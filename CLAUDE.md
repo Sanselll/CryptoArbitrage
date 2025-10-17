@@ -200,3 +200,13 @@ This is a financial trading application. Exercise extreme caution:
 - **PerformanceMetrics**: Daily aggregated performance statistics
 
 Database is created automatically via `db.Database.EnsureCreated()` on startup. For production, use proper migrations (`dotnet ef migrations add`).
+
+## Git Commit Guidelines
+
+When creating git commits:
+
+- **DO NOT** include Claude Code attribution or co-authorship information
+- Use only the repository owner's name and credentials
+- Keep commit messages concise and descriptive
+- Follow the existing commit message style in the repository
+- Focus on what changed and why, not who made the change
