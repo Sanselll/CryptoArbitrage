@@ -54,12 +54,8 @@ public class ArbitrageEngineService : BackgroundService
 
     private async Task InitializeExchangesAsync()
     {
-        using var scope = _serviceProvider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
-
-        var exchanges = await dbContext.Exchanges
-            .Where(e => e.IsEnabled)
-            .ToListAsync();
+        // Use exchanges from configuration instead of database
+        var exchanges = _config.Exchanges.Where(e => e.IsEnabled).ToList();
 
         foreach (var exchange in exchanges)
         {
@@ -202,13 +198,11 @@ public class ArbitrageEngineService : BackgroundService
                 using var scope = _serviceProvider.CreateScope();
                 var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
 
-                var exchange = await dbContext.Exchanges.FirstAsync(e => e.Name == exchangeName);
-
                 foreach (var rate in rates)
                 {
                     dbContext.FundingRates.Add(new FundingRate
                     {
-                        ExchangeId = exchange.Id,
+                        Exchange = exchangeName,
                         Symbol = rate.Symbol,
                         Rate = rate.Rate,
                         AnnualizedRate = rate.AnnualizedRate,

@@ -42,6 +42,7 @@ arbitrage.db*
 
 # Environment files with secrets
 appsettings.Development.json
+appsettings.Production.json
 .env
 .env.local
 .env.*.local

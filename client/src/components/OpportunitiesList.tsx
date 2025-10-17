@@ -4,6 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { EmptyState } from './ui/EmptyState';
+import { LoadingOverlay } from './ui/LoadingOverlay';
 import {
   Table,
   TableHeader,
@@ -63,6 +64,7 @@ export const OpportunitiesList = () => {
   const [selectedOpportunity, setSelectedOpportunity] = useState<any>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -120,10 +122,20 @@ export const OpportunitiesList = () => {
 
     if (!confirmed) return;
 
+    setIsStopping(true);
     try {
       const response = await apiService.stopExecution(opp.executionId);
 
       if (response.success) {
+        // Manually refresh positions immediately after successful stop
+        try {
+          const freshPositions = await apiService.getPositions();
+          useArbitrageStore.getState().setPositions(freshPositions);
+        } catch (refreshError) {
+          console.error('Failed to refresh positions after stop:', refreshError);
+          // Don't fail the whole operation if refresh fails
+        }
+
         alert(
           `Success!\n\n` +
           `${response.message}\n` +
@@ -135,6 +147,8 @@ export const OpportunitiesList = () => {
     } catch (error: any) {
       console.error('Error stopping execution:', error);
       alert(`Failed to stop execution:\n\n${error.message || 'Unknown error'}`);
+    } finally {
+      setIsStopping(false);
     }
   };
 
@@ -188,6 +202,15 @@ export const OpportunitiesList = () => {
 
   return (
     <>
+      <LoadingOverlay
+        isLoading={isExecuting}
+        message="Executing strategy..."
+      />
+      <LoadingOverlay
+        isLoading={isStopping}
+        message="Stopping execution..."
+      />
+
       <Card className="h-full flex flex-col">
         <CardHeader className="p-3">
           <div className="flex items-center justify-between">
@@ -395,6 +418,7 @@ export const OpportunitiesList = () => {
         onClose={() => setIsDialogOpen(false)}
         onExecute={handleExecuteConfirm}
         opportunity={selectedOpportunity}
+        isExecuting={isExecuting}
       />
     )}
     </>
