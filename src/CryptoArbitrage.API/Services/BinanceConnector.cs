@@ -279,25 +279,198 @@ public class BinanceConnector : IExchangeConnector
 
         try
         {
-            var balances = await _restClient.UsdFuturesApi.Account.GetBalancesAsync();
+            // Fetch futures balances
+            var futuresBalances = await _restClient.UsdFuturesApi.Account.GetBalancesAsync();
+            decimal futuresTotal = 0;
+            decimal futuresAvailable = 0;
+            decimal marginUsed = 0;
+            decimal unrealizedPnL = 0;
 
-            if (balances.Success && balances.Data != null && balances.Data.Any())
+            if (futuresBalances.Success && futuresBalances.Data != null && futuresBalances.Data.Any())
             {
-                var usdtBalance = balances.Data.FirstOrDefault(b => b.Asset == "USDT");
-
+                var usdtBalance = futuresBalances.Data.FirstOrDefault(b => b.Asset == "USDT");
                 if (usdtBalance != null)
                 {
-                    return new AccountBalanceDto
-                    {
-                        Exchange = ExchangeName,
-                        TotalBalance = usdtBalance.WalletBalance,
-                        AvailableBalance = usdtBalance.AvailableBalance,
-                        MarginUsed = usdtBalance.WalletBalance - usdtBalance.AvailableBalance,
-                        UnrealizedPnL = usdtBalance.CrossUnrealizedPnl ?? 0,
-                        UpdatedAt = DateTime.UtcNow
-                    };
+                    futuresTotal = usdtBalance.WalletBalance;
+                    futuresAvailable = usdtBalance.AvailableBalance;
+                    marginUsed = usdtBalance.WalletBalance - usdtBalance.AvailableBalance;
+                    unrealizedPnL = usdtBalance.CrossUnrealizedPnl ?? 0;
                 }
             }
+
+            // Fetch spot balances
+            var spotBalances = await GetSpotBalancesAsync();
+            decimal spotTotalUsd = 0;
+            decimal spotAvailableUsd = 0;
+            decimal spotUsdtOnly = 0; // Only USDT for operational balance
+
+            // Convert spot assets to USD equivalent
+            if (spotBalances.Any())
+            {
+                // Get prices for all spot assets
+                var prices = await _restClient.SpotApi.ExchangeData.GetPricesAsync();
+                if (prices.Success && prices.Data != null)
+                {
+                    foreach (var asset in spotBalances)
+                    {
+                        if (asset.Key == "USDT")
+                        {
+                            // USDT is already in USD
+                            spotTotalUsd += asset.Value;
+                            spotAvailableUsd += asset.Value;
+                            spotUsdtOnly = asset.Value; // Track USDT separately for operational balance
+                        }
+                        else
+                        {
+                            // Find price in USDT
+                            var symbol = $"{asset.Key}USDT";
+                            var price = prices.Data.FirstOrDefault(p => p.Symbol == symbol);
+                            if (price != null)
+                            {
+                                var usdValue = asset.Value * price.Price;
+                                spotTotalUsd += usdValue;
+                                spotAvailableUsd += usdValue;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Calculate operational balance: USDT + coins in active positions + futures
+            // In cash-and-carry arbitrage, coins (BTC, ETH, etc.) ARE the positions
+            decimal operationalBalance = spotTotalUsd + futuresTotal;
+
+            return new AccountBalanceDto
+            {
+                Exchange = ExchangeName,
+                // Combined totals
+                TotalBalance = spotTotalUsd + futuresTotal,
+                AvailableBalance = spotAvailableUsd + futuresAvailable,
+                OperationalBalanceUsd = operationalBalance,
+                // Spot specific
+                SpotBalanceUsd = spotTotalUsd,
+                SpotAvailableUsd = spotAvailableUsd,
+                SpotAssets = spotBalances,
+                // Futures specific
+                FuturesBalanceUsd = futuresTotal,
+                FuturesAvailableUsd = futuresAvailable,
+                MarginUsed = marginUsed,
+                UnrealizedPnL = unrealizedPnL,
+                UpdatedAt = DateTime.UtcNow
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching account balance from Binance");
+        }
+
+        return new AccountBalanceDto { Exchange = ExchangeName };
+    }
+
+    public async Task<AccountBalanceDto> GetAccountBalanceAsync(Dictionary<string, decimal> activeSpotPositions)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Binance");
+
+        try
+        {
+            // Fetch futures balances
+            var futuresBalances = await _restClient.UsdFuturesApi.Account.GetBalancesAsync();
+            decimal futuresTotal = 0;
+            decimal futuresAvailable = 0;
+            decimal marginUsed = 0;
+            decimal unrealizedPnL = 0;
+
+            if (futuresBalances.Success && futuresBalances.Data != null && futuresBalances.Data.Any())
+            {
+                var usdtBalance = futuresBalances.Data.FirstOrDefault(b => b.Asset == "USDT");
+                if (usdtBalance != null)
+                {
+                    futuresTotal = usdtBalance.WalletBalance;
+                    futuresAvailable = usdtBalance.AvailableBalance;
+                    marginUsed = usdtBalance.WalletBalance - usdtBalance.AvailableBalance;
+                    unrealizedPnL = usdtBalance.CrossUnrealizedPnl ?? 0;
+                }
+            }
+
+            // Fetch spot balances
+            var spotBalances = await GetSpotBalancesAsync();
+            decimal spotTotalUsd = 0;
+            decimal spotAvailableUsd = 0;
+            decimal spotUsdtOnly = 0; // Only USDT
+
+            // Convert spot assets to USD equivalent
+            if (spotBalances.Any())
+            {
+                // Get prices for all spot assets
+                var prices = await _restClient.SpotApi.ExchangeData.GetPricesAsync();
+                if (prices.Success && prices.Data != null)
+                {
+                    foreach (var asset in spotBalances)
+                    {
+                        if (asset.Key == "USDT")
+                        {
+                            // USDT is already in USD
+                            spotTotalUsd += asset.Value;
+                            spotAvailableUsd += asset.Value;
+                            spotUsdtOnly = asset.Value; // Track USDT separately
+                        }
+                        else
+                        {
+                            // Find price in USDT
+                            var symbol = $"{asset.Key}USDT";
+                            var price = prices.Data.FirstOrDefault(p => p.Symbol == symbol);
+                            if (price != null)
+                            {
+                                var usdValue = asset.Value * price.Price;
+                                spotTotalUsd += usdValue;
+                                spotAvailableUsd += usdValue;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Calculate coins in active positions value
+            decimal coinsInActivePositionsUsd = 0;
+            if (activeSpotPositions.Any())
+            {
+                var prices = await _restClient.SpotApi.ExchangeData.GetPricesAsync();
+                if (prices.Success && prices.Data != null)
+                {
+                    foreach (var position in activeSpotPositions)
+                    {
+                        var symbol = $"{position.Key}USDT";
+                        var price = prices.Data.FirstOrDefault(p => p.Symbol == symbol);
+                        if (price != null)
+                        {
+                            coinsInActivePositionsUsd += position.Value * price.Price;
+                        }
+                    }
+                }
+            }
+
+            // Calculate operational balance: USDT + coins in active positions + futures
+            decimal operationalBalance = spotUsdtOnly + coinsInActivePositionsUsd + futuresTotal;
+
+            return new AccountBalanceDto
+            {
+                Exchange = ExchangeName,
+                // Combined totals
+                TotalBalance = spotTotalUsd + futuresTotal,
+                AvailableBalance = spotAvailableUsd + futuresAvailable,
+                OperationalBalanceUsd = operationalBalance,
+                // Spot specific
+                SpotBalanceUsd = spotTotalUsd,
+                SpotAvailableUsd = spotAvailableUsd,
+                SpotAssets = spotBalances,
+                // Futures specific
+                FuturesBalanceUsd = futuresTotal,
+                FuturesAvailableUsd = futuresAvailable,
+                MarginUsed = marginUsed,
+                UnrealizedPnL = unrealizedPnL,
+                UpdatedAt = DateTime.UtcNow
+            };
         }
         catch (Exception ex)
         {
@@ -525,6 +698,35 @@ public class BinanceConnector : IExchangeConnector
             _logger.LogError(ex, "Error fetching spot balance for {Asset} from Binance", asset);
             throw;
         }
+    }
+
+    public async Task<Dictionary<string, decimal>> GetSpotBalancesAsync()
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Binance");
+
+        var balances = new Dictionary<string, decimal>();
+
+        try
+        {
+            var accountInfo = await _restClient.SpotApi.Account.GetAccountInfoAsync();
+
+            if (accountInfo.Success && accountInfo.Data != null)
+            {
+                foreach (var balance in accountInfo.Data.Balances.Where(b => b.Available > 0 || b.Locked > 0))
+                {
+                    balances[balance.Asset] = balance.Total;
+                }
+
+                _logger.LogInformation("Fetched {Count} spot asset balances from Binance", balances.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching spot balances from Binance");
+        }
+
+        return balances;
     }
 
     public async Task SubscribeToFundingRatesAsync(Action<FundingRateDto> onUpdate)

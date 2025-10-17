@@ -399,15 +399,14 @@ public class ArbitrageEngineService : BackgroundService
                 // Estimated trading fees (0.1% for spot buy + 0.05% for futures short = 0.15%)
                 decimal estimatedTradingFees = 0.0015m;
 
-                // Calculate net profit based on funding rate direction
+                // Calculate net profit for positive funding rate strategy
                 // Positive funding = shorts pay longs -> buy spot + short perp -> collect funding
-                // Negative funding = longs pay shorts -> sell spot (borrow) + long perp -> collect funding
-                // In both cases, we collect the absolute value of funding rate
-                decimal netProfit = Math.Abs(annualizedFundingRate) - Math.Abs(pricePremium) - estimatedTradingFees;
+                // Note: Negative funding would require selling spot (which we cannot do with USDT-only capital)
+                decimal netProfit = annualizedFundingRate - Math.Abs(pricePremium) - estimatedTradingFees;
                 decimal netProfitPercentage = netProfit * 100;
 
-                // Only create opportunity if net profit exceeds minimum threshold
-                if (netProfitPercentage >= _config.MinSpreadPercentage)
+                // Only create opportunity if net profit exceeds minimum threshold AND funding is positive
+                if (netProfitPercentage >= _config.MinSpreadPercentage && annualizedFundingRate > 0)
                 {
                     opportunities.Add(new ArbitrageOpportunityDto
                     {
@@ -446,13 +445,41 @@ public class ArbitrageEngineService : BackgroundService
         var allBalances = new List<AccountBalanceDto>();
         var allPositions = new List<PositionDto>();
 
+        // Query open spot positions first (needed for operational balance calculation)
+        Dictionary<string, Dictionary<string, decimal>> activeSpotPositionsByExchange;
+        using (var scope = _serviceProvider.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+
+            var openSpotPositions = await dbContext.Positions
+                .Where(p => p.Status == PositionStatus.Open && p.Type == PositionType.Spot)
+                .ToListAsync();
+
+            // Group by exchange and aggregate quantities by symbol
+            activeSpotPositionsByExchange = openSpotPositions
+                .GroupBy(p => p.Exchange)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.GroupBy(p => p.Symbol.Replace("USDT", "")) // Extract base asset (e.g., BTC from BTCUSDT)
+                          .ToDictionary(
+                              sg => sg.Key,
+                              sg => sg.Sum(p => p.Quantity)
+                          )
+                );
+        }
+
         // Get balances from exchange connectors
         foreach (var (exchangeName, connector) in _exchangeConnectors)
         {
             try
             {
-                // Fetch balance
-                var balance = await connector.GetAccountBalanceAsync();
+                // Get active spot positions for this exchange
+                var activePositions = activeSpotPositionsByExchange.ContainsKey(exchangeName)
+                    ? activeSpotPositionsByExchange[exchangeName]
+                    : new Dictionary<string, decimal>();
+
+                // Fetch balance with active positions
+                var balance = await connector.GetAccountBalanceAsync(activePositions);
                 allBalances.Add(balance);
             }
             catch (Exception ex)

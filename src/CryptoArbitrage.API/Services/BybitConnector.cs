@@ -219,6 +219,12 @@ public class BybitConnector : IExchangeConnector
 
     public async Task<AccountBalanceDto> GetAccountBalanceAsync()
     {
+        // Call the overload with empty active positions dictionary
+        return await GetAccountBalanceAsync(new Dictionary<string, decimal>());
+    }
+
+    public async Task<AccountBalanceDto> GetAccountBalanceAsync(Dictionary<string, decimal> activeSpotPositions)
+    {
         if (_restClient == null)
             throw new InvalidOperationException("Not connected to Bybit");
 
@@ -228,20 +234,90 @@ public class BybitConnector : IExchangeConnector
 
             if (balance.Success && balance.Data != null && balance.Data.List.Any())
             {
-                var usdtBalance = balance.Data.List.First().Assets.FirstOrDefault(a => a.Asset == "USDT");
+                var account = balance.Data.List.First();
 
-                if (usdtBalance != null)
+                // Get all asset balances
+                var spotBalances = await GetSpotBalancesAsync();
+                decimal spotTotalUsd = 0;
+                decimal spotAvailableUsd = 0;
+                decimal spotUsdtOnly = 0; // Only USDT
+
+                // Convert spot assets to USD
+                if (spotBalances.Any())
                 {
-                    return new AccountBalanceDto
+                    var tickers = await _restClient.V5Api.ExchangeData.GetSpotTickersAsync();
+                    if (tickers.Success && tickers.Data != null)
                     {
-                        Exchange = ExchangeName,
-                        TotalBalance = usdtBalance.Equity ?? 0,
-                        AvailableBalance = usdtBalance.AvailableToWithdraw ?? 0,
-                        MarginUsed = (usdtBalance.Equity ?? 0) - (usdtBalance.AvailableToWithdraw ?? 0),
-                        UnrealizedPnL = usdtBalance.UnrealizedPnl ?? 0,
-                        UpdatedAt = DateTime.UtcNow
-                    };
+                        foreach (var asset in spotBalances)
+                        {
+                            if (asset.Key == "USDT")
+                            {
+                                spotTotalUsd += asset.Value;
+                                spotAvailableUsd += asset.Value;
+                                spotUsdtOnly = asset.Value; // Track USDT separately
+                            }
+                            else
+                            {
+                                var symbol = $"{asset.Key}USDT";
+                                var price = tickers.Data.List.FirstOrDefault(t => t.Symbol == symbol);
+                                if (price != null)
+                                {
+                                    var usdValue = asset.Value * price.LastPrice;
+                                    spotTotalUsd += usdValue;
+                                    spotAvailableUsd += usdValue;
+                                }
+                            }
+                        }
+                    }
                 }
+
+                // Get USDT balance for futures (derivatives positions use USDT as collateral)
+                var usdtBalance = account.Assets.FirstOrDefault(a => a.Asset == "USDT");
+                decimal futuresTotal = usdtBalance?.Equity ?? 0;
+                decimal futuresAvailable = usdtBalance?.AvailableToWithdraw ?? 0;
+                decimal marginUsed = (usdtBalance?.Equity ?? 0) - (usdtBalance?.AvailableToWithdraw ?? 0);
+                decimal unrealizedPnL = usdtBalance?.UnrealizedPnl ?? 0;
+
+                // Calculate coins in active positions value
+                decimal coinsInActivePositionsUsd = 0;
+                if (activeSpotPositions.Any())
+                {
+                    var tickers = await _restClient.V5Api.ExchangeData.GetSpotTickersAsync();
+                    if (tickers.Success && tickers.Data != null)
+                    {
+                        foreach (var position in activeSpotPositions)
+                        {
+                            var symbol = $"{position.Key}USDT";
+                            var price = tickers.Data.List.FirstOrDefault(t => t.Symbol == symbol);
+                            if (price != null)
+                            {
+                                coinsInActivePositionsUsd += position.Value * price.LastPrice;
+                            }
+                        }
+                    }
+                }
+
+                // Calculate operational balance: USDT + coins in active positions + futures
+                decimal operationalBalance = spotUsdtOnly + coinsInActivePositionsUsd + futuresTotal;
+
+                return new AccountBalanceDto
+                {
+                    Exchange = ExchangeName,
+                    // Combined totals
+                    TotalBalance = spotTotalUsd + futuresTotal,
+                    AvailableBalance = spotAvailableUsd + futuresAvailable,
+                    OperationalBalanceUsd = operationalBalance,
+                    // Spot specific
+                    SpotBalanceUsd = spotTotalUsd,
+                    SpotAvailableUsd = spotAvailableUsd,
+                    SpotAssets = spotBalances,
+                    // Futures specific
+                    FuturesBalanceUsd = futuresTotal,
+                    FuturesAvailableUsd = futuresAvailable,
+                    MarginUsed = marginUsed,
+                    UnrealizedPnL = unrealizedPnL,
+                    UpdatedAt = DateTime.UtcNow
+                };
             }
         }
         catch (Exception ex)
@@ -457,6 +533,37 @@ public class BybitConnector : IExchangeConnector
             _logger.LogError(ex, "Error fetching spot balance for {Asset} from Bybit", asset);
             throw;
         }
+    }
+
+    public async Task<Dictionary<string, decimal>> GetSpotBalancesAsync()
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Bybit");
+
+        var balances = new Dictionary<string, decimal>();
+
+        try
+        {
+            // Bybit Unified account includes both spot and derivatives
+            var balance = await _restClient.V5Api.Account.GetBalancesAsync(AccountType.Unified);
+
+            if (balance.Success && balance.Data != null && balance.Data.List.Any())
+            {
+                var assets = balance.Data.List.First().Assets;
+                foreach (var asset in assets.Where(a => a.WalletBalance.HasValue && a.WalletBalance.Value > 0))
+                {
+                    balances[asset.Asset] = asset.WalletBalance.Value;
+                }
+
+                _logger.LogInformation("Fetched {Count} asset balances from Bybit Unified account", balances.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching balances from Bybit");
+        }
+
+        return balances;
     }
 
     public async Task SubscribeToFundingRatesAsync(Action<FundingRateDto> onUpdate)
