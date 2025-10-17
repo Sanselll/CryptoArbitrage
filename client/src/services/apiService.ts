@@ -1,3 +1,5 @@
+import type { Position } from '../types/index';
+
 const API_BASE_URL = 'http://localhost:5052';
 
 interface ExecuteOpportunityRequest {
@@ -32,6 +34,21 @@ interface CloseOpportunityResponse {
 }
 
 export const apiService = {
+  async getPositions(): Promise<any[]> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/position`);
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch positions');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching positions:', error);
+      throw error;
+    }
+  },
+
   async executeOpportunity(request: ExecuteOpportunityRequest): Promise<ExecuteOpportunityResponse> {
     try {
       const response = await fetch(`${API_BASE_URL}/api/opportunity/execute`, {
