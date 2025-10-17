@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(test:*)",
+      "Bash(cat:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet list:*)",
+      "Bash(dotnet run)",
+      "Bash(npm run dev:*)",
+      "Bash(dotnet run:*)",
+      "Bash(npm install:*)",
+      "Bash(sqlite3:*)",
+      "WebSearch",
+      "Read(//Users/sansel/Projects/TradingAgent/platform/frontend/**)",
+      "Read(//Users/sansel/Projects/**)",
+      "Bash(ls:*)",
+      "Bash(du:*)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Read(//dev/**)",
+      "Bash(dotnet clean:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git config:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

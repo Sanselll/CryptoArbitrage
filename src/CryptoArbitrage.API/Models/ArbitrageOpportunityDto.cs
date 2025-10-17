@@ -1,0 +1,50 @@
+using CryptoArbitrage.API.Data.Entities;
+
+namespace CryptoArbitrage.API.Models;
+
+public enum ArbitrageStrategy
+{
+    CrossExchange,      // Arbitrage between two exchanges
+    SpotPerpetual      // Cash-and-carry arbitrage (spot vs perpetual on same exchange)
+}
+
+public class ArbitrageOpportunityDto
+{
+    public int Id { get; set; }
+    public string Symbol { get; set; } = string.Empty;
+    public ArbitrageStrategy Strategy { get; set; } = ArbitrageStrategy.CrossExchange;
+
+    // For cross-exchange arbitrage
+    public string LongExchange { get; set; } = string.Empty;
+    public string ShortExchange { get; set; } = string.Empty;
+    public decimal LongFundingRate { get; set; }
+    public decimal ShortFundingRate { get; set; }
+
+    // For spot-perpetual arbitrage
+    public string Exchange { get; set; } = string.Empty;
+    public decimal SpotPrice { get; set; }
+    public decimal PerpetualPrice { get; set; }
+    public decimal FundingRate { get; set; }
+    public decimal AnnualizedFundingRate { get; set; }
+    public decimal PricePremium { get; set; } // (Perp - Spot) / Spot
+
+    // Common fields
+    public decimal SpreadRate { get; set; }
+    public decimal AnnualizedSpread { get; set; }
+    public decimal EstimatedProfitPercentage { get; set; }
+    public OpportunityStatus Status { get; set; }
+    public DateTime DetectedAt { get; set; }
+    public DateTime? ExecutedAt { get; set; }
+    public DateTime? ActiveOpportunityExecutedAt { get; set; } // From ActiveOpportunity.ExecutedAt when executing
+
+    // Execution fields (merged from Execution table)
+    public int? ExecutionId { get; set; }
+    public ExecutionState? ExecutionState { get; set; }
+    public DateTime? ExecutionStartedAt { get; set; }
+    public decimal? ExecutionFundingEarned { get; set; }
+
+    // Computed unique key for frontend tracking (not stored in DB)
+    public string UniqueKey => Strategy == ArbitrageStrategy.SpotPerpetual
+        ? $"{Symbol}-{Exchange}-SpotPerp"
+        : $"{Symbol}-{LongExchange}-{ShortExchange}-CrossEx";
+}

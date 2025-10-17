@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+@theme {
+  /* TradingAgent Design System - Background Colors */
+  --color-binance-bg: #0b0e11;
+  --color-binance-bg-secondary: #161a1e;
+  --color-binance-bg-tertiary: #1f2329;
+  --color-binance-bg-hover: #2b3139;
+
+  /* Border Colors */
+  --color-binance-border: #2b3139;
+  --color-binance-border-light: #363c45;
+
+  /* Text Colors */
+  --color-binance-text: #eaecef;
+  --color-binance-text-secondary: #b7bdc6;
+  --color-binance-text-muted: #848e9c;
+
+  /* Action Colors */
+  --color-binance-yellow: #f0b90b;
+  --color-binance-green: #0ecb81;
+  --color-binance-red: #f6465d;
+  --color-binance-blue: #3861fb;
+}
+
+html {
+  font-size: 16px; /* Base 16px for better accessibility */
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #0b0e11;
+  color: #eaecef;
+  overflow: hidden;
+  font-size: 0.875rem; /* 14px default body text */
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar - TradingAgent style */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b0e11;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2b3139;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #363c45;
+}
+
+/* Focus visible for accessibility */
+*:focus-visible {
+  outline: 2px solid #f0b90b;
+  outline-offset: 2px;
+}
+
+/* Table styles - Enhanced */
+.table-row-hover {
+  transition: background-color 0.15s ease-in-out;
+}
+
+.table-row-hover:hover {
+  background-color: rgba(43, 49, 57, 0.4);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s ease-out;
+}
+
+/* Smooth transitions */
+.transition-smooth {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Typography helpers */
+.text-mono {
+  font-family: 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+/* Number formatting */
+.number-positive {
+  color: #0ecb81;
+}
+
+.number-negative {
+  color: #f6465d;
+}
+
+/* Card hover effect */
+.card-hover {
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.card-hover:hover {
+  border-color: #363c45;
+  transform: translateY(-1px);
+}
+
+/* Button focus ring */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #f0b90b;
+  outline-offset: 2px;
+}
