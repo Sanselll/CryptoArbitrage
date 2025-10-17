@@ -1,0 +1,35 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{CBC10B47-28B8-4BC6-825E-1E52E73AA6E2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CryptoArbitrage.API", "src\CryptoArbitrage.API\CryptoArbitrage.API.csproj", "{997DCA50-65DF-4F5D-8D4A-53089E539EB9}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "client", "client", "{F9A5E6D3-4B2C-4A1F-9E3D-7C8F5A6B4D2E}"
+	ProjectSection(SolutionItems) = preProject
+		client\package.json = client\package.json
+		client\README.md = client\README.md
+		client\tsconfig.json = client\tsconfig.json
+		client\vite.config.ts = client\vite.config.ts
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{997DCA50-65DF-4F5D-8D4A-53089E539EB9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{997DCA50-65DF-4F5D-8D4A-53089E539EB9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{997DCA50-65DF-4F5D-8D4A-53089E539EB9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{997DCA50-65DF-4F5D-8D4A-53089E539EB9}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{997DCA50-65DF-4F5D-8D4A-53089E539EB9} = {CBC10B47-28B8-4BC6-825E-1E52E73AA6E2}
+	EndGlobalSection
+EndGlobal
