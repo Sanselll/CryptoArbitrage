@@ -13,6 +13,8 @@ public interface IExchangeConnector
     Task<Dictionary<string, SpotPriceDto>> GetSpotPricesAsync(List<string> symbols);
     Task<Dictionary<string, decimal>> GetPerpetualPricesAsync(List<string> symbols);
     Task<AccountBalanceDto> GetAccountBalanceAsync();
+    Task<AccountBalanceDto> GetAccountBalanceAsync(Dictionary<string, decimal> activeSpotPositions);
+    Task<Dictionary<string, decimal>> GetSpotBalancesAsync();
 
     // Perpetual futures trading
     Task<string> PlaceMarketOrderAsync(string symbol, Data.Entities.PositionSide side, decimal quantity, decimal leverage);

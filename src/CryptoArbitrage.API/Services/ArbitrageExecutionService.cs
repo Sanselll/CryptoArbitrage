@@ -117,6 +117,14 @@ public class ArbitrageExecutionService
             {
                 return $"Exchange '{request.Exchange}' is not supported";
             }
+
+            // Validate funding rate direction - only positive funding is profitable with USDT-only capital
+            // Positive funding = shorts pay longs -> BUY spot + SHORT perp -> collect funding
+            // Negative funding would require SELLING spot (which we can't do without owning the coins)
+            if (request.FundingRate <= 0)
+            {
+                return $"Cannot execute negative funding rate ({request.FundingRate * 100:F4}%). Spot-perpetual strategy requires positive funding rates (requires spot BUY + perp SHORT).";
+            }
         }
         else if (request.Strategy == ArbitrageStrategy.CrossExchange)
         {
@@ -506,21 +514,35 @@ public class ArbitrageExecutionService
 
     private decimal RoundQuantity(decimal quantity, string symbol)
     {
-        // Different symbols have different precision requirements
-        // BTC typically allows 5-6 decimals, altcoins may allow 0-3 decimals
-        // For safety, use a reasonable default precision based on quantity size
+        // Symbol-specific precision based on common exchange requirements
+        // Most exchanges use standardized precision per asset class
 
         int decimals;
-        if (quantity >= 1000m)
-            decimals = 0;      // Large quantities: whole numbers
-        else if (quantity >= 10m)
-            decimals = 1;      // Medium quantities: 1 decimal
-        else if (quantity >= 1m)
-            decimals = 2;      // Small quantities: 2 decimals
-        else if (quantity >= 0.01m)
-            decimals = 3;      // Smaller quantities: 3 decimals
+
+        // BTC and high-value coins (fractional quantities)
+        if (symbol.StartsWith("BTC") || symbol.StartsWith("ETH") || symbol.StartsWith("BNB"))
+        {
+            if (quantity >= 1m)
+                decimals = 3;   // e.g., 123.456 BTC
+            else if (quantity >= 0.1m)
+                decimals = 4;   // e.g., 0.1234 BTC
+            else
+                decimals = 5;   // e.g., 0.01234 BTC
+        }
+        // Mid-tier coins (10-1000 USD range)
+        else if (quantity < 10m)
+        {
+            decimals = 2;       // e.g., 1.23 SOL
+        }
+        // Low-value coins or large quantities
+        else if (quantity < 1000m)
+        {
+            decimals = 1;       // e.g., 123.4 DOGE
+        }
         else
-            decimals = 5;      // Very small quantities (like BTC): 5 decimals
+        {
+            decimals = 0;       // e.g., 1234 SHIB (large quantities, no decimals)
+        }
 
         return Math.Round(quantity, decimals, MidpointRounding.ToZero);
     }

@@ -132,8 +132,18 @@ export interface ActiveOpportunity {
 
 export interface AccountBalance {
   exchange: string;
+  // Combined totals (Spot + Futures)
   totalBalance: number;
   availableBalance: number;
+  // Operational balance (USDT + coins in positions + futures balance)
+  operationalBalanceUsd: number;
+  // Spot balances
+  spotBalanceUsd: number;
+  spotAvailableUsd: number;
+  spotAssets: Record<string, number>;
+  // Futures balances
+  futuresBalanceUsd: number;
+  futuresAvailableUsd: number;
   marginUsed: number;
   unrealizedPnL: number;
   updatedAt: string;
