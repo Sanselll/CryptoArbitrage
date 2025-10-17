@@ -10,7 +10,6 @@ public class ArbitrageDbContext : DbContext
     {
     }
 
-    public DbSet<Exchange> Exchanges { get; set; }
     public DbSet<FundingRate> FundingRates { get; set; }
     public DbSet<Execution> Executions { get; set; }
     public DbSet<Position> Positions { get; set; }
@@ -20,27 +19,15 @@ public class ArbitrageDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Exchange configuration
-        modelBuilder.Entity<Exchange>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.Name).IsUnique();
-            entity.Property(e => e.Name).IsRequired().HasMaxLength(50);
-        });
-
         // FundingRate configuration
         modelBuilder.Entity<FundingRate>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => new { e.ExchangeId, e.Symbol, e.RecordedAt });
+            entity.HasIndex(e => new { e.Exchange, e.Symbol, e.RecordedAt });
+            entity.Property(e => e.Exchange).IsRequired().HasMaxLength(50);
             entity.Property(e => e.Symbol).IsRequired().HasMaxLength(20);
             entity.Property(e => e.Rate).HasPrecision(18, 8);
             entity.Property(e => e.AnnualizedRate).HasPrecision(18, 8);
-
-            entity.HasOne(e => e.Exchange)
-                .WithMany(ex => ex.FundingRates)
-                .HasForeignKey(e => e.ExchangeId)
-                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Execution configuration

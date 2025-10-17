@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { X, DollarSign, TrendingUp, Shield, Target } from 'lucide-react';
 import { Button } from './ui/Button';
+import { LoadingOverlay } from './ui/LoadingOverlay';
 
 interface ExecuteDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onExecute: (params: ExecutionParams) => void;
+  isExecuting?: boolean;
   opportunity: {
     symbol: string;
     strategy: number; // 1 = SpotPerpetual, 2 = CrossExchange
@@ -27,7 +29,7 @@ export interface ExecutionParams {
   takeProfitPercentage?: number;
 }
 
-export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity }: ExecuteDialogProps) => {
+export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecuting = false }: ExecuteDialogProps) => {
   const [positionSize, setPositionSize] = useState<number>(1000);
   const [leverage, setLeverage] = useState<number>(1);
   const [stopLoss, setStopLoss] = useState<string>('');
@@ -53,6 +55,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity }: Execu
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm">
+      <LoadingOverlay isLoading={isExecuting} message="Executing trade..." />
       <div className="bg-binance-bg-secondary border border-binance-border rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto m-4">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-binance-border">
@@ -139,8 +142,9 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity }: Execu
               step="100"
               value={positionSize}
               onChange={(e) => setPositionSize(parseFloat(e.target.value))}
-              className="w-full px-4 py-3 bg-binance-bg border border-binance-border rounded-md text-binance-text font-mono text-lg focus:outline-none focus:ring-2 focus:ring-binance-yellow"
+              className="w-full px-4 py-3 bg-binance-bg border border-binance-border rounded-md text-binance-text font-mono text-lg focus:outline-none focus:ring-2 focus:ring-binance-yellow disabled:opacity-50 disabled:cursor-not-allowed"
               required
+              disabled={isExecuting}
             />
             <p className="text-xs text-binance-text-secondary mt-1">
               Min: $100 | Max: $10,000
@@ -162,6 +166,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity }: Execu
                 value={leverage}
                 onChange={(e) => setLeverage(parseInt(e.target.value))}
                 className="flex-1"
+                disabled={isExecuting}
               />
               <span className="text-2xl font-bold text-binance-yellow w-16 text-right">
                 {leverage}x
@@ -187,7 +192,8 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity }: Execu
               value={stopLoss}
               onChange={(e) => setStopLoss(e.target.value)}
               placeholder="e.g., 2.0"
-              className="w-full px-4 py-3 bg-binance-bg border border-binance-border rounded-md text-binance-text font-mono focus:outline-none focus:ring-2 focus:ring-binance-yellow"
+              className="w-full px-4 py-3 bg-binance-bg border border-binance-border rounded-md text-binance-text font-mono focus:outline-none focus:ring-2 focus:ring-binance-yellow disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isExecuting}
             />
             <p className="text-xs text-binance-text-secondary mt-1">
               Close position if loss exceeds this percentage
@@ -209,7 +215,8 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity }: Execu
               value={takeProfit}
               onChange={(e) => setTakeProfit(e.target.value)}
               placeholder="e.g., 5.0"
-              className="w-full px-4 py-3 bg-binance-bg border border-binance-border rounded-md text-binance-text font-mono focus:outline-none focus:ring-2 focus:ring-binance-yellow"
+              className="w-full px-4 py-3 bg-binance-bg border border-binance-border rounded-md text-binance-text font-mono focus:outline-none focus:ring-2 focus:ring-binance-yellow disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isExecuting}
             />
             <p className="text-xs text-binance-text-secondary mt-1">
               Close position when profit reaches this percentage
@@ -241,6 +248,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity }: Execu
               size="lg"
               onClick={onClose}
               className="flex-1"
+              disabled={isExecuting}
             >
               Cancel
             </Button>
@@ -249,8 +257,9 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity }: Execu
               variant="primary"
               size="lg"
               className="flex-1"
+              disabled={isExecuting}
             >
-              Execute Trade
+              {isExecuting ? 'Executing...' : 'Execute Trade'}
             </Button>
           </div>
         </form>

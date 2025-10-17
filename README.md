@@ -59,18 +59,52 @@ dotnet build
 
 ### 3. Configure Exchange API Keys
 
-Edit the database after first run to add your API keys:
+Exchange API keys are now configured via `appsettings.json` files:
 
 ```bash
-# Run the API once to create the database
-dotnet run
+cd src/CryptoArbitrage.API
 
-# The database will be created at: arbitrage.db
-# Use a SQLite browser to edit exchange records and add API keys
-# Or use the API endpoints to update exchange credentials
+# Copy the example configuration file
+cp appsettings.Development.json.example appsettings.Development.json
+
+# Edit appsettings.Development.json and add your API keys
+# This file is excluded from Git for security
 ```
 
-**⚠️ Security Note**: For production, use secure configuration management (Azure Key Vault, AWS Secrets Manager, etc.)
+**Configuration Structure:**
+
+`appsettings.Development.json`:
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Debug",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "ArbitrageConfig": {
+    "Exchanges": [
+      {
+        "Name": "Binance",
+        "ApiKey": "YOUR_BINANCE_API_KEY_HERE",
+        "ApiSecret": "YOUR_BINANCE_API_SECRET_HERE",
+        "IsEnabled": true
+      },
+      {
+        "Name": "Bybit",
+        "ApiKey": "YOUR_BYBIT_API_KEY_HERE",
+        "ApiSecret": "YOUR_BYBIT_API_SECRET_HERE",
+        "IsEnabled": false
+      }
+    ]
+  }
+}
+```
+
+**⚠️ Security Notes**:
+- `appsettings.Development.json` is excluded from Git via `.gitignore`
+- Never commit API keys to version control
+- For production, use secure configuration management (Azure Key Vault, AWS Secrets Manager, etc.)
 
 ### 4. Setup Frontend
 
@@ -108,26 +142,53 @@ The UI will be available at `http://localhost:5173`
 
 ### Backend Configuration
 
-Edit `/src/CryptoArbitrage.API/Program.cs` to configure:
+Configuration is managed through `appsettings.json` files. Edit `/src/CryptoArbitrage.API/appsettings.json` for trading parameters:
 
-```csharp
-var arbitrageConfig = new ArbitrageConfig
+```json
 {
-    MinSpreadPercentage = 0.1m,      // Minimum 0.1% APR spread
-    MaxPositionSizeUsd = 10000m,     // Max $10,000 per position
-    MinPositionSizeUsd = 100m,       // Min $100 per position
-    MaxLeverage = 5m,                // Max 5x leverage
-    MaxTotalExposure = 50000m,       // Max $50,000 total exposure
-    AutoExecute = false,             // Auto-execute opportunities (BE CAREFUL!)
-    DataRefreshIntervalSeconds = 5,  // Refresh every 5 seconds
-    WatchedSymbols = new List<string> {
-        "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"
-    },
-    EnabledExchanges = new List<string> {
-        "Binance", "Bybit"
-    }
-};
+  "ArbitrageConfig": {
+    "MinSpreadPercentage": 0.1,
+    "MaxPositionSizeUsd": 10000,
+    "MinPositionSizeUsd": 100,
+    "MaxLeverage": 5,
+    "MaxTotalExposure": 50000,
+    "AutoExecute": false,
+    "DataRefreshIntervalSeconds": 5,
+    "AutoDiscoverSymbols": true,
+    "MinDailyVolumeUsd": 10000000,
+    "MaxSymbolCount": 50,
+    "MinAbsFundingRate": 0.0001,
+    "SymbolRefreshIntervalHours": 24,
+    "WatchedSymbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"],
+    "Exchanges": [
+      {
+        "Name": "Binance",
+        "IsEnabled": true
+      },
+      {
+        "Name": "Bybit",
+        "IsEnabled": false
+      }
+    ]
+  }
+}
 ```
+
+**Configuration Options:**
+- `MinSpreadPercentage`: Minimum annualized spread to trigger opportunity (%)
+- `MaxPositionSizeUsd`: Maximum position size per trade ($)
+- `MinPositionSizeUsd`: Minimum position size per trade ($)
+- `MaxLeverage`: Maximum leverage multiplier
+- `MaxTotalExposure`: Maximum total exposure across all positions ($)
+- `AutoExecute`: Enable/disable automatic trade execution (⚠️ dangerous)
+- `DataRefreshIntervalSeconds`: Data refresh interval (seconds)
+- `AutoDiscoverSymbols`: Automatically discover high-volume symbols
+- `MinDailyVolumeUsd`: Minimum 24h volume for auto-discovered symbols ($)
+- `MaxSymbolCount`: Maximum number of symbols to monitor
+- `MinAbsFundingRate`: Minimum absolute funding rate threshold
+- `SymbolRefreshIntervalHours`: How often to refresh symbol list (hours)
+
+**API Keys** are configured separately in `appsettings.Development.json` (see step 3 above).
 
 ### Frontend Configuration
 
@@ -138,12 +199,6 @@ async connect(url: string = 'http://localhost:5000/arbitragehub')
 ```
 
 ## API Endpoints
-
-### Exchanges
-- `GET /api/exchange` - List all exchanges
-- `GET /api/exchange/{id}` - Get exchange details
-- `PUT /api/exchange/{id}` - Update exchange configuration
-- `POST /api/exchange/{id}/toggle` - Enable/disable exchange
 
 ### Positions
 - `GET /api/position` - List all positions
@@ -263,12 +318,12 @@ client/src/
 
 The application uses SQLite with the following main tables:
 
-- **Exchanges**: Exchange configurations and API credentials
-- **FundingRates**: Historical funding rate data
+- **FundingRates**: Historical funding rate data (includes exchange name as string)
 - **Positions**: Open and closed positions
-- **Trades**: Individual trade executions
-- **ArbitrageOpportunities**: Detected opportunities log
+- **Executions**: Trade execution records
 - **PerformanceMetrics**: Daily performance statistics
+
+**Note**: Exchange configuration is now managed via `appsettings.json` files, not in the database.
 
 ## Safety & Disclaimers
 

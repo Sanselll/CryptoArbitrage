@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { EmptyState } from './ui/EmptyState';
+import { LoadingOverlay } from './ui/LoadingOverlay';
 import {
   Table,
   TableHeader,
@@ -13,6 +14,8 @@ import {
   TableHead,
   TableCell,
 } from './ui/Table';
+import { useState } from 'react';
+import { apiService } from '../services/apiService';
 
 interface PositionPair {
   executionId: number | undefined;
@@ -24,6 +27,7 @@ interface PositionPair {
 
 export const PositionsGrid = () => {
   const { positions } = useArbitrageStore();
+  const [isClosing, setIsClosing] = useState(false);
 
   const openPositions = positions.filter((p) => p.status === PositionStatus.Open);
 
@@ -56,9 +60,42 @@ export const PositionsGrid = () => {
 
   const totalPnL = openPositions.reduce((sum, p) => sum + p.unrealizedPnL, 0);
 
-  const handleClose = (positionId: number) => {
-    console.log('Close position:', positionId);
-    // TODO: Implement close logic
+  const handleClose = async (executionId: number) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to close this position?\n\n` +
+      `This will close both spot and perpetual positions and realize the P&L.`
+    );
+
+    if (!confirmed) return;
+
+    setIsClosing(true);
+    try {
+      const response = await apiService.stopExecution(executionId);
+
+      if (response.success) {
+        // Manually refresh positions immediately after successful close
+        try {
+          const freshPositions = await apiService.getPositions();
+          useArbitrageStore.getState().setPositions(freshPositions);
+        } catch (refreshError) {
+          console.error('Failed to refresh positions after close:', refreshError);
+          // Don't fail the whole operation if refresh fails
+        }
+
+        alert(
+          `Success!\n\n` +
+          `${response.message}\n` +
+          `Position closed.`
+        );
+      } else {
+        alert(`Failed to close position:\n\n${response.errorMessage}`);
+      }
+    } catch (error: any) {
+      console.error('Error closing position:', error);
+      alert(`Failed to close position:\n\n${error.message || 'Unknown error'}`);
+    } finally {
+      setIsClosing(false);
+    }
   };
 
   const handleEdit = (positionId: number) => {
@@ -67,13 +104,19 @@ export const PositionsGrid = () => {
   };
 
   return (
-    <Card className="h-full flex flex-col">
-      <CardHeader className="p-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-binance-yellow" />
-            Open Positions
-          </CardTitle>
+    <>
+      <LoadingOverlay
+        isLoading={isClosing}
+        message="Closing position..."
+      />
+
+      <Card className="h-full flex flex-col">
+        <CardHeader className="p-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-binance-yellow" />
+              Open Positions
+            </CardTitle>
           <div className="flex items-center gap-3">
             <span className="text-xs text-binance-text-secondary">Total P&L:</span>
             <span
@@ -316,5 +359,6 @@ export const PositionsGrid = () => {
         )}
       </CardContent>
     </Card>
+    </>
   );
 };

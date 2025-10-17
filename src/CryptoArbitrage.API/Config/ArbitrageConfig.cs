@@ -1,5 +1,13 @@
 namespace CryptoArbitrage.API.Config;
 
+public class ExchangeConfig
+{
+    public string Name { get; set; } = string.Empty;
+    public string ApiKey { get; set; } = string.Empty;
+    public string ApiSecret { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; } = true;
+}
+
 public class ArbitrageConfig
 {
     public decimal MinSpreadPercentage { get; set; } = 0.1m; // 0.1% minimum spread
@@ -8,7 +16,6 @@ public class ArbitrageConfig
     public decimal MaxLeverage { get; set; } = 5m;
     public decimal MaxTotalExposure { get; set; } = 50000m;
     public List<string> WatchedSymbols { get; set; } = new();
-    public List<string> EnabledExchanges { get; set; } = new();
     public bool AutoExecute { get; set; } = false;
     public int DataRefreshIntervalSeconds { get; set; } = 5;
 
@@ -18,4 +25,7 @@ public class ArbitrageConfig
     public int MaxSymbolCount { get; set; } = 50; // Track top 50 symbols by volume
     public decimal MinAbsFundingRate { get; set; } = 0.0001m; // 0.01% = 3.65% APR minimum
     public int SymbolRefreshIntervalHours { get; set; } = 24; // Refresh symbol list daily
+
+    // Exchange configurations (moved from database)
+    public List<ExchangeConfig> Exchanges { get; set; } = new();
 }

@@ -482,11 +482,11 @@ public class ArbitrageExecutionService
 
     private async Task EnsureConnectedAsync(string exchangeName, IExchangeConnector connector)
     {
-        // Get exchange credentials from database
-        var exchange = await _dbContext.Exchanges.FirstOrDefaultAsync(e => e.Name == exchangeName);
+        // Get exchange credentials from configuration
+        var exchange = _config.Exchanges.FirstOrDefault(e => e.Name == exchangeName);
         if (exchange == null)
         {
-            throw new Exception($"Exchange '{exchangeName}' not found in database");
+            throw new Exception($"Exchange '{exchangeName}' not found in configuration");
         }
 
         if (string.IsNullOrEmpty(exchange.ApiKey) || string.IsNullOrEmpty(exchange.ApiSecret))
