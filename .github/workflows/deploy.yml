@@ -86,14 +86,14 @@ jobs:
           APP_DIR="/home/deploy/crypto-arbitrage"
           mkdir -p $APP_DIR
           cd $APP_DIR
-          
-          if [ -d .git ]; then
-            git fetch origin
-            git checkout develop
-            git pull origin develop
-          else
+
+          if [ ! -d .git ]; then
             git clone $GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git .
           fi
+
+          git fetch origin
+          git checkout develop
+          git pull origin develop
           
           if [ ! -f .env.production ]; then
             cp .env.production.example .env.production
