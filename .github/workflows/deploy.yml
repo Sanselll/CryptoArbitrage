@@ -58,9 +58,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
       - name: Deploy to DigitalOcean
         env:
-          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -73,10 +79,6 @@ jobs:
           PROD_GOOGLE_CLIENT_SECRET: ${{ secrets.PROD_GOOGLE_CLIENT_SECRET }}
           PROD_DOMAIN: ${{ secrets.PROD_DOMAIN }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts 2>/dev/null
           
           ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST << 'SSHEOF'
           set -e
