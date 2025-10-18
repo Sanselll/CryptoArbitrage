@@ -24,7 +24,7 @@ public class BinanceConnector : IExchangeConnector
         _logger = logger;
     }
 
-    public async Task<bool> ConnectAsync(string apiKey, string apiSecret)
+    public async Task<bool> ConnectAsync(string apiKey, string apiSecret, bool useDemoTrading = false)
     {
         try
         {
@@ -34,17 +34,18 @@ public class BinanceConnector : IExchangeConnector
             if (hasCredentials)
             {
                 var credentials = new ApiCredentials(apiKey, apiSecret);
+                var environment = useDemoTrading ? BinanceEnvironment.Demo : BinanceEnvironment.Live;
 
                 _restClient = new BinanceRestClient(options =>
                 {
                     options.ApiCredentials = credentials;
-                    options.Environment = BinanceEnvironment.Demo;
+                    options.Environment = environment;
                 });
 
                 _socketClient = new BinanceSocketClient(options =>
                 {
                     options.ApiCredentials = credentials;
-                    options.Environment = BinanceEnvironment.Demo;
+                    options.Environment = environment;
                 });
 
                 // Test connection with authenticated endpoint
@@ -100,7 +101,7 @@ public class BinanceConnector : IExchangeConnector
         _socketClient?.Dispose();
     }
 
-    public async Task<List<string>> GetActiveSymbolsAsync(decimal minDailyVolumeUsd, int maxSymbols)
+    public async Task<List<string>> GetActiveSymbolsAsync(decimal minDailyVolumeUsd, int maxSymbols, decimal minHighPriorityFundingRate = 0)
     {
         if (_restClient == null)
             throw new InvalidOperationException("Not connected to Binance");
@@ -604,7 +605,7 @@ public class BinanceConnector : IExchangeConnector
     }
 
     // Spot trading methods for cash-and-carry arbitrage
-    public async Task<string> PlaceSpotBuyOrderAsync(string symbol, decimal quantity)
+    public async Task<(string orderId, decimal filledQuantity)> PlaceSpotBuyOrderAsync(string symbol, decimal quantity)
     {
         if (_restClient == null)
             throw new InvalidOperationException("Not connected to Binance");
@@ -623,8 +624,13 @@ public class BinanceConnector : IExchangeConnector
 
             if (order.Success && order.Data != null)
             {
-                _logger.LogInformation("Spot BUY order placed on Binance: {OrderId}", order.Data.Id);
-                return order.Data.Id.ToString();
+                // Binance returns filled quantity in the order response
+                var filledQuantity = order.Data.QuantityFilled > 0 ? order.Data.QuantityFilled : quantity;
+
+                _logger.LogInformation("Spot BUY order placed on Binance: {OrderId}, Requested: {Requested}, Filled: {Filled}",
+                    order.Data.Id, quantity, filledQuantity);
+
+                return (order.Data.Id.ToString(), filledQuantity);
             }
 
             _logger.LogError("Failed to place spot BUY order on Binance: {Error}", order.Error);
@@ -737,5 +743,125 @@ public class BinanceConnector : IExchangeConnector
         // Binance doesn't have a direct funding rate WebSocket stream
         // We'll need to poll periodically instead
         await Task.CompletedTask;
+    }
+
+    // Get instrument specifications for quantity validation
+    public async Task<InstrumentInfo?> GetInstrumentInfoAsync(string symbol, bool isSpot = false)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Binance");
+
+        try
+        {
+            if (isSpot)
+            {
+                // Get spot exchange info
+                var exchangeInfo = await _restClient.SpotApi.ExchangeData.GetExchangeInfoAsync(symbol);
+
+                if (exchangeInfo.Success && exchangeInfo.Data?.Symbols != null && exchangeInfo.Data.Symbols.Any())
+                {
+                    var symbolInfo = exchangeInfo.Data.Symbols.First();
+
+                    // Find LOT_SIZE filter
+                    var lotSizeFilter = symbolInfo.LotSizeFilter;
+
+                    if (lotSizeFilter != null)
+                    {
+                        _logger.LogInformation(
+                            "Spot instrument info for {Symbol}: MinQty={Min}, MaxQty={Max}, StepSize={Step}",
+                            symbol, lotSizeFilter.MinQuantity, lotSizeFilter.MaxQuantity, lotSizeFilter.StepSize);
+
+                        return new InstrumentInfo
+                        {
+                            Symbol = symbol,
+                            MinOrderQty = lotSizeFilter.MinQuantity,
+                            MaxOrderQty = lotSizeFilter.MaxQuantity,
+                            QtyStep = lotSizeFilter.StepSize,
+                            IsSpot = true
+                        };
+                    }
+                }
+            }
+            else
+            {
+                // Get futures exchange info
+                var exchangeInfo = await _restClient.UsdFuturesApi.ExchangeData.GetExchangeInfoAsync();
+
+                if (exchangeInfo.Success && exchangeInfo.Data?.Symbols != null)
+                {
+                    var symbolInfo = exchangeInfo.Data.Symbols.FirstOrDefault(s => s.Name == symbol);
+
+                    if (symbolInfo != null)
+                    {
+                        // Find LOT_SIZE filter
+                        var lotSizeFilter = symbolInfo.LotSizeFilter;
+
+                        if (lotSizeFilter != null)
+                        {
+                            _logger.LogInformation(
+                                "Futures instrument info for {Symbol}: MinQty={Min}, MaxQty={Max}, StepSize={Step}",
+                                symbol, lotSizeFilter.MinQuantity, lotSizeFilter.MaxQuantity, lotSizeFilter.StepSize);
+
+                            return new InstrumentInfo
+                            {
+                                Symbol = symbol,
+                                MinOrderQty = lotSizeFilter.MinQuantity,
+                                MaxOrderQty = lotSizeFilter.MaxQuantity,
+                                QtyStep = lotSizeFilter.StepSize,
+                                IsSpot = false
+                            };
+                        }
+                    }
+                }
+            }
+
+            _logger.LogWarning("No instrument info found for {Symbol} ({Type})", symbol, isSpot ? "Spot" : "Futures");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching instrument info for {Symbol} from Binance", symbol);
+            return null;
+        }
+    }
+
+    // Validate and adjust quantity to meet exchange requirements
+    public decimal ValidateAndAdjustQuantity(decimal quantity, InstrumentInfo instrumentInfo)
+    {
+        if (instrumentInfo == null)
+        {
+            _logger.LogWarning("No instrument info provided for quantity validation, using original quantity");
+            return quantity;
+        }
+
+        // Check if quantity is within limits
+        if (quantity < instrumentInfo.MinOrderQty)
+        {
+            _logger.LogWarning(
+                "Quantity {Quantity} is below minimum {MinQty} for {Symbol}, adjusting to minimum",
+                quantity, instrumentInfo.MinOrderQty, instrumentInfo.Symbol);
+            quantity = instrumentInfo.MinOrderQty;
+        }
+
+        if (quantity > instrumentInfo.MaxOrderQty)
+        {
+            _logger.LogWarning(
+                "Quantity {Quantity} exceeds maximum {MaxQty} for {Symbol}, adjusting to maximum",
+                quantity, instrumentInfo.MaxOrderQty, instrumentInfo.Symbol);
+            quantity = instrumentInfo.MaxOrderQty;
+        }
+
+        // Round to the correct step size
+        var steps = Math.Floor(quantity / instrumentInfo.QtyStep);
+        var adjustedQuantity = steps * instrumentInfo.QtyStep;
+
+        if (adjustedQuantity != quantity)
+        {
+            _logger.LogInformation(
+                "Adjusted quantity from {OriginalQty} to {AdjustedQty} (step: {QtyStep}) for {Symbol}",
+                quantity, adjustedQuantity, instrumentInfo.QtyStep, instrumentInfo.Symbol);
+        }
+
+        return adjustedQuantity;
     }
 }

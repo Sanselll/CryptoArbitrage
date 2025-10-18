@@ -9,7 +9,7 @@ export const Header = () => {
   const todayPnLPercent = 0;
 
   return (
-    <header className="h-14 bg-binance-bg-secondary border-b border-binance-border px-4 flex items-center justify-between">
+    <header className="h-10 bg-binance-bg-secondary border-b border-binance-border px-4 flex items-center justify-between">
       {/* Left Section - Branding & Status */}
       <div className="flex items-center gap-4">
         {/* Logo/Brand */}

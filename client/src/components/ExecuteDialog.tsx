@@ -32,6 +32,7 @@ export interface ExecutionParams {
 
 export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecuting = false }: ExecuteDialogProps) => {
   const [positionSize, setPositionSize] = useState<number>(100);
+  const [positionSizeInput, setPositionSizeInput] = useState<string>('100');
   const [leverage, setLeverage] = useState<number>(1);
   const [balances, setBalances] = useState<ExecutionBalances | null>(null);
   const [loadingBalances, setLoadingBalances] = useState(false);
@@ -63,6 +64,14 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
 
   const isSpotPerp = opportunity.strategy === 1;
 
+  // Calculate the effective funding rate based on strategy
+  const effectiveFundingRate = isSpotPerp
+    ? (opportunity.fundingRate || 0)
+    : ((opportunity.longFundingRate || 0) - (opportunity.shortFundingRate || 0));
+
+  // Calculate estimated 8h earnings: position size * funding rate
+  const estimated8hEarnings = positionSize * Math.abs(effectiveFundingRate);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -88,7 +97,10 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
     ? balances.totalAvailable >= totalRequired
     : spotSufficient && marginSufficient;
 
-  const canExecute = !loadingBalances && !balanceError && totalSufficient && positionSize >= 100 && positionSize <= 10000;
+  // Validate input is not empty and is a valid number
+  const isValidInput = positionSizeInput !== '' && !isNaN(parseFloat(positionSizeInput)) && parseFloat(positionSizeInput) > 0;
+
+  const canExecute = !loadingBalances && !balanceError && totalSufficient && isValidInput && positionSize >= 100 && positionSize <= 10000;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm">
@@ -113,13 +125,19 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
 
         {/* Compact Opportunity Info */}
         <div className="p-3 bg-binance-bg border-b border-binance-border">
-          <div className="grid grid-cols-2 gap-2 text-[10px]">
+          <div className="grid grid-cols-3 gap-2 text-[10px]">
             <div>
               <p className="text-binance-text-secondary">Funding (8h)</p>
               <p className={`font-mono font-bold ${
-                (opportunity.fundingRate || 0) >= 0 ? 'text-binance-green' : 'text-binance-red'
+                effectiveFundingRate >= 0 ? 'text-binance-green' : 'text-binance-red'
               }`}>
-                {((opportunity.fundingRate || 0) * 100).toFixed(4)}%
+                {(effectiveFundingRate * 100).toFixed(4)}%
+              </p>
+            </div>
+            <div>
+              <p className="text-binance-text-secondary">Est. 8h Earn</p>
+              <p className="font-mono font-bold text-binance-green">
+                ${estimated8hEarnings.toFixed(2)}
               </p>
             </div>
             <div>
@@ -200,13 +218,38 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
               Position Size (USD)
             </label>
             <input
-              type="number"
-              min="100"
-              max="10000"
-              step="50"
-              value={positionSize}
-              onChange={(e) => setPositionSize(parseFloat(e.target.value) || 100)}
+              type="text"
+              inputMode="numeric"
+              value={positionSizeInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                // Allow only numbers and decimal point
+                if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                  setPositionSizeInput(value);
+                  const parsed = parseFloat(value);
+                  if (!isNaN(parsed) && parsed > 0) {
+                    setPositionSize(parsed);
+                  } else if (value === '') {
+                    setPositionSize(100); // Default when empty
+                  }
+                }
+              }}
+              onBlur={() => {
+                // Ensure valid number on blur
+                const parsed = parseFloat(positionSizeInput);
+                if (isNaN(parsed) || parsed < 100) {
+                  setPositionSize(100);
+                  setPositionSizeInput('100');
+                } else if (parsed > 10000) {
+                  setPositionSize(10000);
+                  setPositionSizeInput('10000');
+                } else {
+                  setPositionSize(parsed);
+                  setPositionSizeInput(parsed.toString());
+                }
+              }}
               className="w-full px-2 py-1.5 bg-binance-bg border border-binance-border rounded text-binance-text font-mono text-sm focus:outline-none focus:ring-1 focus:ring-binance-yellow disabled:opacity-50"
+              placeholder="100"
               required
               disabled={isExecuting}
             />

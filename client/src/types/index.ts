@@ -61,10 +61,17 @@ export enum ExecutionState {
   Failed = 2
 }
 
+export enum StrategySubType {
+  SpotPerpetualSameExchange = 0,
+  CrossExchangeFuturesFutures = 1,
+  CrossExchangeSpotFutures = 2
+}
+
 export interface ArbitrageOpportunity {
   id: number;
   symbol: string;
   strategy?: number; // 0 = CrossExchange, 1 = SpotPerpetual
+  subType?: StrategySubType;
 
   // Cross-exchange fields
   longExchange: string;

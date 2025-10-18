@@ -5,6 +5,8 @@ import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { EmptyState } from './ui/EmptyState';
 import { LoadingOverlay } from './ui/LoadingOverlay';
+import { ExchangeBadge } from './ui/ExchangeBadge';
+import { AlertDialog, ConfirmDialog } from './ui/Dialog';
 import {
   Table,
   TableHeader,
@@ -16,7 +18,25 @@ import {
 import { useState, useEffect } from 'react';
 import { ExecuteDialog, ExecutionParams } from './ExecuteDialog';
 import { apiService } from '../services/apiService';
-import { PositionStatus } from '../types/index';
+import { PositionStatus, StrategySubType } from '../types/index';
+import { useDialog } from '../hooks/useDialog';
+
+// Helper function to get strategy type label
+const getStrategyLabel = (subType?: number): { text: string; color: string } => {
+  switch (subType) {
+    case StrategySubType.SpotPerpetualSameExchange:
+    case 0:
+      return { text: 'Spot-Perp', color: 'bg-blue-500/20 text-blue-400' };
+    case StrategySubType.CrossExchangeFuturesFutures:
+    case 1:
+      return { text: 'Cross-Fut', color: 'bg-purple-500/20 text-purple-400' };
+    case StrategySubType.CrossExchangeSpotFutures:
+    case 2:
+      return { text: 'Cross-Spot', color: 'bg-green-500/20 text-green-400' };
+    default:
+      return { text: 'Unknown', color: 'bg-gray-500/20 text-gray-400' };
+  }
+};
 
 // Helper function to calculate time until next funding (every 8 hours at 00:00, 08:00, 16:00 UTC)
 const getNextFundingTime = () => {
@@ -65,6 +85,7 @@ export const OpportunitiesList = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const { alertState, showSuccess, showError, showInfo, closeAlert, confirmState, showConfirm, closeConfirm } = useDialog();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -109,47 +130,54 @@ export const OpportunitiesList = () => {
   const handleStop = async (opp: any) => {
     // Check if this opportunity has an execution running
     if (!opp.executionId) {
-      alert('No execution found for this opportunity');
+      showInfo('No execution found for this opportunity', 'No Execution');
       return;
     }
 
-    const confirmed = window.confirm(
-      `Are you sure you want to stop this execution?\n\n` +
-      `Symbol: ${opp.symbol}\n` +
-      `Exchange: ${opp.exchange}\n` +
-      `This will close all positions and sell the spot asset.`
-    );
-
-    if (!confirmed) return;
-
-    setIsStopping(true);
-    try {
-      const response = await apiService.stopExecution(opp.executionId);
-
-      if (response.success) {
-        // Manually refresh positions immediately after successful stop
+    showConfirm(
+      `Symbol: ${opp.symbol}\nExchange: ${opp.exchange}\n\nThis will close all positions and sell the spot asset.`,
+      async () => {
+        setIsStopping(true);
         try {
-          const freshPositions = await apiService.getPositions();
-          useArbitrageStore.getState().setPositions(freshPositions);
-        } catch (refreshError) {
-          console.error('Failed to refresh positions after stop:', refreshError);
-          // Don't fail the whole operation if refresh fails
-        }
+          const response = await apiService.stopExecution(opp.executionId);
 
-        alert(
-          `Success!\n\n` +
-          `${response.message}\n` +
-          `Execution stopped and positions closed.`
-        );
-      } else {
-        alert(`Failed to stop execution:\n\n${response.errorMessage}`);
+          if (response.success) {
+            // Manually refresh positions immediately after successful stop
+            try {
+              const freshPositions = await apiService.getPositions();
+              useArbitrageStore.getState().setPositions(freshPositions);
+            } catch (refreshError) {
+              console.error('Failed to refresh positions after stop:', refreshError);
+              // Don't fail the whole operation if refresh fails
+            }
+
+            showSuccess(
+              `${response.message}\n\nExecution stopped and positions closed.`,
+              'Success'
+            );
+          } else {
+            showError(
+              `${response.errorMessage}`,
+              'Failed to Stop Execution'
+            );
+          }
+        } catch (error: any) {
+          console.error('Error stopping execution:', error);
+          showError(
+            `${error.message || 'Unknown error'}`,
+            'Failed to Stop Execution'
+          );
+        } finally {
+          setIsStopping(false);
+        }
+      },
+      {
+        title: 'Stop Execution',
+        confirmText: 'Stop',
+        cancelText: 'Cancel',
+        variant: 'danger',
       }
-    } catch (error: any) {
-      console.error('Error stopping execution:', error);
-      alert(`Failed to stop execution:\n\n${error.message || 'Unknown error'}`);
-    } finally {
-      setIsStopping(false);
-    }
+    );
   };
 
   const handleExecuteConfirm = async (params: ExecutionParams) => {
@@ -162,6 +190,7 @@ export const OpportunitiesList = () => {
       const request = {
         symbol: selectedOpportunity.symbol,
         strategy: selectedOpportunity.strategy,
+        subType: selectedOpportunity.subType || 0,  // Include the subType
         exchange: isSpotPerp ? selectedOpportunity.exchange : '',
         longExchange: !isSpotPerp ? selectedOpportunity.longExchange : undefined,
         shortExchange: !isSpotPerp ? selectedOpportunity.shortExchange : undefined,
@@ -187,14 +216,23 @@ export const OpportunitiesList = () => {
       const response = await apiService.executeOpportunity(request);
 
       if (response.success) {
-        alert(`Success!\n\n${response.message}\n\nPositions created: ${response.positionIds.length}\nOrders: ${response.orderIds.join(', ')}`);
+        showSuccess(
+          `${response.message}\n\nPositions created: ${response.positionIds.length}\nOrders: ${response.orderIds.join(', ')}`,
+          'Success'
+        );
         setIsDialogOpen(false);
       } else {
-        alert(`Execution failed:\n\n${response.errorMessage}`);
+        showError(
+          `${response.errorMessage}`,
+          'Execution Failed'
+        );
       }
     } catch (error: any) {
       console.error('Error executing opportunity:', error);
-      alert(`Failed to execute opportunity:\n\n${error.message || 'Unknown error'}`);
+      showError(
+        `${error.message || 'Unknown error'}`,
+        'Failed to Execute'
+      );
     } finally {
       setIsExecuting(false);
     }
@@ -212,18 +250,18 @@ export const OpportunitiesList = () => {
       />
 
       <Card className="h-full flex flex-col">
-        <CardHeader className="p-3">
+        <CardHeader className="p-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Target className="w-4 h-4 text-binance-yellow" />
+            <CardTitle className="flex items-center gap-1.5 text-sm">
+              <Target className="w-3 h-3 text-binance-yellow" />
               Arbitrage Opportunities
             </CardTitle>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 text-binance-text-secondary text-sm">
-                <Clock className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 text-binance-text-secondary text-[10px]">
+                <Clock className="w-3 h-3" />
                 <span className="font-mono">{timeUntilFunding}</span>
               </div>
-              <Badge variant="info" size="sm">
+              <Badge variant="info" size="sm" className="text-[10px]">
                 {activeOpportunities.length} Active
               </Badge>
             </div>
@@ -242,15 +280,11 @@ export const OpportunitiesList = () => {
             <TableHeader>
               <TableRow hover={false}>
                 <TableHead>Symbol</TableHead>
-                <TableHead className="text-right">Spot Price</TableHead>
-                <TableHead className="text-right">Perp Price</TableHead>
-                <TableHead className="text-right">8h Rate</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Exchange</TableHead>
+                <TableHead className="text-right">8h Profit</TableHead>
                 <TableHead className="text-right">APR</TableHead>
                 <TableHead className="text-right">Status</TableHead>
-                <TableHead className="text-right">Time</TableHead>
-                <TableHead className="text-right">Est. Funding Fee</TableHead>
-                <TableHead className="text-right">P&L</TableHead>
-                <TableHead className="text-right">Est. Total P&L</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -259,6 +293,7 @@ export const OpportunitiesList = () => {
                 // Determine if this is spot-perpetual or cross-exchange
                 const isSpotPerp = opp.strategy === 1; // SpotPerpetual = 1
                 const uniqueKey = `${opp.symbol}-${opp.exchange || opp.longExchange}-${index}`;
+                const strategyLabel = getStrategyLabel(opp.subType);
 
                 // Find matching positions for this opportunity
                 const matchingPositions = positions.filter(
@@ -294,30 +329,40 @@ export const OpportunitiesList = () => {
 
                 return (
                   <TableRow key={uniqueKey}>
-                    <TableCell className="font-bold">{opp.symbol}</TableCell>
-                    <TableCell className="text-right">
-                      <span className="font-mono text-sm font-semibold text-binance-text">
-                        {isSpotPerp ? `$${opp.spotPrice?.toFixed(6) || '-'}` : '-'}
+                    <TableCell className="font-bold text-xs py-1">{opp.symbol}</TableCell>
+                    <TableCell className="py-1">
+                      <Badge
+                        size="sm"
+                        className={`text-[10px] ${strategyLabel.color}`}
+                      >
+                        {strategyLabel.text}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="py-1">
+                      {isSpotPerp ? (
+                        <ExchangeBadge exchange={opp.exchange} />
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <ExchangeBadge exchange={opp.longExchange} />
+                          <span className="text-binance-text-muted">/</span>
+                          <ExchangeBadge exchange={opp.shortExchange} />
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right py-1">
+                      <span className="font-mono text-[11px] font-bold text-binance-green">
+                        {(() => {
+                          // Calculate 8-hour profit: APR / 365 days / 3 funding periods per day
+                          const apr = isSpotPerp
+                            ? opp.estimatedProfitPercentage
+                            : opp.annualizedSpread * 100;
+                          const profit8h = apr / 365 / 3;
+                          return `${profit8h >= 0 ? '+' : ''}${profit8h.toFixed(4)}%`;
+                        })()}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right">
-                      <span className="font-mono text-sm font-semibold text-binance-text">
-                        {isSpotPerp ? `$${opp.perpetualPrice?.toFixed(6) || '-'}` : '-'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className={`font-mono text-sm font-bold ${
-                        isSpotPerp
-                          ? (opp.fundingRate >= 0 ? 'text-binance-green' : 'text-binance-red')
-                          : 'text-binance-text-secondary'
-                      }`}>
-                        {isSpotPerp
-                          ? `${(opp.fundingRate * 100).toFixed(4)}%`
-                          : `${((opp.longFundingRate + opp.shortFundingRate) / 2 * 100).toFixed(4)}%`}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Badge variant="success" size="sm">
+                    <TableCell className="text-right py-1">
+                      <Badge variant="success" size="sm" className="text-[10px]">
                         <span className="font-mono font-bold">
                           {isSpotPerp
                             ? (opp.estimatedProfitPercentage).toFixed(2)
@@ -325,70 +370,26 @@ export const OpportunitiesList = () => {
                         </span>
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right py-1">
                       {isExecuting ? (
-                        <Badge variant="info" size="sm">
+                        <Badge variant="info" size="sm" className="text-[10px]">
                           Executing
                         </Badge>
                       ) : (
-                        <Badge variant="secondary" size="sm">
+                        <Badge variant="secondary" size="sm" className="text-[10px]">
                           Ready
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <span className="font-mono text-sm text-binance-text-secondary">
-                        {isExecuting ? executionTimes[executionKey] || '-' : '-'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {isExecuting ? (
-                        <span
-                          className={`font-mono text-sm font-bold ${
-                            estimatedEarnings >= 0 ? 'text-binance-green' : 'text-binance-red'
-                          }`}
-                        >
-                          {estimatedEarnings >= 0 ? '+' : ''}${estimatedEarnings.toFixed(2)}
-                        </span>
-                      ) : (
-                        <span className="font-mono text-sm text-binance-text-secondary">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {isExecuting ? (
-                        <span
-                          className={`font-mono text-sm font-bold ${
-                            totalPnL >= 0 ? 'text-binance-green' : 'text-binance-red'
-                          }`}
-                        >
-                          {totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)}
-                        </span>
-                      ) : (
-                        <span className="font-mono text-sm text-binance-text-secondary">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {isExecuting ? (
-                        <span
-                          className={`font-mono text-sm font-bold ${
-                            (totalPnL + estimatedEarnings) >= 0 ? 'text-binance-green' : 'text-binance-red'
-                          }`}
-                        >
-                          {(totalPnL + estimatedEarnings) >= 0 ? '+' : ''}${(totalPnL + estimatedEarnings).toFixed(2)}
-                        </span>
-                      ) : (
-                        <span className="font-mono text-sm text-binance-text-secondary">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right py-1">
                       {opp.executionId ? (
                         <Button
                           variant="danger"
                           size="sm"
                           onClick={() => handleStop(opp)}
-                          className="gap-1"
+                          className="gap-0.5 h-6 px-2 text-[10px]"
                         >
-                          <StopCircle className="w-3 h-3" />
+                          <StopCircle className="w-2.5 h-2.5" />
                           Stop
                         </Button>
                       ) : (
@@ -396,9 +397,9 @@ export const OpportunitiesList = () => {
                           variant="primary"
                           size="sm"
                           onClick={() => handleExecute(opp)}
-                          className="gap-1"
+                          className="gap-0.5 h-6 px-2 text-[10px]"
                         >
-                          <Play className="w-3 h-3" />
+                          <Play className="w-2.5 h-2.5" />
                           Execute
                         </Button>
                       )}
@@ -421,6 +422,25 @@ export const OpportunitiesList = () => {
         isExecuting={isExecuting}
       />
     )}
+
+    <AlertDialog
+      isOpen={alertState.isOpen}
+      onClose={closeAlert}
+      title={alertState.title}
+      message={alertState.message}
+      variant={alertState.variant}
+    />
+
+    <ConfirmDialog
+      isOpen={confirmState.isOpen}
+      onClose={closeConfirm}
+      onConfirm={confirmState.onConfirm}
+      title={confirmState.title}
+      message={confirmState.message}
+      confirmText={confirmState.confirmText}
+      cancelText={confirmState.cancelText}
+      variant={confirmState.variant}
+    />
     </>
   );
 };
