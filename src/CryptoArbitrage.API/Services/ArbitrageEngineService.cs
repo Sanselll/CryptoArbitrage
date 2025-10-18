@@ -220,7 +220,7 @@ public class ArbitrageEngineService : BackgroundService
         if (fundingRates.Count >= 2)
         {
             // Futures/Futures cross-exchange
-            var crossExchangeFuturesOpps = await DetectCrossExchangeFuturesOpportunitiesAsync(fundingRates);
+            var crossExchangeFuturesOpps = await DetectCrossExchangeFuturesOpportunitiesAsync(fundingRates, perpPrices);
             opportunities.AddRange(crossExchangeFuturesOpps);
 
             // Spot/Futures cross-exchange
@@ -234,6 +234,61 @@ public class ArbitrageEngineService : BackgroundService
 
         if (opportunities.Any())
         {
+            // Enrich opportunities with 24h volume data
+            try
+            {
+                var uniqueSymbols = opportunities.Select(o => o.Symbol).Distinct().ToList();
+                var volumeByExchange = new Dictionary<string, Dictionary<string, decimal>>();
+
+                foreach (var (exchangeName, connector) in _exchangeConnectors)
+                {
+                    try
+                    {
+                        var volumes = await connector.Get24hVolumeAsync(uniqueSymbols);
+                        volumeByExchange[exchangeName] = volumes;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to fetch 24h volumes from {Exchange}", exchangeName);
+                    }
+                }
+
+                // Populate volume for each opportunity
+                foreach (var opp in opportunities)
+                {
+                    // For spot-perp, use the exchange's volume
+                    if (opp.Strategy == ArbitrageStrategy.SpotPerpetual && volumeByExchange.ContainsKey(opp.Exchange))
+                    {
+                        if (volumeByExchange[opp.Exchange].TryGetValue(opp.Symbol, out var volume))
+                        {
+                            opp.Volume24h = volume;
+                        }
+                    }
+                    // For cross-exchange, use the average or max volume from both exchanges
+                    else if (opp.Strategy == ArbitrageStrategy.CrossExchange)
+                    {
+                        decimal longVolume = 0, shortVolume = 0;
+                        if (volumeByExchange.ContainsKey(opp.LongExchange))
+                        {
+                            volumeByExchange[opp.LongExchange].TryGetValue(opp.Symbol, out longVolume);
+                        }
+                        if (volumeByExchange.ContainsKey(opp.ShortExchange))
+                        {
+                            volumeByExchange[opp.ShortExchange].TryGetValue(opp.Symbol, out shortVolume);
+                        }
+                        // Use the minimum of the two volumes (limiting factor for arbitrage)
+                        opp.Volume24h = Math.Min(longVolume > 0 ? longVolume : decimal.MaxValue,
+                                                 shortVolume > 0 ? shortVolume : decimal.MaxValue);
+                        if (opp.Volume24h == decimal.MaxValue)
+                            opp.Volume24h = 0; // No volume data available
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error enriching opportunities with volume data");
+            }
+
             // Enrich opportunities with execution information from Executions table
             using (var scope = _serviceProvider.CreateScope())
             {
@@ -288,7 +343,8 @@ public class ArbitrageEngineService : BackgroundService
     }
 
     private async Task<List<ArbitrageOpportunityDto>> DetectCrossExchangeFuturesOpportunitiesAsync(
-        Dictionary<string, List<FundingRateDto>> fundingRates)
+        Dictionary<string, List<FundingRateDto>> fundingRates,
+        Dictionary<string, Dictionary<string, decimal>> perpPrices)
     {
         var opportunities = new List<ArbitrageOpportunityDto>();
 
@@ -314,6 +370,14 @@ public class ArbitrageEngineService : BackgroundService
 
                     var rate1 = fundingRates[exchange1].First(r => r.Symbol == symbol);
                     var rate2 = fundingRates[exchange2].First(r => r.Symbol == symbol);
+
+                    // Get perpetual prices for both exchanges
+                    decimal price1 = 0;
+                    decimal price2 = 0;
+                    if (perpPrices.ContainsKey(exchange1) && perpPrices[exchange1].ContainsKey(symbol))
+                        price1 = perpPrices[exchange1][symbol];
+                    if (perpPrices.ContainsKey(exchange2) && perpPrices[exchange2].ContainsKey(symbol))
+                        price2 = perpPrices[exchange2][symbol];
 
                     // CRITICAL: Funding rate calculation for Futures/Futures cross-exchange
                     // Strategy: LONG on exchange with LOWER funding rate, SHORT on exchange with HIGHER funding rate
@@ -363,6 +427,10 @@ public class ArbitrageEngineService : BackgroundService
                     // Only profitable if net funding is positive
                     if (annualizedNetFunding * 100 >= _config.MinSpreadPercentage)
                     {
+                        // Determine which price goes to which field based on long/short exchanges
+                        decimal longExchangePrice = (longExchange == exchange1) ? price1 : price2;
+                        decimal shortExchangePrice = (shortExchange == exchange1) ? price1 : price2;
+
                         opportunities.Add(new ArbitrageOpportunityDto
                         {
                             Strategy = ArbitrageStrategy.CrossExchange,
@@ -372,6 +440,9 @@ public class ArbitrageEngineService : BackgroundService
                             ShortExchange = shortExchange,
                             LongFundingRate = longRate,
                             ShortFundingRate = shortRate,
+                            // Use SpotPrice for longExchange perp price, PerpetualPrice for shortExchange perp price
+                            SpotPrice = longExchangePrice,
+                            PerpetualPrice = shortExchangePrice,
                             SpreadRate = netFundingRate,
                             AnnualizedSpread = annualizedNetFunding,
                             EstimatedProfitPercentage = annualizedNetFunding * 100,
