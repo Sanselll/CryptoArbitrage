@@ -14,6 +14,9 @@ git fetch origin
 git checkout develop
 git pull origin develop
 
+# Extract owner name (lowercase)
+REPO_OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f1 | tr '[:upper:]' '[:lower:]')
+
 # Create/update .env.production
 cat > .env.production << EOF
 POSTGRES_DB=crypto_arbitrage
@@ -29,6 +32,7 @@ GOOGLE_CLIENT_ID=$PROD_GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET=$PROD_GOOGLE_CLIENT_SECRET
 ASPNETCORE_ENVIRONMENT=Production
 IMAGE_TAG=$GITHUB_SHA
+GITHUB_REPOSITORY_OWNER=$REPO_OWNER
 EOF
 
 # Extract owner and pull images
