@@ -51,7 +51,7 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VITE_GOOGLE_CLIENT_ID=${{ secrets.PROD_GOOGLE_CLIENT_ID }}
-            VITE_API_URL=https://${{ secrets.PROD_DOMAIN }}:8080
+            VITE_API_BASE_URL=http://${{ secrets.PROD_DOMAIN }}:8080/api
 
   deploy:
     needs: build-and-push
