@@ -312,6 +312,37 @@ public class BybitConnector : IExchangeConnector
         return perpPrices;
     }
 
+    public async Task<Dictionary<string, decimal>> Get24hVolumeAsync(List<string> symbols)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Bybit");
+
+        var volumes = new Dictionary<string, decimal>();
+
+        try
+        {
+            // Get 24h ticker data from Bybit linear tickers
+            var tickers = await _restClient.V5Api.ExchangeData.GetLinearInverseTickersAsync(Category.Linear);
+
+            if (tickers.Success && tickers.Data != null)
+            {
+                foreach (var ticker in tickers.Data.List.Where(t => symbols.Contains(t.Symbol)))
+                {
+                    // Turnover24h is the 24h volume in USDT
+                    volumes[ticker.Symbol] = ticker.Turnover24h;
+                }
+            }
+
+            _logger.LogInformation("Fetched {Count} 24h volumes from Bybit", volumes.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching 24h volumes from Bybit");
+        }
+
+        return volumes;
+    }
+
     public async Task<AccountBalanceDto> GetAccountBalanceAsync()
     {
         // Call the overload with empty active positions dictionary

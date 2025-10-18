@@ -91,6 +91,7 @@ export interface ArbitrageOpportunity {
   spreadRate: number;
   annualizedSpread: number;
   estimatedProfitPercentage: number;
+  volume24h?: number;
   status: OpportunityStatus;
   detectedAt: string;
   executedAt?: string;

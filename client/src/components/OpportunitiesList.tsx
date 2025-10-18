@@ -282,9 +282,10 @@ export const OpportunitiesList = () => {
                 <TableHead>Symbol</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Exchange</TableHead>
+                <TableHead className="text-right">Spread</TableHead>
                 <TableHead className="text-right">8h Profit</TableHead>
                 <TableHead className="text-right">APR</TableHead>
-                <TableHead className="text-right">Status</TableHead>
+                <TableHead className="text-right">24h Vol</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -350,6 +351,27 @@ export const OpportunitiesList = () => {
                       )}
                     </TableCell>
                     <TableCell className="text-right py-1">
+                      <span className="font-mono text-[11px] font-bold text-binance-text-primary">
+                        {(() => {
+                          // Calculate spread (price difference)
+                          // Based on strategy subtype:
+                          // - Spot-Perp: (perpPrice - spotPrice) / spotPrice
+                          // - Cross-Fut: (shortExchangePrice - longExchangePrice) / longExchangePrice
+                          // - Cross-Spot: (shortExchangeFutPrice - longExchangeSpotPrice) / longExchangeSpotPrice
+
+                          const spotPrice = opp.spotPrice || 0;
+                          const perpPrice = opp.perpetualPrice || 0;
+
+                          if (spotPrice > 0 && perpPrice > 0) {
+                            // For all types: spotPrice represents the long side, perpPrice represents the short side
+                            const spread = ((perpPrice - spotPrice) / spotPrice) * 100;
+                            return `${spread >= 0 ? '+' : ''}${spread.toFixed(4)}%`;
+                          }
+                          return '-';
+                        })()}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1">
                       <span className="font-mono text-[11px] font-bold text-binance-green">
                         {(() => {
                           // Calculate 8-hour profit: APR / 365 days / 3 funding periods per day
@@ -371,15 +393,11 @@ export const OpportunitiesList = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right py-1">
-                      {isExecuting ? (
-                        <Badge variant="info" size="sm" className="text-[10px]">
-                          Executing
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" size="sm" className="text-[10px]">
-                          Ready
-                        </Badge>
-                      )}
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {opp.volume24h
+                          ? `$${(opp.volume24h / 1000000).toFixed(2)}M`
+                          : '-'}
+                      </span>
                     </TableCell>
                     <TableCell className="text-right py-1">
                       {opp.executionId ? (
@@ -392,6 +410,10 @@ export const OpportunitiesList = () => {
                           <StopCircle className="w-2.5 h-2.5" />
                           Stop
                         </Button>
+                      ) : isExecuting ? (
+                        <span className="text-[11px] text-binance-text-secondary">
+                          Executing...
+                        </span>
                       ) : (
                         <Button
                           variant="primary"

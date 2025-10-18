@@ -40,6 +40,7 @@ public class ArbitrageOpportunityDto
     public decimal SpreadRate { get; set; }
     public decimal AnnualizedSpread { get; set; }
     public decimal EstimatedProfitPercentage { get; set; }
+    public decimal Volume24h { get; set; }  // 24-hour trading volume in USDT
     public OpportunityStatus Status { get; set; }
     public DateTime DetectedAt { get; set; }
     public DateTime? ExecutedAt { get; set; }

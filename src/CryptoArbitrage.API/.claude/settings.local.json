@@ -50,7 +50,8 @@
       "Bash(bash test_bybit_position.sh)",
       "Bash(chmod +x get_bybit_position.sh)",
       "Bash(bash get_bybit_position.sh)",
-      "Bash(sqlite3 /Users/sansel/Projects/CryptoArbitrage/src/CryptoArbitrage.API/arbitrage.db \"SELECT Id, Symbol, Exchange, LongExchange, ShortExchange, State FROM Executions WHERE State = ''Running'' LIMIT 5\")"
+      "Bash(sqlite3 /Users/sansel/Projects/CryptoArbitrage/src/CryptoArbitrage.API/arbitrage.db \"SELECT Id, Symbol, Exchange, LongExchange, ShortExchange, State FROM Executions WHERE State = ''Running'' LIMIT 5\")",
+      "Bash(pkill -f dotnet)"
     ],
     "deny": [],
     "ask": []

@@ -273,6 +273,37 @@ public class BinanceConnector : IExchangeConnector
         return perpPrices;
     }
 
+    public async Task<Dictionary<string, decimal>> Get24hVolumeAsync(List<string> symbols)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Binance");
+
+        var volumes = new Dictionary<string, decimal>();
+
+        try
+        {
+            // Get 24h ticker data from Binance USD-M Futures API
+            var tickers = await _restClient.UsdFuturesApi.ExchangeData.GetTickersAsync();
+
+            if (tickers.Success && tickers.Data != null)
+            {
+                foreach (var ticker in tickers.Data.Where(t => symbols.Contains(t.Symbol)))
+                {
+                    // QuoteVolume is the 24h volume in USDT
+                    volumes[ticker.Symbol] = ticker.QuoteVolume;
+                }
+            }
+
+            _logger.LogInformation("Fetched {Count} 24h volumes from Binance", volumes.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching 24h volumes from Binance");
+        }
+
+        return volumes;
+    }
+
     public async Task<AccountBalanceDto> GetAccountBalanceAsync()
     {
         if (_restClient == null)
