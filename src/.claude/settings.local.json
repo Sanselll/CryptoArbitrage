@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/sansel/Projects/CryptoArbitrage/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
