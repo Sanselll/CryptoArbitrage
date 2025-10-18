@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Read(//Users/sansel/Projects/CryptoArbitrage/**)"
+      "Read(//Users/sansel/Projects/CryptoArbitrage/**)",
+      "Bash(cat .github/workflows/deploy.yml)"
     ],
     "deny": [],
     "ask": []

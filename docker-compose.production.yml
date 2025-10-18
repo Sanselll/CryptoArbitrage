@@ -25,7 +25,7 @@ services:
 
   # Backend API (Production)
   backend:
-    image: ghcr.io/${GITHUB_REPOSITORY:-yourusername/crypto-arbitrage-api}:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourusername}/crypto-arbitrage/api:${IMAGE_TAG:-latest}
     container_name: crypto-arbitrage-api-prod
     restart: always
     ports:
@@ -61,7 +61,7 @@ services:
 
   # Frontend (Production)
   frontend:
-    image: ghcr.io/${GITHUB_REPOSITORY:-yourusername/crypto-arbitrage-frontend}:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourusername}/crypto-arbitrage/web:${IMAGE_TAG:-latest}
     container_name: crypto-arbitrage-frontend-prod
     restart: always
     ports:
