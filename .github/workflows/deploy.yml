@@ -79,55 +79,19 @@ jobs:
           PROD_GOOGLE_CLIENT_SECRET: ${{ secrets.PROD_GOOGLE_CLIENT_SECRET }}
           PROD_DOMAIN: ${{ secrets.PROD_DOMAIN }}
         run: |
-          
-          ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST bash << 'SSHEOF'
-          set -e
+          # Copy deploy script to droplet
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ./deploy.sh $DEPLOY_USER@$DEPLOY_HOST:/tmp/deploy.sh
 
-          APP_DIR="/home/deploy/crypto-arbitrage"
-          mkdir -p "$APP_DIR"
-          cd "$APP_DIR"
+          # Execute deploy script
+          ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            GITHUB_SERVER_URL="$GITHUB_SERVER_URL" \
+            GITHUB_SHA="$GITHUB_SHA" \
+            PROD_POSTGRES_PASSWORD="$PROD_POSTGRES_PASSWORD" \
+            PROD_JWT_SECRET="$PROD_JWT_SECRET" \
+            PROD_ENCRYPTION_KEY="$PROD_ENCRYPTION_KEY" \
+            PROD_GOOGLE_CLIENT_ID="$PROD_GOOGLE_CLIENT_ID" \
+            PROD_GOOGLE_CLIENT_SECRET="$PROD_GOOGLE_CLIENT_SECRET" \
+            bash /tmp/deploy.sh "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
 
-          if [ ! -d .git ]; then
-            git clone "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
-          fi
-
-          git fetch origin
-          git checkout develop
-          git pull origin develop
-
-          if [ ! -f .env.production ]; then
-            cp .env.production.example .env.production
-          fi
-
-          cat > .env.production << EOF
-          POSTGRES_DB=crypto_arbitrage
-          POSTGRES_USER=postgres
-          POSTGRES_PASSWORD=$PROD_POSTGRES_PASSWORD
-          BACKEND_PORT=8080
-          FRONTEND_PORT=3000
-          JWT_SECRET_KEY=$PROD_JWT_SECRET
-          JWT_ISSUER=CryptoArbitrage
-          JWT_AUDIENCE=CryptoArbitrageClient
-          ENCRYPTION_KEY=$PROD_ENCRYPTION_KEY
-          GOOGLE_CLIENT_ID=$PROD_GOOGLE_CLIENT_ID
-          GOOGLE_CLIENT_SECRET=$PROD_GOOGLE_CLIENT_SECRET
-          ASPNETCORE_ENVIRONMENT=Production
-          IMAGE_TAG=$GITHUB_SHA
-          EOF
-          
-          REPO_OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f1)
-          docker pull ghcr.io/$REPO_OWNER/crypto-arbitrage/api:latest || true
-          docker pull ghcr.io/$REPO_OWNER/crypto-arbitrage/web:latest || true
-          
-          docker compose -f docker-compose.production.yml down || true
-          
-          docker compose -f docker-compose.production.yml --env-file .env.production up -d
-          
-          sleep 10
-          
-          docker compose -f docker-compose.production.yml exec -T api dotnet ef database update || true
-          
-          docker compose -f docker-compose.production.yml ps
-          SSHEOF
-          
           rm ~/.ssh/deploy_key
