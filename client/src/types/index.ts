@@ -64,10 +64,23 @@ export enum ExecutionState {
 export interface ArbitrageOpportunity {
   id: number;
   symbol: string;
+  strategy?: number; // 0 = CrossExchange, 1 = SpotPerpetual
+
+  // Cross-exchange fields
   longExchange: string;
   shortExchange: string;
   longFundingRate: number;
   shortFundingRate: number;
+
+  // Spot-perpetual fields
+  exchange?: string;
+  spotPrice?: number;
+  perpetualPrice?: number;
+  fundingRate?: number;
+  annualizedFundingRate?: number;
+  pricePremium?: number;
+
+  // Common fields
   spreadRate: number;
   annualizedSpread: number;
   estimatedProfitPercentage: number;
@@ -81,6 +94,9 @@ export interface ArbitrageOpportunity {
   executionState?: ExecutionState;
   executionStartedAt?: string;
   executionFundingEarned?: number;
+
+  // Computed unique key for frontend tracking
+  uniqueKey?: string;
 }
 
 export interface ActiveOpportunity {

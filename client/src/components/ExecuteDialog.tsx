@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { X, DollarSign, TrendingUp, Shield, Target } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, DollarSign, TrendingUp, Wallet, AlertCircle } from 'lucide-react';
 import { Button } from './ui/Button';
 import { LoadingOverlay } from './ui/LoadingOverlay';
+import { apiService, type ExecutionBalances } from '../services/apiService';
 
 interface ExecuteDialogProps {
   isOpen: boolean;
@@ -30,10 +31,33 @@ export interface ExecutionParams {
 }
 
 export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecuting = false }: ExecuteDialogProps) => {
-  const [positionSize, setPositionSize] = useState<number>(1000);
+  const [positionSize, setPositionSize] = useState<number>(100);
   const [leverage, setLeverage] = useState<number>(1);
-  const [stopLoss, setStopLoss] = useState<string>('');
-  const [takeProfit, setTakeProfit] = useState<string>('');
+  const [balances, setBalances] = useState<ExecutionBalances | null>(null);
+  const [loadingBalances, setLoadingBalances] = useState(false);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+
+  // Fetch balances when dialog opens
+  useEffect(() => {
+    // Determine the exchange to use (SpotPerp uses 'exchange', CrossExchange uses 'longExchange')
+    const exchangeName = opportunity.exchange || opportunity.longExchange;
+
+    if (isOpen && exchangeName) {
+      const fetchBalances = async () => {
+        setLoadingBalances(true);
+        setBalanceError(null);
+        try {
+          const data = await apiService.getExecutionBalances(exchangeName, leverage);
+          setBalances(data);
+        } catch (error: any) {
+          setBalanceError(error.message || 'Failed to fetch balances');
+        } finally {
+          setLoadingBalances(false);
+        }
+      };
+      fetchBalances();
+    }
+  }, [isOpen, opportunity.exchange, opportunity.longExchange, leverage]);
 
   if (!isOpen) return null;
 
@@ -45,209 +69,204 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
     onExecute({
       positionSizeUsd: positionSize,
       leverage,
-      stopLossPercentage: stopLoss ? parseFloat(stopLoss) : undefined,
-      takeProfitPercentage: takeProfit ? parseFloat(takeProfit) : undefined,
+      stopLossPercentage: undefined,
+      takeProfitPercentage: undefined,
     });
   };
 
-  const estimatedMargin = positionSize / leverage;
-  const totalPosition = positionSize * (isSpotPerp ? 2 : 2); // Both legs
+  // Calculate requirements
+  const requiredSpot = positionSize;
+  const requiredMargin = positionSize / leverage;
+  const totalRequired = balances?.isUnifiedAccount
+    ? requiredSpot + requiredMargin
+    : requiredSpot; // For Binance, spot and margin are separate
+
+  // Check if we have sufficient balance
+  const spotSufficient = balances ? balances.spotUsdtAvailable >= requiredSpot : false;
+  const marginSufficient = balances ? balances.futuresAvailable >= requiredMargin : false;
+  const totalSufficient = balances?.isUnifiedAccount
+    ? balances.totalAvailable >= totalRequired
+    : spotSufficient && marginSufficient;
+
+  const canExecute = !loadingBalances && !balanceError && totalSufficient && positionSize >= 100 && positionSize <= 10000;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm">
       <LoadingOverlay isLoading={isExecuting} message="Executing trade..." />
-      <div className="bg-binance-bg-secondary border border-binance-border rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto m-4">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-binance-border">
+      <div className="bg-binance-bg-secondary border border-binance-border rounded-lg shadow-2xl w-full max-w-md m-4">
+        {/* Compact Header */}
+        <div className="flex items-center justify-between p-3 border-b border-binance-border">
           <div>
-            <h2 className="text-2xl font-bold text-binance-text">Execute Arbitrage</h2>
-            <p className="text-sm text-binance-text-secondary mt-1">
-              {opportunity.symbol} - {isSpotPerp ? 'Spot-Perpetual' : 'Cross-Exchange'}
+            <h2 className="text-base font-bold text-binance-text">Execute {opportunity.symbol}</h2>
+            <p className="text-[10px] text-binance-text-secondary">
+              {isSpotPerp ? 'Spot-Perpetual' : 'Cross-Exchange'} •
+              {isSpotPerp ? opportunity.exchange : `${opportunity.longExchange} / ${opportunity.shortExchange}`}
             </p>
           </div>
           <button
             onClick={onClose}
             className="text-binance-text-secondary hover:text-binance-text transition-colors"
           >
-            <X className="w-6 h-6" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Opportunity Summary */}
-        <div className="p-6 bg-binance-bg border-b border-binance-border">
-          <h3 className="text-sm font-semibold text-binance-text-secondary mb-3">Opportunity Details</h3>
-          <div className="grid grid-cols-2 gap-4">
-            {isSpotPerp ? (
-              <>
-                <div>
-                  <p className="text-xs text-binance-text-secondary">Spot Price</p>
-                  <p className="text-lg font-mono font-bold text-binance-text">
-                    ${opportunity.spotPrice?.toFixed(6) || '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-binance-text-secondary">Perp Price</p>
-                  <p className="text-lg font-mono font-bold text-binance-text">
-                    ${opportunity.perpetualPrice?.toFixed(6) || '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-binance-text-secondary">Funding Rate (8h)</p>
-                  <p className={`text-lg font-mono font-bold ${
-                    (opportunity.fundingRate || 0) >= 0 ? 'text-binance-green' : 'text-binance-red'
-                  }`}>
-                    {((opportunity.fundingRate || 0) * 100).toFixed(4)}%
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-binance-text-secondary">Estimated APR</p>
-                  <p className="text-lg font-mono font-bold text-binance-green">
-                    {opportunity.estimatedProfitPercentage?.toFixed(2) || '-'}%
-                  </p>
-                </div>
-              </>
-            ) : (
-              <>
-                <div>
-                  <p className="text-xs text-binance-text-secondary">Long Exchange</p>
-                  <p className="text-lg font-semibold text-binance-text">{opportunity.longExchange}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-binance-text-secondary">Short Exchange</p>
-                  <p className="text-lg font-semibold text-binance-text">{opportunity.shortExchange}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-xs text-binance-text-secondary">Estimated APR</p>
-                  <p className="text-lg font-mono font-bold text-binance-green">
-                    {((opportunity.annualizedSpread || 0) * 100).toFixed(2)}%
-                  </p>
-                </div>
-              </>
-            )}
+        {/* Compact Opportunity Info */}
+        <div className="p-3 bg-binance-bg border-b border-binance-border">
+          <div className="grid grid-cols-2 gap-2 text-[10px]">
+            <div>
+              <p className="text-binance-text-secondary">Funding (8h)</p>
+              <p className={`font-mono font-bold ${
+                (opportunity.fundingRate || 0) >= 0 ? 'text-binance-green' : 'text-binance-red'
+              }`}>
+                {((opportunity.fundingRate || 0) * 100).toFixed(4)}%
+              </p>
+            </div>
+            <div>
+              <p className="text-binance-text-secondary">Est. APR</p>
+              <p className="font-mono font-bold text-binance-green">
+                {opportunity.estimatedProfitPercentage?.toFixed(2) || '-'}%
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Execution Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Position Size */}
+        {/* Balance Display */}
+        {loadingBalances ? (
+          <div className="p-3 bg-binance-bg-secondary border-b border-binance-border">
+            <p className="text-[10px] text-binance-text-secondary">Loading balances...</p>
+          </div>
+        ) : balanceError ? (
+          <div className="p-3 bg-binance-bg-secondary border-b border-binance-border">
+            <div className="flex items-center gap-1 text-binance-red">
+              <AlertCircle className="w-3 h-3" />
+              <p className="text-[10px]">{balanceError}</p>
+            </div>
+          </div>
+        ) : balances ? (
+          <div className="p-3 bg-binance-bg-secondary border-b border-binance-border">
+            <div className="flex items-center gap-1 mb-2">
+              <Wallet className="w-3 h-3 text-binance-yellow" />
+              <h3 className="text-[10px] font-semibold text-binance-text">Available Balance</h3>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[10px]">
+              {balances.isUnifiedAccount ? (
+                <>
+                  <div>
+                    <p className="text-binance-text-secondary">Total Available</p>
+                    <p className={`font-mono font-bold ${totalSufficient ? 'text-binance-green' : 'text-binance-red'}`}>
+                      ${balances.totalAvailable.toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-binance-text-secondary">Required</p>
+                    <p className="font-mono font-bold text-binance-text">
+                      ${totalRequired.toFixed(2)}
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <p className="text-binance-text-secondary">Spot USDT</p>
+                    <p className={`font-mono font-bold ${spotSufficient ? 'text-binance-green' : 'text-binance-red'}`}>
+                      ${balances.spotUsdtAvailable.toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-binance-text-secondary">Futures Margin</p>
+                    <p className={`font-mono font-bold ${marginSufficient ? 'text-binance-green' : 'text-binance-red'}`}>
+                      ${balances.futuresAvailable.toFixed(2)}
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+            {!totalSufficient && (
+              <div className="mt-2 flex items-start gap-1 text-binance-red">
+                <AlertCircle className="w-3 h-3 mt-0.5" />
+                <p className="text-[10px]">Insufficient balance for this position size</p>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {/* Compact Execution Form */}
+        <form onSubmit={handleSubmit} className="p-3 space-y-3">
+          {/* Compact Position Size */}
           <div>
-            <label className="flex items-center gap-2 text-sm font-semibold text-binance-text mb-2">
-              <DollarSign className="w-4 h-4 text-binance-yellow" />
-              Position Size (USD per side)
+            <label className="flex items-center gap-1 text-[11px] font-semibold text-binance-text mb-1">
+              <DollarSign className="w-3 h-3 text-binance-yellow" />
+              Position Size (USD)
             </label>
             <input
               type="number"
               min="100"
               max="10000"
-              step="100"
+              step="50"
               value={positionSize}
-              onChange={(e) => setPositionSize(parseFloat(e.target.value))}
-              className="w-full px-4 py-3 bg-binance-bg border border-binance-border rounded-md text-binance-text font-mono text-lg focus:outline-none focus:ring-2 focus:ring-binance-yellow disabled:opacity-50 disabled:cursor-not-allowed"
+              onChange={(e) => setPositionSize(parseFloat(e.target.value) || 100)}
+              className="w-full px-2 py-1.5 bg-binance-bg border border-binance-border rounded text-binance-text font-mono text-sm focus:outline-none focus:ring-1 focus:ring-binance-yellow disabled:opacity-50"
               required
               disabled={isExecuting}
             />
-            <p className="text-xs text-binance-text-secondary mt-1">
-              Min: $100 | Max: $10,000
+            <p className="text-[10px] text-binance-text-secondary mt-0.5">
+              Min: $100 • Max: ${balances?.maxPositionSize.toFixed(0) || '10,000'}
             </p>
           </div>
 
-          {/* Leverage */}
+          {/* Compact Leverage */}
           <div>
-            <label className="flex items-center gap-2 text-sm font-semibold text-binance-text mb-2">
-              <TrendingUp className="w-4 h-4 text-binance-yellow" />
-              Leverage
-            </label>
-            <div className="flex items-center gap-4">
-              <input
-                type="range"
-                min="1"
-                max="5"
-                step="1"
-                value={leverage}
-                onChange={(e) => setLeverage(parseInt(e.target.value))}
-                className="flex-1"
-                disabled={isExecuting}
-              />
-              <span className="text-2xl font-bold text-binance-yellow w-16 text-right">
+            <label className="flex items-center justify-between text-[11px] font-semibold text-binance-text mb-1">
+              <div className="flex items-center gap-1">
+                <TrendingUp className="w-3 h-3 text-binance-yellow" />
+                Leverage
+              </div>
+              <span className="text-base font-bold text-binance-yellow">
                 {leverage}x
               </span>
-            </div>
-            <p className="text-xs text-binance-text-secondary mt-1">
-              Higher leverage increases risk and potential liquidation
-            </p>
-          </div>
-
-          {/* Stop Loss (Optional) */}
-          <div>
-            <label className="flex items-center gap-2 text-sm font-semibold text-binance-text mb-2">
-              <Shield className="w-4 h-4 text-binance-red" />
-              Stop Loss (%)
-              <span className="text-binance-text-secondary font-normal">(Optional)</span>
             </label>
             <input
-              type="number"
-              min="0.1"
-              max="50"
-              step="0.1"
-              value={stopLoss}
-              onChange={(e) => setStopLoss(e.target.value)}
-              placeholder="e.g., 2.0"
-              className="w-full px-4 py-3 bg-binance-bg border border-binance-border rounded-md text-binance-text font-mono focus:outline-none focus:ring-2 focus:ring-binance-yellow disabled:opacity-50 disabled:cursor-not-allowed"
+              type="range"
+              min="1"
+              max="5"
+              step="1"
+              value={leverage}
+              onChange={(e) => setLeverage(parseInt(e.target.value))}
+              className="w-full h-1"
               disabled={isExecuting}
             />
-            <p className="text-xs text-binance-text-secondary mt-1">
-              Close position if loss exceeds this percentage
-            </p>
-          </div>
-
-          {/* Take Profit (Optional) */}
-          <div>
-            <label className="flex items-center gap-2 text-sm font-semibold text-binance-text mb-2">
-              <Target className="w-4 h-4 text-binance-green" />
-              Take Profit (%)
-              <span className="text-binance-text-secondary font-normal">(Optional)</span>
-            </label>
-            <input
-              type="number"
-              min="0.1"
-              max="100"
-              step="0.1"
-              value={takeProfit}
-              onChange={(e) => setTakeProfit(e.target.value)}
-              placeholder="e.g., 5.0"
-              className="w-full px-4 py-3 bg-binance-bg border border-binance-border rounded-md text-binance-text font-mono focus:outline-none focus:ring-2 focus:ring-binance-yellow disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={isExecuting}
-            />
-            <p className="text-xs text-binance-text-secondary mt-1">
-              Close position when profit reaches this percentage
-            </p>
-          </div>
-
-          {/* Summary */}
-          <div className="bg-binance-bg border border-binance-border rounded-lg p-4 space-y-2">
-            <h4 className="font-semibold text-binance-text mb-2">Execution Summary</h4>
-            <div className="flex justify-between text-sm">
-              <span className="text-binance-text-secondary">Required Margin:</span>
-              <span className="font-mono font-bold text-binance-text">${estimatedMargin.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-binance-text-secondary">Total Position (both sides):</span>
-              <span className="font-mono font-bold text-binance-text">${totalPosition.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-binance-text-secondary">Number of Positions:</span>
-              <span className="font-mono font-bold text-binance-text">2</span>
+            <div className="flex justify-between text-[10px] text-binance-text-secondary mt-0.5">
+              <span>1x</span>
+              <span>Margin: ${requiredMargin.toFixed(2)}</span>
+              <span>5x</span>
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-3 pt-4">
+          {/* Compact Summary */}
+          <div className="bg-binance-bg border border-binance-border rounded p-2 space-y-1 text-[10px]">
+            <div className="flex justify-between">
+              <span className="text-binance-text-secondary">Spot Purchase:</span>
+              <span className="font-mono font-bold text-binance-text">${requiredSpot.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-binance-text-secondary">Perp Margin:</span>
+              <span className="font-mono font-bold text-binance-text">${requiredMargin.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-t border-binance-border pt-1">
+              <span className="text-binance-text">Total Required:</span>
+              <span className="font-mono font-bold text-binance-text">${totalRequired.toFixed(2)}</span>
+            </div>
+          </div>
+
+          {/* Compact Actions */}
+          <div className="flex gap-2 pt-1">
             <Button
               type="button"
               variant="secondary"
-              size="lg"
+              size="sm"
               onClick={onClose}
-              className="flex-1"
+              className="flex-1 h-8 text-[11px]"
               disabled={isExecuting}
             >
               Cancel
@@ -255,11 +274,12 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
             <Button
               type="submit"
               variant="primary"
-              size="lg"
-              className="flex-1"
-              disabled={isExecuting}
+              size="sm"
+              className="flex-1 h-8 text-[11px]"
+              disabled={isExecuting || !canExecute}
+              title={!canExecute && !isExecuting ? 'Insufficient balance or invalid parameters' : ''}
             >
-              {isExecuting ? 'Executing...' : 'Execute Trade'}
+              {isExecuting ? 'Executing...' : 'Execute'}
             </Button>
           </div>
         </form>
