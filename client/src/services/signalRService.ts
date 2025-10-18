@@ -1,6 +1,9 @@
 import * as signalR from '@microsoft/signalr';
 import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance } from '../types/index';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5052/api';
+const HUB_URL = API_BASE_URL.replace('/api', '/hubs/arbitrage');
+
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
   private callbacks = {
@@ -12,7 +15,7 @@ class SignalRService {
     onAlert: [] as ((data: { message: string; severity: string; timestamp: string }) => void)[],
   };
 
-  async connect(url: string = 'http://localhost:5052/hubs/arbitrage') {
+  async connect(url: string = HUB_URL) {
     if (this.connection?.state === signalR.HubConnectionState.Connected) {
       console.log('Already connected');
       return;
