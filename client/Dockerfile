@@ -13,6 +13,14 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Accept build arguments
+ARG VITE_GOOGLE_CLIENT_ID
+ARG VITE_API_URL
+
+# Set environment variables for build
+ENV VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+ENV VITE_API_URL=${VITE_API_URL}
+
 # Build the application
 RUN npm run build
 

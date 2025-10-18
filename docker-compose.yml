@@ -57,6 +57,9 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
     container_name: crypto-arbitrage-frontend
     restart: unless-stopped
     ports:
