@@ -1,0 +1,127 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/CryptoArbitrage.API
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/api:latest
+            ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./client
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/web:latest
+            ghcr.io/${{ github.repository }}/web:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: success()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to DigitalOcean
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_SHA: ${{ github.sha }}
+          PROD_POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+          PROD_JWT_SECRET: ${{ secrets.PROD_JWT_SECRET }}
+          PROD_ENCRYPTION_KEY: ${{ secrets.PROD_ENCRYPTION_KEY }}
+          PROD_GOOGLE_CLIENT_ID: ${{ secrets.PROD_GOOGLE_CLIENT_ID }}
+          PROD_GOOGLE_CLIENT_SECRET: ${{ secrets.PROD_GOOGLE_CLIENT_SECRET }}
+          PROD_DOMAIN: ${{ secrets.PROD_DOMAIN }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts 2>/dev/null
+          
+          ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST << 'SSHEOF'
+          set -e
+          
+          APP_DIR="/home/deploy/crypto-arbitrage"
+          mkdir -p $APP_DIR
+          cd $APP_DIR
+          
+          if [ -d .git ]; then
+            git fetch origin
+            git checkout develop
+            git pull origin develop
+          else
+            git clone $GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git .
+          fi
+          
+          if [ ! -f .env.production ]; then
+            cp .env.production.example .env.production
+          fi
+          
+          cat > .env.production << 'ENVEOF'
+          POSTGRES_DB=crypto_arbitrage
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=$PROD_POSTGRES_PASSWORD
+          BACKEND_PORT=8080
+          FRONTEND_PORT=3000
+          JWT_SECRET_KEY=$PROD_JWT_SECRET
+          JWT_ISSUER=CryptoArbitrage
+          JWT_AUDIENCE=CryptoArbitrageClient
+          ENCRYPTION_KEY=$PROD_ENCRYPTION_KEY
+          GOOGLE_CLIENT_ID=$PROD_GOOGLE_CLIENT_ID
+          GOOGLE_CLIENT_SECRET=$PROD_GOOGLE_CLIENT_SECRET
+          ASPNETCORE_ENVIRONMENT=Production
+          IMAGE_TAG=$GITHUB_SHA
+          ENVEOF
+          
+          docker pull ghcr.io/$GITHUB_REPOSITORY/api:latest || true
+          docker pull ghcr.io/$GITHUB_REPOSITORY/web:latest || true
+          
+          docker compose -f docker-compose.production.yml down || true
+          
+          docker compose -f docker-compose.production.yml --env-file .env.production up -d
+          
+          sleep 10
+          
+          docker compose -f docker-compose.production.yml exec -T api dotnet ef database update || true
+          
+          docker compose -f docker-compose.production.yml ps
+          SSHEOF
+          
+          rm ~/.ssh/deploy_key
