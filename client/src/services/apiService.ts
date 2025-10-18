@@ -33,6 +33,16 @@ interface CloseOpportunityResponse {
   errorMessage?: string;
 }
 
+interface ExecutionBalances {
+  exchange: string;
+  spotUsdtAvailable: number;
+  futuresAvailable: number;
+  totalAvailable: number;
+  isUnifiedAccount: boolean;
+  marginUsagePercent: number;
+  maxPositionSize: number;
+}
+
 export const apiService = {
   async getPositions(): Promise<any[]> {
     try {
@@ -115,6 +125,23 @@ export const apiService = {
       throw error;
     }
   },
+
+  async getExecutionBalances(exchange: string, maxLeverage: number = 5): Promise<ExecutionBalances> {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/opportunity/execution-balances?exchange=${encodeURIComponent(exchange)}&maxLeverage=${maxLeverage}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch execution balances');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching execution balances:', error);
+      throw error;
+    }
+  },
 };
 
-export type { ExecuteOpportunityRequest, ExecuteOpportunityResponse, CloseOpportunityResponse };
+export type { ExecuteOpportunityRequest, ExecuteOpportunityResponse, CloseOpportunityResponse, ExecutionBalances };

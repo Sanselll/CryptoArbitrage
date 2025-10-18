@@ -11,7 +11,7 @@ public class Execution
     public decimal FundingEarned { get; set; } = 0;
     public decimal PositionSizeUsd { get; set; }
 
-    // Binance order/position IDs for reference
-    public string SpotOrderId { get; set; } = string.Empty;
-    public string PerpOrderId { get; set; } = string.Empty;
+    // Order/position IDs for reference (SpotOrderId is nullable for futures-only cross-exchange)
+    public string? SpotOrderId { get; set; }
+    public string? PerpOrderId { get; set; }
 }

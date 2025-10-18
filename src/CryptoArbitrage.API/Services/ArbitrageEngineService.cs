@@ -70,11 +70,12 @@ public class ArbitrageEngineService : BackgroundService
 
                 if (connector != null)
                 {
-                    var connected = await connector.ConnectAsync(exchange.ApiKey, exchange.ApiSecret);
+                    var connected = await connector.ConnectAsync(exchange.ApiKey, exchange.ApiSecret, exchange.UseDemoTrading);
                     if (connected)
                     {
                         _exchangeConnectors[exchange.Name] = connector;
-                        _logger.LogInformation("Connected to {Exchange}", exchange.Name);
+                        var environment = exchange.UseDemoTrading ? "Demo Trading" : "Live";
+                        _logger.LogInformation("Connected to {Exchange} ({Environment})", exchange.Name, environment);
                     }
                 }
             }
@@ -116,7 +117,8 @@ public class ArbitrageEngineService : BackgroundService
                 {
                     var symbols = await connector.GetActiveSymbolsAsync(
                         _config.MinDailyVolumeUsd,
-                        _config.MaxSymbolCount
+                        _config.MaxSymbolCount,
+                        _config.MinHighPriorityFundingRate
                     );
                     allDiscoveredSymbols.AddRange(symbols);
                 }
@@ -126,24 +128,11 @@ public class ArbitrageEngineService : BackgroundService
                 }
             }
 
-            // Get unique symbols (intersection if multiple exchanges, union otherwise)
-            if (_exchangeConnectors.Count > 1)
-            {
-                // For cross-exchange arbitrage, only include symbols available on all exchanges
-                var symbolGroups = _exchangeConnectors.Values
-                    .Select(async c => await c.GetActiveSymbolsAsync(_config.MinDailyVolumeUsd, _config.MaxSymbolCount))
-                    .Select(t => t.Result.ToHashSet());
-
-                _activeSymbols = symbolGroups
-                    .Aggregate((a, b) => { a.IntersectWith(b); return a; })
-                    .OrderBy(s => s)
-                    .ToList();
-            }
-            else
-            {
-                // Single exchange, use all discovered symbols
-                _activeSymbols = allDiscoveredSymbols.Distinct().OrderBy(s => s).ToList();
-            }
+            // Use UNION of all symbols from all exchanges
+            // This allows us to:
+            // 1. Detect cross-exchange opportunities for symbols on multiple exchanges (intersection)
+            // 2. Detect spot-perpetual opportunities for ALL symbols (union)
+            _activeSymbols = allDiscoveredSymbols.Distinct().OrderBy(s => s).ToList();
 
             _lastSymbolRefresh = DateTime.UtcNow;
             _logger.LogInformation(
@@ -224,17 +213,22 @@ public class ArbitrageEngineService : BackgroundService
         var allRates = fundingRates.Values.SelectMany(r => r).ToList();
         await _hubContext.Clients.All.SendAsync("ReceiveFundingRates", allRates);
 
-        // Detect both types of arbitrage opportunities
+        // Detect all types of arbitrage opportunities
         var opportunities = new List<ArbitrageOpportunityDto>();
 
         // Cross-exchange arbitrage (requires 2+ exchanges)
         if (fundingRates.Count >= 2)
         {
-            var crossExchangeOpps = await DetectCrossExchangeOpportunitiesAsync(fundingRates);
-            opportunities.AddRange(crossExchangeOpps);
+            // Futures/Futures cross-exchange
+            var crossExchangeFuturesOpps = await DetectCrossExchangeFuturesOpportunitiesAsync(fundingRates);
+            opportunities.AddRange(crossExchangeFuturesOpps);
+
+            // Spot/Futures cross-exchange
+            var crossExchangeSpotFuturesOpps = await DetectCrossExchangeSpotFuturesOpportunitiesAsync(fundingRates, spotPrices, perpPrices);
+            opportunities.AddRange(crossExchangeSpotFuturesOpps);
         }
 
-        // Spot-perpetual arbitrage (works with single exchange)
+        // Spot-perpetual arbitrage (same exchange)
         var spotPerpOpps = await DetectSpotPerpetualOpportunitiesAsync(fundingRates, spotPrices, perpPrices);
         opportunities.AddRange(spotPerpOpps);
 
@@ -293,7 +287,7 @@ public class ArbitrageEngineService : BackgroundService
         await SendDashboardUpdateAsync();
     }
 
-    private async Task<List<ArbitrageOpportunityDto>> DetectCrossExchangeOpportunitiesAsync(
+    private async Task<List<ArbitrageOpportunityDto>> DetectCrossExchangeFuturesOpportunitiesAsync(
         Dictionary<string, List<FundingRateDto>> fundingRates)
     {
         var opportunities = new List<ArbitrageOpportunityDto>();
@@ -321,28 +315,66 @@ public class ArbitrageEngineService : BackgroundService
                     var rate1 = fundingRates[exchange1].First(r => r.Symbol == symbol);
                     var rate2 = fundingRates[exchange2].First(r => r.Symbol == symbol);
 
-                    var spread = Math.Abs(rate1.Rate - rate2.Rate);
-                    var annualizedSpread = Math.Abs(rate1.AnnualizedRate - rate2.AnnualizedRate);
+                    // CRITICAL: Funding rate calculation for Futures/Futures cross-exchange
+                    // Strategy: LONG on exchange with LOWER funding rate, SHORT on exchange with HIGHER funding rate
+                    //
+                    // Net funding earnings = |fundingRateLong| + |fundingRateShort| when signs differ
+                    //                      = |fundingRateHigh - fundingRateLow| when signs are same
+                    //
+                    // Example 1: Exchange1: +0.05%, Exchange2: -0.03%
+                    //   -> LONG on Exchange2 (lower/negative), SHORT on Exchange1 (higher/positive)
+                    //   -> Earn: receive 0.03% from long position + receive 0.05% from short position = 0.08% per funding
+                    //
+                    // Example 2: Exchange1: +0.10%, Exchange2: +0.03%
+                    //   -> LONG on Exchange2 (lower), SHORT on Exchange1 (higher)
+                    //   -> Pay 0.03% on long, Receive 0.10% on short -> Net: +0.07%
+                    //
+                    // Example 3: Exchange1: -0.05%, Exchange2: -0.10%
+                    //   -> LONG on Exchange2 (lower/more negative), SHORT on Exchange1 (higher/less negative)
+                    //   -> Receive 0.10% on long, Pay 0.05% on short -> Net: +0.05%
 
-                    if (annualizedSpread * 100 >= _config.MinSpreadPercentage)
+                    decimal netFundingRate;
+                    string longExchange, shortExchange;
+                    decimal longRate, shortRate;
+
+                    if (rate1.Rate < rate2.Rate)
                     {
-                        // Determine which exchange should be long and which should be short
-                        var (longExchange, longRate, shortExchange, shortRate) =
-                            rate1.Rate < rate2.Rate
-                            ? (exchange1, rate1.Rate, exchange2, rate2.Rate)
-                            : (exchange2, rate2.Rate, exchange1, rate1.Rate);
+                        // LONG on exchange1 (lower rate), SHORT on exchange2 (higher rate)
+                        longExchange = exchange1;
+                        shortExchange = exchange2;
+                        longRate = rate1.Rate;
+                        shortRate = rate2.Rate;
+                    }
+                    else
+                    {
+                        // LONG on exchange2 (lower rate), SHORT on exchange1 (higher rate)
+                        longExchange = exchange2;
+                        shortExchange = exchange1;
+                        longRate = rate2.Rate;
+                        shortRate = rate1.Rate;
+                    }
 
+                    // Net funding = -longRate (we pay if positive, receive if negative)
+                    //              + shortRate (we receive if positive, pay if negative)
+                    // Simplifies to: shortRate - longRate
+                    netFundingRate = shortRate - longRate;
+                    var annualizedNetFunding = netFundingRate * 3 * 365; // 3 fundings per day, 365 days
+
+                    // Only profitable if net funding is positive
+                    if (annualizedNetFunding * 100 >= _config.MinSpreadPercentage)
+                    {
                         opportunities.Add(new ArbitrageOpportunityDto
                         {
                             Strategy = ArbitrageStrategy.CrossExchange,
+                            SubType = StrategySubType.CrossExchangeFuturesFutures,
                             Symbol = symbol,
                             LongExchange = longExchange,
                             ShortExchange = shortExchange,
                             LongFundingRate = longRate,
                             ShortFundingRate = shortRate,
-                            SpreadRate = spread,
-                            AnnualizedSpread = annualizedSpread,
-                            EstimatedProfitPercentage = annualizedSpread * 100,
+                            SpreadRate = netFundingRate,
+                            AnnualizedSpread = annualizedNetFunding,
+                            EstimatedProfitPercentage = annualizedNetFunding * 100,
                             Status = OpportunityStatus.Detected,
                             DetectedAt = DateTime.UtcNow
                         });
@@ -411,6 +443,7 @@ public class ArbitrageEngineService : BackgroundService
                     opportunities.Add(new ArbitrageOpportunityDto
                     {
                         Strategy = ArbitrageStrategy.SpotPerpetual,
+                        SubType = StrategySubType.SpotPerpetualSameExchange,
                         Symbol = fundingRate.Symbol,
                         Exchange = exchangeName,
                         SpotPrice = spotPrice.Price,
@@ -424,6 +457,107 @@ public class ArbitrageEngineService : BackgroundService
                         Status = OpportunityStatus.Detected,
                         DetectedAt = DateTime.UtcNow
                     });
+                }
+            }
+        }
+
+        await Task.CompletedTask;
+        return opportunities.OrderByDescending(o => o.EstimatedProfitPercentage).ToList();
+    }
+
+    private async Task<List<ArbitrageOpportunityDto>> DetectCrossExchangeSpotFuturesOpportunitiesAsync(
+        Dictionary<string, List<FundingRateDto>> fundingRates,
+        Dictionary<string, Dictionary<string, SpotPriceDto>> spotPrices,
+        Dictionary<string, Dictionary<string, decimal>> perpPrices)
+    {
+        var opportunities = new List<ArbitrageOpportunityDto>();
+
+        if (fundingRates.Count < 2)
+            return opportunities;
+
+        var exchangeNames = fundingRates.Keys.ToList();
+
+        // Strategy: Buy spot on one exchange (Exchange A) + Short perpetual on another exchange (Exchange B)
+        // This works ACROSS exchanges, combining spot from one and futures from another
+        //
+        // Profitability: Funding rate on Exchange B - price premium - trading fees
+        // Note: We need positive funding on the SHORT exchange to make this profitable
+
+        foreach (var spotExchange in exchangeNames)
+        {
+            if (!spotPrices.ContainsKey(spotExchange) || !spotPrices[spotExchange].Any())
+                continue;
+
+            var spotExchangePrices = spotPrices[spotExchange];
+
+            foreach (var futuresExchange in exchangeNames)
+            {
+                if (spotExchange == futuresExchange)
+                    continue; // Skip same exchange (that's handled by spot-perpetual strategy)
+
+                if (!fundingRates.ContainsKey(futuresExchange) || !fundingRates[futuresExchange].Any())
+                    continue;
+
+                if (!perpPrices.ContainsKey(futuresExchange) || !perpPrices[futuresExchange].Any())
+                    continue;
+
+                var futuresRates = fundingRates[futuresExchange];
+                var futuresPrices = perpPrices[futuresExchange];
+
+                // Find symbols that exist on BOTH exchanges (spot on one, futures on other)
+                var commonSymbols = spotExchangePrices.Keys
+                    .Intersect(futuresRates.Select(r => r.Symbol))
+                    .Intersect(futuresPrices.Keys)
+                    .ToList();
+
+                foreach (var symbol in commonSymbols)
+                {
+                    var spotPrice = spotExchangePrices[symbol].Price;
+                    var futuresPrice = futuresPrices[symbol];
+                    var fundingRate = futuresRates.First(r => r.Symbol == symbol);
+
+                    if (spotPrice == 0 || futuresPrice == 0)
+                        continue;
+
+                    // Calculate price premium between exchanges: (Futures - Spot) / Spot
+                    decimal pricePremium = (futuresPrice - spotPrice) / spotPrice;
+
+                    // Annualized funding rate
+                    decimal annualizedFundingRate = fundingRate.AnnualizedRate;
+
+                    // Estimated trading fees (0.1% spot + 0.05% futures = 0.15%)
+                    decimal estimatedTradingFees = 0.0015m;
+
+                    // Net profit = funding earned - price premium - trading fees
+                    // Only profitable if funding rate is POSITIVE (shorts pay longs -> we collect funding)
+                    decimal netProfit = annualizedFundingRate - Math.Abs(pricePremium) - estimatedTradingFees;
+                    decimal netProfitPercentage = netProfit * 100;
+
+                    // Only create opportunity if:
+                    // 1. Net profit exceeds minimum threshold
+                    // 2. Funding rate is POSITIVE (we receive funding as short position)
+                    if (netProfitPercentage >= _config.MinSpreadPercentage && annualizedFundingRate > 0)
+                    {
+                        opportunities.Add(new ArbitrageOpportunityDto
+                        {
+                            Strategy = ArbitrageStrategy.CrossExchange,
+                            SubType = StrategySubType.CrossExchangeSpotFutures,
+                            Symbol = symbol,
+                            LongExchange = spotExchange,      // Buy spot here
+                            ShortExchange = futuresExchange,  // Short futures here
+                            Exchange = spotExchange,          // For UI compatibility
+                            SpotPrice = spotPrice,
+                            PerpetualPrice = futuresPrice,
+                            FundingRate = fundingRate.Rate,
+                            AnnualizedFundingRate = annualizedFundingRate,
+                            PricePremium = pricePremium,
+                            SpreadRate = netProfit,
+                            AnnualizedSpread = netProfit,
+                            EstimatedProfitPercentage = netProfitPercentage,
+                            Status = OpportunityStatus.Detected,
+                            DetectedAt = DateTime.UtcNow
+                        });
+                    }
                 }
             }
         }
@@ -520,10 +654,42 @@ public class ArbitrageEngineService : BackgroundService
 
                             if (livePosition != null)
                             {
+                                // Position found on exchange - use exchange data
                                 unrealizedPnL = livePosition.UnrealizedPnL;
                                 realizedPnL = livePosition.RealizedPnL;
                                 fundingPaid = livePosition.TotalFundingFeePaid;
                                 fundingReceived = livePosition.TotalFundingFeeReceived;
+                            }
+                            else
+                            {
+                                // Position not found on exchange (e.g., demo/testnet accounts)
+                                // Calculate P&L manually using current perpetual price
+                                _logger.LogWarning(
+                                    "Position not found on {Exchange} for {Symbol} {Side} - calculating P&L from current price (demo mode)",
+                                    dbPosition.Exchange, dbPosition.Symbol, dbPosition.Side);
+
+                                var perpPrices = await connector.GetPerpetualPricesAsync(new List<string> { dbPosition.Symbol });
+                                if (perpPrices.TryGetValue(dbPosition.Symbol, out var currentPrice))
+                                {
+                                    decimal priceDiff = currentPrice - dbPosition.EntryPrice;
+
+                                    // Calculate unrealized P&L: (CurrentPrice - EntryPrice) * Quantity
+                                    // For LONG: profit when price goes up (currentPrice > entryPrice)
+                                    // For SHORT: profit when price goes down (currentPrice < entryPrice)
+                                    if (dbPosition.Side == PositionSide.Long)
+                                    {
+                                        unrealizedPnL = priceDiff * dbPosition.Quantity;
+                                    }
+                                    else // Short
+                                    {
+                                        unrealizedPnL = -priceDiff * dbPosition.Quantity;
+                                    }
+
+                                    _logger.LogInformation(
+                                        "Calculated P&L for {Exchange} {Symbol} {Side}: Entry=${Entry}, Current=${Current}, P&L=${PnL}",
+                                        dbPosition.Exchange, dbPosition.Symbol, dbPosition.Side,
+                                        dbPosition.EntryPrice, currentPrice, unrealizedPnL);
+                                }
                             }
                         }
                         else if (dbPosition.Type == PositionType.Spot)

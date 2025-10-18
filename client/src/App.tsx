@@ -68,7 +68,7 @@ function App() {
     <div className="h-screen flex flex-col bg-binance-bg">
       <Header />
 
-      <main className="flex-1 overflow-hidden p-4">
+      <main className="flex-1 overflow-hidden px-4 pb-4 pt-3">
         <div className="h-full flex flex-col gap-3">
           {/* Balance Overview - Top Section */}
           <div className="flex-shrink-0">

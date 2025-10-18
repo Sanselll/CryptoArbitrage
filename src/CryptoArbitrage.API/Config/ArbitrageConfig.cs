@@ -6,6 +6,7 @@ public class ExchangeConfig
     public string ApiKey { get; set; } = string.Empty;
     public string ApiSecret { get; set; } = string.Empty;
     public bool IsEnabled { get; set; } = true;
+    public bool UseDemoTrading { get; set; } = false;
 }
 
 public class ArbitrageConfig
@@ -24,7 +25,8 @@ public class ArbitrageConfig
     public decimal MinDailyVolumeUsd { get; set; } = 10_000_000m; // $10M minimum daily volume
     public int MaxSymbolCount { get; set; } = 50; // Track top 50 symbols by volume
     public decimal MinAbsFundingRate { get; set; } = 0.0001m; // 0.01% = 3.65% APR minimum
-    public int SymbolRefreshIntervalHours { get; set; } = 24; // Refresh symbol list daily
+    public decimal MinHighPriorityFundingRate { get; set; } = 0.01m; // 1% = 365% APR - always include these
+    public double SymbolRefreshIntervalHours { get; set; } = 24; // Refresh symbol list daily
 
     // Exchange configurations (moved from database)
     public List<ExchangeConfig> Exchanges { get; set; } = new();

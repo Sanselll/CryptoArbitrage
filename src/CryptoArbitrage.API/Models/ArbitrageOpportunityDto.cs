@@ -8,11 +8,19 @@ public enum ArbitrageStrategy
     SpotPerpetual      // Cash-and-carry arbitrage (spot vs perpetual on same exchange)
 }
 
+public enum StrategySubType
+{
+    SpotPerpetualSameExchange,       // Buy spot + short perp on same exchange
+    CrossExchangeFuturesFutures,     // Long perp on one exchange + short perp on another
+    CrossExchangeSpotFutures         // Buy spot on one exchange + short perp on another
+}
+
 public class ArbitrageOpportunityDto
 {
     public int Id { get; set; }
     public string Symbol { get; set; } = string.Empty;
     public ArbitrageStrategy Strategy { get; set; } = ArbitrageStrategy.CrossExchange;
+    public StrategySubType SubType { get; set; } = StrategySubType.CrossExchangeFuturesFutures;
 
     // For cross-exchange arbitrage
     public string LongExchange { get; set; } = string.Empty;

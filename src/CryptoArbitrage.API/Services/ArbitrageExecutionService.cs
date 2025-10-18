@@ -36,7 +36,7 @@ public class ArbitrageExecutionService
         try
         {
             // Validate request
-            var validationError = ValidateRequest(request);
+            var validationError = await ValidateRequestAsync(request);
             if (validationError != null)
             {
                 return new ExecuteOpportunityResponse
@@ -53,13 +53,7 @@ public class ArbitrageExecutionService
             }
             else if (request.Strategy == ArbitrageStrategy.CrossExchange)
             {
-                // COMMENTED OUT: Cross-exchange arbitrage not part of the refactoring scope
-                return new ExecuteOpportunityResponse
-                {
-                    Success = false,
-                    ErrorMessage = "Cross-exchange strategy is currently disabled"
-                };
-                // return await ExecuteCrossExchangeAsync(request);
+                return await ExecuteCrossExchangeAsync(request);
             }
             else
             {
@@ -81,7 +75,7 @@ public class ArbitrageExecutionService
         }
     }
 
-    private string? ValidateRequest(ExecuteOpportunityRequest request)
+    private async Task<string?> ValidateRequestAsync(ExecuteOpportunityRequest request)
     {
         // Check position size limits
         if (request.PositionSizeUsd < _config.MinPositionSizeUsd)
@@ -125,6 +119,13 @@ public class ArbitrageExecutionService
             {
                 return $"Cannot execute negative funding rate ({request.FundingRate * 100:F4}%). Spot-perpetual strategy requires positive funding rates (requires spot BUY + perp SHORT).";
             }
+
+            // Validate balance availability
+            var balanceValidation = await ValidateBalanceForSpotPerpetualAsync(request);
+            if (!balanceValidation.IsValid)
+            {
+                return string.Join("; ", balanceValidation.Errors);
+            }
         }
         else if (request.Strategy == ArbitrageStrategy.CrossExchange)
         {
@@ -142,9 +143,197 @@ public class ArbitrageExecutionService
             {
                 return $"Short exchange '{request.ShortExchange}' is not supported";
             }
+
+            // Validate balance availability on both exchanges
+            var balanceValidation = await ValidateBalanceForCrossExchangeAsync(request);
+            if (!balanceValidation.IsValid)
+            {
+                return string.Join("; ", balanceValidation.Errors);
+            }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Validate balance for spot-perpetual execution on a single exchange
+    /// </summary>
+    private async Task<BalanceValidationResult> ValidateBalanceForSpotPerpetualAsync(ExecuteOpportunityRequest request)
+    {
+        var result = new BalanceValidationResult
+        {
+            Exchange = request.Exchange,
+            RequiredSpotUsdt = request.PositionSizeUsd,
+            RequiredFuturesMargin = request.PositionSizeUsd / request.Leverage,
+            TotalRequired = request.PositionSizeUsd + (request.PositionSizeUsd / request.Leverage)
+        };
+
+        try
+        {
+            var connector = _exchangeConnectors[request.Exchange];
+            await EnsureConnectedAsync(request.Exchange, connector);
+
+            var balance = await connector.GetAccountBalanceAsync();
+            result.IsUnifiedAccount = request.Exchange == "Bybit"; // Bybit uses unified account
+
+            if (result.IsUnifiedAccount)
+            {
+                // Bybit: Check unified account balance
+                result.AvailableSpotUsdt = balance.FuturesAvailableUsd;
+                result.AvailableFuturesMargin = balance.FuturesAvailableUsd;
+
+                if (balance.FuturesAvailableUsd < result.TotalRequired)
+                {
+                    result.Errors.Add(
+                        $"Insufficient balance on {request.Exchange}. " +
+                        $"Required: ${result.TotalRequired:N2} (${result.RequiredSpotUsdt:N2} spot + ${result.RequiredFuturesMargin:N2} margin), " +
+                        $"Available: ${balance.FuturesAvailableUsd:N2}"
+                    );
+                }
+                else
+                {
+                    result.IsValid = true;
+                }
+            }
+            else
+            {
+                // Binance: Check separate spot and futures balances
+                result.AvailableSpotUsdt = balance.SpotAvailableUsd;
+                result.AvailableFuturesMargin = balance.FuturesAvailableUsd;
+
+                // Check spot USDT balance
+                if (balance.SpotAvailableUsd < result.RequiredSpotUsdt)
+                {
+                    result.Errors.Add(
+                        $"Insufficient spot USDT on {request.Exchange}. " +
+                        $"Required: ${result.RequiredSpotUsdt:N2}, Available: ${balance.SpotAvailableUsd:N2}"
+                    );
+                }
+
+                // Check futures margin balance
+                if (balance.FuturesAvailableUsd < result.RequiredFuturesMargin)
+                {
+                    result.Errors.Add(
+                        $"Insufficient futures margin on {request.Exchange}. " +
+                        $"Required: ${result.RequiredFuturesMargin:N2}, Available: ${balance.FuturesAvailableUsd:N2}"
+                    );
+                }
+
+                result.IsValid = result.Errors.Count == 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error validating balance for {Exchange}", request.Exchange);
+            result.Errors.Add($"Failed to check balance on {request.Exchange}: {ex.Message}");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Validate balance for cross-exchange execution on multiple exchanges
+    /// </summary>
+    private async Task<BalanceValidationResult> ValidateBalanceForCrossExchangeAsync(ExecuteOpportunityRequest request)
+    {
+        var result = new BalanceValidationResult
+        {
+            LongExchange = request.LongExchange,
+            ShortExchange = request.ShortExchange,
+            RequiredFuturesMargin = request.PositionSizeUsd / request.Leverage,
+            TotalRequired = (request.PositionSizeUsd / request.Leverage) * 2 // Both exchanges need margin
+        };
+
+        try
+        {
+            // Check long exchange balance
+            var longConnector = _exchangeConnectors[request.LongExchange!];
+            await EnsureConnectedAsync(request.LongExchange!, longConnector);
+            var longBalance = await longConnector.GetAccountBalanceAsync();
+
+            if (longBalance.FuturesAvailableUsd < result.RequiredFuturesMargin)
+            {
+                result.Errors.Add(
+                    $"Insufficient futures margin on {request.LongExchange}. " +
+                    $"Required: ${result.RequiredFuturesMargin:N2}, Available: ${longBalance.FuturesAvailableUsd:N2}"
+                );
+            }
+
+            // Check short exchange balance
+            var shortConnector = _exchangeConnectors[request.ShortExchange!];
+            await EnsureConnectedAsync(request.ShortExchange!, shortConnector);
+            var shortBalance = await shortConnector.GetAccountBalanceAsync();
+
+            if (shortBalance.FuturesAvailableUsd < result.RequiredFuturesMargin)
+            {
+                result.Errors.Add(
+                    $"Insufficient futures margin on {request.ShortExchange}. " +
+                    $"Required: ${result.RequiredFuturesMargin:N2}, Available: ${shortBalance.FuturesAvailableUsd:N2}"
+                );
+            }
+
+            result.IsValid = result.Errors.Count == 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error validating balance for cross-exchange");
+            result.Errors.Add($"Failed to check balance: {ex.Message}");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Get execution balances for UI display
+    /// </summary>
+    public async Task<ExecutionBalancesDto> GetExecutionBalancesAsync(string exchange, decimal maxLeverage)
+    {
+        var result = new ExecutionBalancesDto
+        {
+            Exchange = exchange,
+            IsUnifiedAccount = exchange == "Bybit"
+        };
+
+        try
+        {
+            var connector = _exchangeConnectors[exchange];
+            await EnsureConnectedAsync(exchange, connector);
+
+            var balance = await connector.GetAccountBalanceAsync();
+
+            result.SpotUsdtAvailable = balance.SpotAvailableUsd;
+            result.FuturesAvailable = balance.FuturesAvailableUsd;
+            result.TotalAvailable = result.IsUnifiedAccount
+                ? balance.FuturesAvailableUsd
+                : balance.SpotAvailableUsd + balance.FuturesAvailableUsd;
+
+            // Calculate margin usage
+            if (balance.TotalBalance > 0)
+            {
+                result.MarginUsagePercent = (balance.MarginUsed / balance.TotalBalance) * 100;
+            }
+
+            // Calculate max position size based on available balance
+            // For unified: total available / (1 + 1/leverage)
+            // For separated: min(spot available, futures available * leverage)
+            if (result.IsUnifiedAccount)
+            {
+                result.MaxPositionSize = result.TotalAvailable / (1 + 1 / maxLeverage);
+            }
+            else
+            {
+                result.MaxPositionSize = Math.Min(
+                    result.SpotUsdtAvailable,
+                    result.FuturesAvailable * maxLeverage
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching execution balances for {Exchange}", exchange);
+        }
+
+        return result;
     }
 
     private async Task<ExecuteOpportunityResponse> ExecuteSpotPerpetualAsync(ExecuteOpportunityRequest request)
@@ -176,24 +365,59 @@ public class ArbitrageExecutionService
 
             // Calculate quantities
             // For spot-perpetual: buy spot (no leverage), short perpetual (with leverage)
-            // Use the SAME quantity for both legs to maintain a proper hedge
+            // CRITICAL: Both legs MUST use EXACTLY the same quantity to maintain a proper hedge
+
+            // Step 1: Calculate base quantity from position size and spot price
+            // PositionSizeUsd is the amount to invest in coins (same coin quantity on both spot and perpetual)
             var baseQuantity = request.PositionSizeUsd / spotPrice;
-            var quantity = RoundQuantity(baseQuantity, request.Symbol);
 
-            var spotQuantity = quantity;
-            var perpQuantity = quantity;
+            // Step 2: Get instrument info for BOTH spot and perpetual to validate quantity
+            decimal finalQuantity;
 
-            // Step 1: Place spot buy order using PlaceSpotBuyOrderAsync
+            if (connector is BybitConnector bybitConnector)
+            {
+                // For Bybit: Get both spot and perpetual instrument info
+                var spotInstrumentInfo = await bybitConnector.GetInstrumentInfoAsync(request.Symbol, isSpot: true);
+                var perpInstrumentInfo = await bybitConnector.GetInstrumentInfoAsync(request.Symbol, isSpot: false);
+
+                // Validate quantity with spot constraints
+                var spotValidatedQty = spotInstrumentInfo != null
+                    ? bybitConnector.ValidateAndAdjustQuantity(baseQuantity, spotInstrumentInfo)
+                    : baseQuantity;
+
+                // Validate quantity with perp constraints
+                var perpValidatedQty = perpInstrumentInfo != null
+                    ? bybitConnector.ValidateAndAdjustQuantity(baseQuantity, perpInstrumentInfo)
+                    : baseQuantity;
+
+                // Use the SMALLER quantity to ensure both orders can execute with the same quantity
+                finalQuantity = Math.Min(spotValidatedQty, perpValidatedQty);
+
+                _logger.LogInformation(
+                    "Quantity validation for {Symbol}: Base={Base}, SpotValidated={Spot}, PerpValidated={Perp}, Final={Final}",
+                    request.Symbol, baseQuantity, spotValidatedQty, perpValidatedQty, finalQuantity);
+            }
+            else
+            {
+                // For Binance and other exchanges: use simple rounding
+                finalQuantity = RoundQuantity(baseQuantity, request.Symbol);
+            }
+
+            // Step 3: Place spot buy order and get ACTUAL filled quantity
             string spotOrderId;
+            decimal actualFilledQuantity;
             try
             {
-                spotOrderId = await connector.PlaceSpotBuyOrderAsync(
+                var (orderId, filledQty) = await connector.PlaceSpotBuyOrderAsync(
                     request.Symbol,
-                    spotQuantity
+                    finalQuantity
                 );
+                spotOrderId = orderId;
+                actualFilledQuantity = filledQty;
+
                 response.OrderIds.Add(spotOrderId);
-                _logger.LogInformation("Placed spot buy order {OrderId} for {Quantity} {Symbol} @ ${Price}",
-                    spotOrderId, spotQuantity, request.Symbol, spotPrice);
+                _logger.LogInformation("Placed spot buy order {OrderId} for {Symbol} @ ${Price}, Requested: {Requested}, Filled: {Filled}",
+                    spotOrderId, request.Symbol, spotPrice, finalQuantity, actualFilledQuantity);
             }
             catch (Exception ex)
             {
@@ -202,10 +426,36 @@ public class ArbitrageExecutionService
                 return response;
             }
 
-            // Step 2: Place perpetual short order using PlaceMarketOrderAsync
+            // Step 4: Place perpetual short order using the EXACT FILLED quantity from spot order
+            // IMPORTANT: The perpetual market may have different quantity precision than spot
+            // We need to round the filled quantity to match perpetual's precision
+            decimal perpQuantity = actualFilledQuantity;
+
+            if (connector is BybitConnector bybitConn)
+            {
+                // Get perpetual instrument info to validate quantity precision
+                var perpInstrumentInfo = await bybitConn.GetInstrumentInfoAsync(request.Symbol, isSpot: false);
+                if (perpInstrumentInfo != null)
+                {
+                    perpQuantity = bybitConn.ValidateAndAdjustQuantity(actualFilledQuantity, perpInstrumentInfo);
+                    if (perpQuantity != actualFilledQuantity)
+                    {
+                        _logger.LogWarning("Adjusted perpetual quantity from {Original} to {Adjusted} to match instrument precision",
+                            actualFilledQuantity, perpQuantity);
+                    }
+                }
+            }
+            else
+            {
+                // For other exchanges, use simple rounding
+                perpQuantity = RoundQuantity(actualFilledQuantity, request.Symbol);
+            }
+
             string perpOrderId;
             try
             {
+                _logger.LogInformation("Placing perpetual SHORT for filled quantity: {Quantity}", perpQuantity);
+
                 perpOrderId = await connector.PlaceMarketOrderAsync(
                     request.Symbol,
                     PositionSide.Short,
@@ -218,8 +468,9 @@ public class ArbitrageExecutionService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to place perpetual short order. Spot order was placed: {SpotOrderId}", spotOrderId);
-                response.ErrorMessage = $"Failed to place perpetual short order: {ex.Message}. WARNING: Spot position is open!";
+                _logger.LogError(ex, "Failed to place perpetual short order. Spot order was placed: {SpotOrderId} with {Quantity} coins",
+                    spotOrderId, actualFilledQuantity);
+                response.ErrorMessage = $"Failed to place perpetual short order: {ex.Message}. WARNING: Spot position is open with {actualFilledQuantity} coins!";
                 return response;
             }
 
@@ -249,7 +500,7 @@ public class ArbitrageExecutionService
                 Side = PositionSide.Short,
                 Status = PositionStatus.Open,
                 EntryPrice = perpPrice,
-                Quantity = perpQuantity,
+                Quantity = perpQuantity, // Use the rounded/adjusted perpetual quantity
                 Leverage = request.Leverage,
                 InitialMargin = request.PositionSizeUsd / request.Leverage,
                 RealizedPnL = 0,
@@ -267,7 +518,7 @@ public class ArbitrageExecutionService
                 Side = PositionSide.Long,
                 Status = PositionStatus.Open,
                 EntryPrice = spotPrice,
-                Quantity = spotQuantity,
+                Quantity = actualFilledQuantity,
                 Leverage = 1m, // Spot positions don't use leverage
                 InitialMargin = request.PositionSizeUsd,
                 RealizedPnL = 0,
@@ -298,195 +549,283 @@ public class ArbitrageExecutionService
         }
     }
 
-    // COMMENTED OUT: Cross-exchange arbitrage not part of the refactoring scope
-    // This method references ArbitrageOpportunities table and Positions table which no longer exist
-    // private async Task<ExecuteOpportunityResponse> ExecuteCrossExchangeAsync(ExecuteOpportunityRequest request)
-    // {
-    //     if (string.IsNullOrEmpty(request.LongExchange) || string.IsNullOrEmpty(request.ShortExchange))
-    //     {
-    //         return new ExecuteOpportunityResponse
-    //         {
-    //             Success = false,
-    //             ErrorMessage = "Long and short exchanges must be specified"
-    //         };
-    //     }
-    //
-    //     var longConnector = _exchangeConnectors[request.LongExchange];
-    //     var shortConnector = _exchangeConnectors[request.ShortExchange];
-    //     var response = new ExecuteOpportunityResponse();
-    //
-    //     try
-    //     {
-    //         // Ensure both connectors are connected
-    //         await EnsureConnectedAsync(request.LongExchange, longConnector);
-    //         await EnsureConnectedAsync(request.ShortExchange, shortConnector);
-    //
-    //         _logger.LogInformation(
-    //             "Executing cross-exchange arbitrage for {Symbol}: LONG on {LongExchange}, SHORT on {ShortExchange}, size: ${Size}, leverage: {Leverage}x",
-    //             request.Symbol, request.LongExchange, request.ShortExchange, request.PositionSizeUsd, request.Leverage);
-    //
-    //         // Get current prices from both exchanges
-    //         var longPrices = await longConnector.GetPerpetualPricesAsync(new List<string> { request.Symbol });
-    //         var shortPrices = await shortConnector.GetPerpetualPricesAsync(new List<string> { request.Symbol });
-    //
-    //         if (!longPrices.ContainsKey(request.Symbol) || !shortPrices.ContainsKey(request.Symbol))
-    //         {
-    //             response.ErrorMessage = $"Unable to fetch prices for {request.Symbol} from both exchanges";
-    //             return response;
-    //         }
-    //
-    //         var longPrice = longPrices[request.Symbol];
-    //         var shortPrice = shortPrices[request.Symbol];
-    //
-    //         // Calculate quantities
-    //         // Use the SAME quantity for both legs to maintain a proper hedge
-    //         // Base calculation on the average price for better hedging
-    //         var avgPrice = (longPrice + shortPrice) / 2;
-    //         var baseQuantity = request.PositionSizeUsd / avgPrice;
-    //         var quantity = RoundQuantity(baseQuantity, request.Symbol);
-    //
-    //         var longQuantity = quantity;
-    //         var shortQuantity = quantity;
-    //
-    //         // Place long order on first exchange
-    //         string longOrderId;
-    //         try
-    //         {
-    //             longOrderId = await longConnector.PlaceMarketOrderAsync(
-    //                 request.Symbol,
-    //                 PositionSide.Long,
-    //                 longQuantity,
-    //                 request.Leverage
-    //             );
-    //             response.OrderIds.Add($"{request.LongExchange}:{longOrderId}");
-    //         }
-    //         catch (Exception ex)
-    //         {
-    //             _logger.LogError(ex, "Failed to place long order on {Exchange}", request.LongExchange);
-    //             response.ErrorMessage = $"Failed to place long order on {request.LongExchange}: {ex.Message}";
-    //             return response;
-    //         }
-    //
-    //         // Place short order on second exchange
-    //         string shortOrderId;
-    //         try
-    //         {
-    //             shortOrderId = await shortConnector.PlaceMarketOrderAsync(
-    //                 request.Symbol,
-    //                 PositionSide.Short,
-    //                 shortQuantity,
-    //                 request.Leverage
-    //             );
-    //             response.OrderIds.Add($"{request.ShortExchange}:{shortOrderId}");
-    //         }
-    //         catch (Exception ex)
-    //         {
-    //             _logger.LogError(ex, "Failed to place short order on {Exchange}. Long order was placed on {LongExchange}: {LongOrderId}",
-    //                 request.ShortExchange, request.LongExchange, longOrderId);
-    //             response.ErrorMessage = $"Failed to place short order on {request.ShortExchange}: {ex.Message}. WARNING: Long position is open on {request.LongExchange}!";
-    //             return response;
-    //         }
-    //
-    //         // Get exchange IDs from database
-    //         var longExchange = await _dbContext.Exchanges.FirstOrDefaultAsync(e => e.Name == request.LongExchange);
-    //         var shortExchange = await _dbContext.Exchanges.FirstOrDefaultAsync(e => e.Name == request.ShortExchange);
-    //
-    //         if (longExchange == null || shortExchange == null)
-    //         {
-    //             response.ErrorMessage = $"Exchange(s) not found in database";
-    //             return response;
-    //         }
-    //
-    //         // Create ArbitrageOpportunity record (historical/detected opportunity)
-    //         var arbitrageOpportunity = new ArbitrageOpportunity
-    //         {
-    //             Symbol = request.Symbol,
-    //             LongExchangeId = longExchange.Id,
-    //             ShortExchangeId = shortExchange.Id,
-    //             LongFundingRate = request.LongFundingRate ?? 0,
-    //             ShortFundingRate = request.ShortFundingRate ?? 0,
-    //             SpreadRate = request.SpreadRate,
-    //             AnnualizedSpread = request.AnnualizedSpread,
-    //             EstimatedProfitPercentage = request.EstimatedProfitPercentage,
-    //             Status = OpportunityStatus.Executed,
-    //             DetectedAt = DateTime.UtcNow,
-    //             ExecutedAt = DateTime.UtcNow,
-    //             Notes = $"CrossExchange|{request.Strategy}"
-    //         };
-    //
-    //         _dbContext.ArbitrageOpportunities.Add(arbitrageOpportunity);
-    //         await _dbContext.SaveChangesAsync(); // Save to get the opportunity ID
-    //
-    //         // Create ActiveOpportunity record (currently executing opportunity)
-    //         var activeOpportunity = new ActiveOpportunity
-    //         {
-    //             ArbitrageOpportunityId = arbitrageOpportunity.Id,
-    //             ExecutedAt = DateTime.UtcNow,
-    //             PositionSizeUsd = request.PositionSizeUsd,
-    //             Leverage = request.Leverage,
-    //             StopLossPercentage = request.StopLossPercentage,
-    //             TakeProfitPercentage = request.TakeProfitPercentage,
-    //             Strategy = ArbitrageStrategy.CrossExchange,
-    //             Exchange = null, // CrossExchange doesn't have a single exchange
-    //             IsActive = true,
-    //             Notes = $"CrossExchange|SL:{request.StopLossPercentage}|TP:{request.TakeProfitPercentage}"
-    //         };
-    //
-    //         _dbContext.ActiveOpportunities.Add(activeOpportunity);
-    //         await _dbContext.SaveChangesAsync(); // Save to get the active opportunity ID
-    //
-    //         // Record positions in database and link to active opportunity
-    //         var longPosition = new Position
-    //         {
-    //             ExchangeId = longExchange.Id,
-    //             Symbol = request.Symbol,
-    //             Side = PositionSide.Long,
-    //             EntryPrice = longPrice,
-    //             Quantity = longQuantity,
-    //             Leverage = request.Leverage,
-    //             Status = PositionStatus.Open,
-    //             OpenedAt = DateTime.UtcNow,
-    //             ActiveOpportunityId = activeOpportunity.Id,
-    //             Notes = $"Long|{request.LongExchange}|CrossExchange"
-    //         };
-    //
-    //         var shortPosition = new Position
-    //         {
-    //             ExchangeId = shortExchange.Id,
-    //             Symbol = request.Symbol,
-    //             Side = PositionSide.Short,
-    //             EntryPrice = shortPrice,
-    //             Quantity = shortQuantity,
-    //             Leverage = request.Leverage,
-    //             Status = PositionStatus.Open,
-    //             OpenedAt = DateTime.UtcNow,
-    //             ActiveOpportunityId = activeOpportunity.Id,
-    //             Notes = $"Short|{request.ShortExchange}|CrossExchange"
-    //         };
-    //
-    //         _dbContext.Positions.Add(longPosition);
-    //         _dbContext.Positions.Add(shortPosition);
-    //         await _dbContext.SaveChangesAsync();
-    //
-    //         response.PositionIds.Add(longPosition.Id);
-    //         response.PositionIds.Add(shortPosition.Id);
-    //         response.TotalPositionSize = request.PositionSizeUsd * 2; // Both legs
-    //         response.Success = true;
-    //         response.Message = $"Successfully opened cross-exchange arbitrage for {request.Symbol}";
-    //
-    //         _logger.LogInformation(
-    //             "Cross-exchange arbitrage executed: {Symbol} LONG on {LongExchange} @ ${LongPrice}, SHORT on {ShortExchange} @ ${ShortPrice}",
-    //             request.Symbol, request.LongExchange, longPrice, request.ShortExchange, shortPrice);
-    //
-    //         return response;
-    //     }
-    //     catch (Exception ex)
-    //     {
-    //         _logger.LogError(ex, "Error in cross-exchange execution");
-    //         response.ErrorMessage = $"Execution error: {ex.Message}";
-    //         return response;
-    //     }
-    // }
+    private async Task<ExecuteOpportunityResponse> ExecuteCrossExchangeAsync(ExecuteOpportunityRequest request)
+    {
+        if (string.IsNullOrEmpty(request.LongExchange) || string.IsNullOrEmpty(request.ShortExchange))
+        {
+            return new ExecuteOpportunityResponse
+            {
+                Success = false,
+                ErrorMessage = "Long and short exchanges must be specified"
+            };
+        }
+
+        var longConnector = _exchangeConnectors[request.LongExchange];
+        var shortConnector = _exchangeConnectors[request.ShortExchange];
+        var response = new ExecuteOpportunityResponse();
+
+        try
+        {
+            // Ensure both connectors are connected
+            await EnsureConnectedAsync(request.LongExchange, longConnector);
+            await EnsureConnectedAsync(request.ShortExchange, shortConnector);
+
+            // Determine if this is Futures/Futures or Spot/Futures cross-exchange
+            bool isSpotFutures = request.SubType == StrategySubType.CrossExchangeSpotFutures;
+
+            _logger.LogInformation(
+                "Executing {SubType} cross-exchange arbitrage for {Symbol}: LONG on {LongExchange}, SHORT on {ShortExchange}, size: ${Size}, leverage: {Leverage}x",
+                request.SubType, request.Symbol, request.LongExchange, request.ShortExchange, request.PositionSizeUsd, request.Leverage);
+
+            decimal longPrice, shortPrice;
+
+            if (isSpotFutures)
+            {
+                // Spot/Futures: Get spot price from long exchange, perpetual price from short exchange
+                var spotPrices = await longConnector.GetSpotPricesAsync(new List<string> { request.Symbol });
+                var perpPrices = await shortConnector.GetPerpetualPricesAsync(new List<string> { request.Symbol });
+
+                if (!spotPrices.ContainsKey(request.Symbol) || !perpPrices.ContainsKey(request.Symbol))
+                {
+                    response.ErrorMessage = $"Unable to fetch prices for {request.Symbol} from both exchanges";
+                    return response;
+                }
+
+                longPrice = spotPrices[request.Symbol].Price;
+                shortPrice = perpPrices[request.Symbol];
+            }
+            else
+            {
+                // Futures/Futures: Get perpetual prices from both exchanges
+                var longPrices = await longConnector.GetPerpetualPricesAsync(new List<string> { request.Symbol });
+                var shortPrices = await shortConnector.GetPerpetualPricesAsync(new List<string> { request.Symbol });
+
+                if (!longPrices.ContainsKey(request.Symbol) || !shortPrices.ContainsKey(request.Symbol))
+                {
+                    response.ErrorMessage = $"Unable to fetch prices for {request.Symbol} from both exchanges";
+                    return response;
+                }
+
+                longPrice = longPrices[request.Symbol];
+                shortPrice = shortPrices[request.Symbol];
+            }
+
+            // Calculate quantities - use same quantity for both legs to maintain proper hedge
+            var avgPrice = (longPrice + shortPrice) / 2;
+            var baseQuantity = request.PositionSizeUsd / avgPrice;
+
+            // Get instrument info from both exchanges to ensure proper quantity precision
+            decimal finalQuantity;
+
+            // For futures/futures cross-exchange, get instrument info from both exchanges
+            if (!isSpotFutures)
+            {
+                InstrumentInfo? longInstrumentInfo = null;
+                InstrumentInfo? shortInstrumentInfo = null;
+
+                // Get instrument info from long exchange
+                if (longConnector is BinanceConnector binanceLong)
+                {
+                    longInstrumentInfo = await binanceLong.GetInstrumentInfoAsync(request.Symbol, isSpot: false);
+                }
+                else if (longConnector is BybitConnector bybitLong)
+                {
+                    longInstrumentInfo = await bybitLong.GetInstrumentInfoAsync(request.Symbol, isSpot: false);
+                }
+
+                // Get instrument info from short exchange
+                if (shortConnector is BinanceConnector binanceShort)
+                {
+                    shortInstrumentInfo = await binanceShort.GetInstrumentInfoAsync(request.Symbol, isSpot: false);
+                }
+                else if (shortConnector is BybitConnector bybitShort)
+                {
+                    shortInstrumentInfo = await bybitShort.GetInstrumentInfoAsync(request.Symbol, isSpot: false);
+                }
+
+                // Validate quantity against both exchanges' requirements
+                decimal longValidatedQty = baseQuantity;
+                decimal shortValidatedQty = baseQuantity;
+
+                if (longInstrumentInfo != null)
+                {
+                    if (longConnector is BinanceConnector binanceLongConn)
+                    {
+                        longValidatedQty = binanceLongConn.ValidateAndAdjustQuantity(baseQuantity, longInstrumentInfo);
+                    }
+                    else if (longConnector is BybitConnector bybitLongConn)
+                    {
+                        longValidatedQty = bybitLongConn.ValidateAndAdjustQuantity(baseQuantity, longInstrumentInfo);
+                    }
+                }
+
+                if (shortInstrumentInfo != null)
+                {
+                    if (shortConnector is BinanceConnector binanceShortConn)
+                    {
+                        shortValidatedQty = binanceShortConn.ValidateAndAdjustQuantity(baseQuantity, shortInstrumentInfo);
+                    }
+                    else if (shortConnector is BybitConnector bybitShortConn)
+                    {
+                        shortValidatedQty = bybitShortConn.ValidateAndAdjustQuantity(baseQuantity, shortInstrumentInfo);
+                    }
+                }
+
+                // Use the SMALLER quantity to ensure both orders can execute with the same quantity
+                finalQuantity = Math.Min(longValidatedQty, shortValidatedQty);
+
+                _logger.LogInformation(
+                    "Cross-exchange quantity validation for {Symbol}: Base={Base}, LongValidated={Long}, ShortValidated={Short}, Final={Final}",
+                    request.Symbol, baseQuantity, longValidatedQty, shortValidatedQty, finalQuantity);
+            }
+            else
+            {
+                // For spot/futures cross-exchange, use simple rounding (spot side will handle its own validation)
+                finalQuantity = RoundQuantity(baseQuantity, request.Symbol);
+            }
+
+            var quantity = finalQuantity;
+
+            // Place long order on first exchange
+            string longOrderId;
+            decimal actualLongQuantity;
+            try
+            {
+                if (isSpotFutures)
+                {
+                    // Place spot buy order
+                    var (orderId, filledQty) = await longConnector.PlaceSpotBuyOrderAsync(
+                        request.Symbol,
+                        quantity
+                    );
+                    longOrderId = orderId;
+                    actualLongQuantity = filledQty;
+
+                    response.OrderIds.Add($"{request.LongExchange}:SPOT:{longOrderId}");
+                    _logger.LogInformation("Placed spot buy order {OrderId} on {Exchange} for {Quantity} {Symbol} @ ${Price}",
+                        longOrderId, request.LongExchange, actualLongQuantity, request.Symbol, longPrice);
+                }
+                else
+                {
+                    // Place perpetual long order
+                    longOrderId = await longConnector.PlaceMarketOrderAsync(
+                        request.Symbol,
+                        PositionSide.Long,
+                        quantity,
+                        request.Leverage
+                    );
+                    actualLongQuantity = quantity; // For futures, assume full fill (we don't get actual fill from this method)
+
+                    response.OrderIds.Add($"{request.LongExchange}:PERP:{longOrderId}");
+                    _logger.LogInformation("Placed perpetual long order {OrderId} on {Exchange} for {Quantity} {Symbol} @ ${Price}",
+                        longOrderId, request.LongExchange, quantity, request.Symbol, longPrice);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to place long order on {Exchange}", request.LongExchange);
+                response.ErrorMessage = $"Failed to place long order on {request.LongExchange}: {ex.Message}";
+                return response;
+            }
+
+            // Place short order on second exchange
+            string shortOrderId;
+            try
+            {
+                shortOrderId = await shortConnector.PlaceMarketOrderAsync(
+                    request.Symbol,
+                    PositionSide.Short,
+                    quantity,
+                    request.Leverage
+                );
+                response.OrderIds.Add($"{request.ShortExchange}:{shortOrderId}");
+                _logger.LogInformation("Placed short order {OrderId} on {Exchange} for {Quantity} {Symbol} @ ${Price}",
+                    shortOrderId, request.ShortExchange, quantity, request.Symbol, shortPrice);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to place short order on {Exchange}. Long order was placed on {LongExchange}: {LongOrderId}",
+                    request.ShortExchange, request.LongExchange, longOrderId);
+                response.ErrorMessage = $"Failed to place short order on {request.ShortExchange}: {ex.Message}. WARNING: Long position is open on {request.LongExchange}!";
+                return response;
+            }
+
+            // Create Execution record for cross-exchange (shared across both positions)
+            var execution = new Execution
+            {
+                Symbol = request.Symbol,
+                Exchange = $"{request.LongExchange}/{request.ShortExchange}", // Both exchanges
+                StartedAt = DateTime.UtcNow,
+                State = ExecutionState.Running,
+                FundingEarned = 0,
+                PositionSizeUsd = isSpotFutures ? request.PositionSizeUsd : request.PositionSizeUsd * 2, // Spot/Futures uses single size, Futures/Futures uses both legs
+                SpotOrderId = isSpotFutures ? longOrderId : null, // For Spot/Futures, store spot order ID here
+                PerpOrderId = isSpotFutures ? shortOrderId : $"{longOrderId},{shortOrderId}" // Store both order IDs
+            };
+
+            _dbContext.Executions.Add(execution);
+            await _dbContext.SaveChangesAsync(); // Save to get execution ID
+
+            // Create Position records for both exchanges
+            var longPosition = new Position
+            {
+                ExecutionId = execution.Id,
+                Symbol = request.Symbol,
+                Exchange = request.LongExchange,
+                Type = isSpotFutures ? PositionType.Spot : PositionType.Perpetual, // Spot for Spot/Futures, Perpetual for Futures/Futures
+                Side = PositionSide.Long,
+                Status = PositionStatus.Open,
+                EntryPrice = longPrice,
+                Quantity = isSpotFutures ? actualLongQuantity : quantity, // Use actual filled quantity for spot
+                Leverage = isSpotFutures ? 1m : request.Leverage, // Spot has no leverage
+                InitialMargin = isSpotFutures ? request.PositionSizeUsd : request.PositionSizeUsd / request.Leverage,
+                RealizedPnL = 0,
+                UnrealizedPnL = 0,
+                OrderId = longOrderId,
+                OpenedAt = DateTime.UtcNow
+            };
+
+            var shortPosition = new Position
+            {
+                ExecutionId = execution.Id,
+                Symbol = request.Symbol,
+                Exchange = request.ShortExchange,
+                Type = PositionType.Perpetual,
+                Side = PositionSide.Short,
+                Status = PositionStatus.Open,
+                EntryPrice = shortPrice,
+                Quantity = quantity,
+                Leverage = request.Leverage,
+                InitialMargin = request.PositionSizeUsd / request.Leverage,
+                RealizedPnL = 0,
+                UnrealizedPnL = 0,
+                OrderId = shortOrderId,
+                OpenedAt = DateTime.UtcNow
+            };
+
+            _dbContext.Positions.Add(longPosition);
+            _dbContext.Positions.Add(shortPosition);
+            await _dbContext.SaveChangesAsync();
+
+            response.PositionIds.Add(longPosition.Id);
+            response.PositionIds.Add(shortPosition.Id);
+            response.TotalPositionSize = request.PositionSizeUsd * 2; // Both legs
+            response.Success = true;
+            response.Message = $"Successfully opened cross-exchange arbitrage for {request.Symbol}";
+
+            _logger.LogInformation(
+                "Cross-exchange arbitrage executed: {Symbol} LONG on {LongExchange} @ ${LongPrice}, SHORT on {ShortExchange} @ ${ShortPrice}, Execution ID: {Id}",
+                request.Symbol, request.LongExchange, longPrice, request.ShortExchange, shortPrice, execution.Id);
+
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in cross-exchange execution");
+            response.ErrorMessage = $"Execution error: {ex.Message}";
+            return response;
+        }
+    }
 
     private async Task EnsureConnectedAsync(string exchangeName, IExchangeConnector connector)
     {
@@ -503,13 +842,14 @@ public class ArbitrageExecutionService
         }
 
         // Connect the exchange connector
-        var connected = await connector.ConnectAsync(exchange.ApiKey, exchange.ApiSecret);
+        var connected = await connector.ConnectAsync(exchange.ApiKey, exchange.ApiSecret, exchange.UseDemoTrading);
         if (!connected)
         {
             throw new Exception($"Failed to connect to {exchangeName}");
         }
 
-        _logger.LogInformation("Connected to {Exchange} for trade execution", exchangeName);
+        var environment = exchange.UseDemoTrading ? "Demo Trading" : "Live";
+        _logger.LogInformation("Connected to {Exchange} ({Environment}) for trade execution", exchangeName, environment);
     }
 
     private decimal RoundQuantity(decimal quantity, string symbol)
@@ -572,12 +912,110 @@ public class ArbitrageExecutionService
             _logger.LogInformation("Stopping Execution {Id} for {Symbol} on {Exchange}",
                 executionId, execution.Symbol, execution.Exchange);
 
-            var connector = _exchangeConnectors[execution.Exchange];
+            // Determine if this is a cross-exchange execution (format: "Binance/Bybit")
+            bool isCrossExchange = execution.Exchange.Contains("/");
 
-            // Ensure connector is connected
-            await EnsureConnectedAsync(execution.Exchange, connector);
+            if (isCrossExchange)
+            {
+                // Handle cross-exchange (cross-fut) strategy
+                return await StopCrossExchangeExecutionAsync(execution, response);
+            }
+            else
+            {
+                // Handle single-exchange (spot-perpetual) strategy
+                return await StopSingleExchangeExecutionAsync(execution, response);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error stopping Execution {Id}", executionId);
+            response.ErrorMessage = $"Failed to stop execution: {ex.Message}";
+            return response;
+        }
+    }
 
-            // Step 1: Close SHORT perpetual position using ClosePositionAsync
+    private async Task<CloseOpportunityResponse> StopSingleExchangeExecutionAsync(
+        Execution execution,
+        CloseOpportunityResponse response)
+    {
+        var connector = _exchangeConnectors[execution.Exchange];
+
+        // Ensure connector is connected
+        await EnsureConnectedAsync(execution.Exchange, connector);
+
+            // IMPORTANT: For spot-perpetual strategy, we must close BOTH legs:
+            // 1. Sell the spot asset (LONG position)
+            // 2. Close the perpetual SHORT position
+            // We do spot first so if it fails, we still have the hedge in place
+
+            // Step 1: Get spot balance and sell ALL of the spot asset
+            decimal spotQuantity = 0;
+            string? spotSellOrderId = null;
+            try
+            {
+                // Extract base asset from symbol (e.g., BTCUSDT -> BTC, ETHUSDT -> ETH)
+                var baseAsset = execution.Symbol.Replace("USDT", "").Replace("BUSD", "").Replace("USDC", "");
+
+                _logger.LogInformation("Checking spot balance for base asset: {Asset}", baseAsset);
+                spotQuantity = await connector.GetSpotBalanceAsync(baseAsset);
+
+                if (spotQuantity == 0)
+                {
+                    _logger.LogWarning("No spot balance found for {Asset}. This may indicate the position was already closed or there was an error during execution.", baseAsset);
+                }
+                else
+                {
+                    // Round the spot quantity to match the spot market's precision
+                    decimal roundedSpotQuantity = spotQuantity;
+
+                    if (connector is BybitConnector bybitConn)
+                    {
+                        var spotInstrumentInfo = await bybitConn.GetInstrumentInfoAsync(execution.Symbol, isSpot: true);
+                        if (spotInstrumentInfo != null && spotInstrumentInfo.QtyStep > 0)
+                        {
+                            roundedSpotQuantity = bybitConn.ValidateAndAdjustQuantity(spotQuantity, spotInstrumentInfo);
+                            if (roundedSpotQuantity != spotQuantity)
+                            {
+                                _logger.LogWarning("Adjusted spot sell quantity from {Original} to {Adjusted} to match instrument precision (step: {Step})",
+                                    spotQuantity, roundedSpotQuantity, spotInstrumentInfo.QtyStep);
+                            }
+                        }
+                        else
+                        {
+                            // Fallback: If instrument info is not available, use simple rounding
+                            // This should rarely happen since we always fetch instrument info
+                            roundedSpotQuantity = RoundQuantity(spotQuantity, execution.Symbol);
+                            _logger.LogWarning("No instrument info available, using fallback rounding. Spot sell quantity from {Original} to {Adjusted}",
+                                spotQuantity, roundedSpotQuantity);
+                        }
+                    }
+                    else
+                    {
+                        roundedSpotQuantity = RoundQuantity(spotQuantity, execution.Symbol);
+                    }
+
+                    _logger.LogInformation("Found spot balance for {Asset}: {Quantity}. Placing sell order for {Symbol} with rounded quantity: {RoundedQty}",
+                        baseAsset, spotQuantity, execution.Symbol, roundedSpotQuantity);
+
+                    spotSellOrderId = await connector.PlaceSpotSellOrderAsync(
+                        execution.Symbol,
+                        roundedSpotQuantity
+                    );
+
+                    _logger.LogInformation(
+                        "Successfully sold spot asset {Asset}, quantity: {Quantity}, order ID: {OrderId}",
+                        baseAsset, roundedSpotQuantity, spotSellOrderId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to sell spot asset for {Symbol}. Will NOT close perpetual position to maintain hedge!",
+                    execution.Symbol);
+                response.ErrorMessage = $"Failed to sell spot asset: {ex.Message}. Perpetual position remains open to maintain hedge. Please close manually!";
+                return response;
+            }
+
+            // Step 2: Close SHORT perpetual position using ClosePositionAsync
             try
             {
                 _logger.LogInformation("Closing perpetual short position for {Symbol}", execution.Symbol);
@@ -590,48 +1028,13 @@ public class ArbitrageExecutionService
                 }
                 else
                 {
-                    _logger.LogWarning("ClosePositionAsync returned false for {Symbol}, but will continue", execution.Symbol);
+                    _logger.LogWarning("ClosePositionAsync returned false for {Symbol}, position may already be closed", execution.Symbol);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to close perpetual short position for {Symbol}", execution.Symbol);
-                response.ErrorMessage = $"Failed to close perpetual position: {ex.Message}";
-                return response;
-            }
-
-            // Step 2: Get spot balance and sell ALL of the spot asset
-            decimal spotQuantity;
-            try
-            {
-                // Extract base asset from symbol (e.g., BTCUSDT -> BTC)
-                var baseAsset = execution.Symbol.Replace("USDT", "").Replace("BUSD", "");
-                spotQuantity = await connector.GetSpotBalanceAsync(baseAsset);
-
-                if (spotQuantity == 0)
-                {
-                    _logger.LogWarning("No spot balance found for {Asset}, nothing to sell", baseAsset);
-                }
-                else
-                {
-                    _logger.LogInformation("Selling spot asset for {Symbol}, quantity: {Quantity}",
-                        execution.Symbol, spotQuantity);
-
-                    string spotSellOrderId = await connector.PlaceSpotSellOrderAsync(
-                        execution.Symbol,
-                        spotQuantity
-                    );
-
-                    _logger.LogInformation(
-                        "Successfully sold spot asset for {Symbol}, order ID: {OrderId}",
-                        execution.Symbol, spotSellOrderId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to sell spot asset for {Symbol}. Perpetual position was already closed!",
-                    execution.Symbol);
-                response.ErrorMessage = $"Failed to sell spot asset: {ex.Message}. WARNING: Perpetual position is already closed!";
+                _logger.LogError(ex, "Failed to close perpetual short position for {Symbol}. Spot asset was already sold!", execution.Symbol);
+                response.ErrorMessage = $"Failed to close perpetual position: {ex.Message}. WARNING: Spot asset was already sold (order: {spotSellOrderId})!";
                 return response;
             }
 
@@ -641,7 +1044,7 @@ public class ArbitrageExecutionService
 
             // Close related Position records
             var positions = await _dbContext.Positions
-                .Where(p => p.ExecutionId == executionId && p.Status == PositionStatus.Open)
+                .Where(p => p.ExecutionId == execution.Id && p.Status == PositionStatus.Open)
                 .ToListAsync();
 
             foreach (var position in positions)
@@ -654,24 +1057,128 @@ public class ArbitrageExecutionService
             await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("Execution {Id} stopped successfully, closed {Count} positions, deleting execution record",
-                executionId, positions.Count);
+                execution.Id, positions.Count);
 
             // DELETE the Execution record (don't keep stopped records)
             _dbContext.Executions.Remove(execution);
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Deleted Execution {Id} from database", executionId);
+            _logger.LogInformation("Deleted Execution {Id} from database", execution.Id);
 
             response.Success = true;
             response.Message = $"Successfully stopped execution for {execution.Symbol}";
 
             return response;
-        }
-        catch (Exception ex)
+    }
+
+    private async Task<CloseOpportunityResponse> StopCrossExchangeExecutionAsync(
+        Execution execution,
+        CloseOpportunityResponse response)
+    {
+        // For cross-exchange strategies, we need to close positions on both exchanges
+        // The execution.Exchange field contains "Exchange1/Exchange2" format
+
+        // Get all positions for this execution to determine which exchanges are involved
+        var positions = await _dbContext.Positions
+            .Where(p => p.ExecutionId == execution.Id && p.Status == PositionStatus.Open)
+            .ToListAsync();
+
+        if (positions.Count == 0)
         {
-            _logger.LogError(ex, "Error stopping Execution {Id}", executionId);
-            response.ErrorMessage = $"Failed to stop execution: {ex.Message}";
+            _logger.LogWarning("No open positions found for Execution {Id}", execution.Id);
+            response.ErrorMessage = "No open positions found for this execution";
             return response;
         }
+
+        _logger.LogInformation("Found {Count} open positions for cross-exchange execution {Id}",
+            positions.Count, execution.Id);
+
+        // Group positions by exchange
+        var positionsByExchange = positions.GroupBy(p => p.Exchange).ToList();
+
+        var closedExchanges = new List<string>();
+        var failedExchanges = new List<string>();
+
+        // Close positions on each exchange
+        foreach (var exchangeGroup in positionsByExchange)
+        {
+            var exchangeName = exchangeGroup.Key;
+            var exchangePositions = exchangeGroup.ToList();
+
+            try
+            {
+                if (!_exchangeConnectors.TryGetValue(exchangeName, out var connector))
+                {
+                    _logger.LogError("Exchange connector not found for {Exchange}", exchangeName);
+                    failedExchanges.Add(exchangeName);
+                    continue;
+                }
+
+                _logger.LogInformation("Closing {Count} positions on {Exchange}",
+                    exchangePositions.Count, exchangeName);
+
+                // Ensure connector is connected
+                await EnsureConnectedAsync(exchangeName, connector);
+
+                // Close all perpetual positions for this exchange/symbol
+                bool closedSuccessfully = await connector.ClosePositionAsync(execution.Symbol);
+
+                if (closedSuccessfully)
+                {
+                    _logger.LogInformation("Successfully closed positions on {Exchange} for {Symbol}",
+                        exchangeName, execution.Symbol);
+                    closedExchanges.Add(exchangeName);
+                }
+                else
+                {
+                    _logger.LogWarning("ClosePositionAsync returned false for {Exchange}/{Symbol}, position may already be closed",
+                        exchangeName, execution.Symbol);
+                    closedExchanges.Add(exchangeName); // Still count as success
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to close positions on {Exchange} for {Symbol}",
+                    exchangeName, execution.Symbol);
+                failedExchanges.Add(exchangeName);
+            }
+        }
+
+        // Check if we successfully closed positions on all exchanges
+        if (failedExchanges.Count > 0)
+        {
+            var failedList = string.Join(", ", failedExchanges);
+            var closedList = closedExchanges.Count > 0 ? string.Join(", ", closedExchanges) : "none";
+            response.ErrorMessage = $"Failed to close positions on: {failedList}. Successfully closed on: {closedList}";
+            return response;
+        }
+
+        // Update execution state to Stopped
+        execution.State = ExecutionState.Stopped;
+        execution.StoppedAt = DateTime.UtcNow;
+
+        // Close all position records
+        foreach (var position in positions)
+        {
+            position.Status = PositionStatus.Closed;
+            position.ClosedAt = DateTime.UtcNow;
+            position.ExecutionId = null; // Detach from execution (historical record)
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("Cross-exchange execution {Id} stopped successfully, closed {Count} positions on {Exchanges}",
+            execution.Id, positions.Count, string.Join(", ", closedExchanges));
+
+        // DELETE the Execution record (don't keep stopped records)
+        _dbContext.Executions.Remove(execution);
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("Deleted Execution {Id} from database", execution.Id);
+
+        response.Success = true;
+        response.Message = $"Successfully stopped cross-exchange execution for {execution.Symbol} on {string.Join(", ", closedExchanges)}";
+
+        return response;
     }
 }

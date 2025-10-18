@@ -136,6 +136,28 @@ public class OpportunityController : ControllerBase
     //     return activeOpportunities;
     // }
 
+    [HttpGet("execution-balances")]
+    public async Task<ActionResult<ExecutionBalancesDto>> GetExecutionBalances(
+        [FromQuery] string exchange,
+        [FromQuery] decimal maxLeverage = 5)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(exchange))
+            {
+                return BadRequest("Exchange parameter is required");
+            }
+
+            var balances = await _executionService.GetExecutionBalancesAsync(exchange, maxLeverage);
+            return Ok(balances);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching execution balances for {Exchange}", exchange);
+            return StatusCode(500, new { error = $"Failed to fetch balances: {ex.Message}" });
+        }
+    }
+
     [HttpPost("execute")]
     public async Task<ActionResult<ExecuteOpportunityResponse>> ExecuteOpportunity([FromBody] ExecuteOpportunityRequest request)
     {

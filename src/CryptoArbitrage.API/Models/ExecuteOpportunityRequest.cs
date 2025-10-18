@@ -6,6 +6,7 @@ public class ExecuteOpportunityRequest
 {
     public required string Symbol { get; set; }
     public ArbitrageStrategy Strategy { get; set; }
+    public StrategySubType SubType { get; set; } = StrategySubType.SpotPerpetualSameExchange;
     public required string Exchange { get; set; }
     public string? LongExchange { get; set; } // For cross-exchange arbitrage
     public string? ShortExchange { get; set; } // For cross-exchange arbitrage
