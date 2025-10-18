@@ -102,7 +102,23 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175")
+        var allowedOrigins = new List<string>
+        {
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:5175"
+        };
+
+        // Add production domain from environment variable
+        var prodDomain = Environment.GetEnvironmentVariable("PROD_DOMAIN");
+        if (!string.IsNullOrEmpty(prodDomain))
+        {
+            allowedOrigins.Add($"http://{prodDomain}");
+            allowedOrigins.Add($"https://{prodDomain}");
+        }
+
+        policy.WithOrigins(allowedOrigins.ToArray())
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
