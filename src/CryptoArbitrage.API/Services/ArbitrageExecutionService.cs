@@ -12,17 +12,23 @@ public class ArbitrageExecutionService
     private readonly ArbitrageDbContext _dbContext;
     private readonly ArbitrageConfig _config;
     private readonly Dictionary<string, IExchangeConnector> _exchangeConnectors;
+    private readonly ICurrentUserService _currentUser;
+    private readonly IEncryptionService _encryption;
 
     public ArbitrageExecutionService(
         ILogger<ArbitrageExecutionService> _logger,
         ArbitrageDbContext dbContext,
         ArbitrageConfig config,
         BinanceConnector binanceConnector,
-        BybitConnector bybitConnector)
+        BybitConnector bybitConnector,
+        ICurrentUserService currentUser,
+        IEncryptionService encryption)
     {
         this._logger = _logger;
         _dbContext = dbContext;
         _config = config;
+        _currentUser = currentUser;
+        _encryption = encryption;
 
         _exchangeConnectors = new Dictionary<string, IExchangeConnector>
         {
@@ -107,6 +113,17 @@ public class ArbitrageExecutionService
         // Validate exchange connector exists
         if (request.Strategy == ArbitrageStrategy.SpotPerpetual)
         {
+            // CRITICAL: Check if user has connected API keys for this exchange
+            var userApiKey = await _dbContext.UserExchangeApiKeys
+                .FirstOrDefaultAsync(k => k.UserId == _currentUser.UserId
+                    && k.ExchangeName == request.Exchange
+                    && k.IsEnabled);
+
+            if (userApiKey == null)
+            {
+                return $"You haven't connected {request.Exchange} exchange. Please add your API keys in Profile Settings.";
+            }
+
             if (!_exchangeConnectors.ContainsKey(request.Exchange))
             {
                 return $"Exchange '{request.Exchange}' is not supported";
@@ -132,6 +149,30 @@ public class ArbitrageExecutionService
             if (string.IsNullOrEmpty(request.LongExchange) || string.IsNullOrEmpty(request.ShortExchange))
             {
                 return "Long and short exchanges must be specified for cross-exchange arbitrage";
+            }
+
+            // CRITICAL: Check if user has connected API keys for BOTH exchanges
+            var userLongApiKey = await _dbContext.UserExchangeApiKeys
+                .FirstOrDefaultAsync(k => k.UserId == _currentUser.UserId
+                    && k.ExchangeName == request.LongExchange
+                    && k.IsEnabled);
+
+            var userShortApiKey = await _dbContext.UserExchangeApiKeys
+                .FirstOrDefaultAsync(k => k.UserId == _currentUser.UserId
+                    && k.ExchangeName == request.ShortExchange
+                    && k.IsEnabled);
+
+            if (userLongApiKey == null && userShortApiKey == null)
+            {
+                return $"You haven't connected {request.LongExchange} or {request.ShortExchange}. Please add your API keys in Profile Settings.";
+            }
+            else if (userLongApiKey == null)
+            {
+                return $"You haven't connected {request.LongExchange} exchange. Please add your API keys in Profile Settings.";
+            }
+            else if (userShortApiKey == null)
+            {
+                return $"You haven't connected {request.ShortExchange} exchange. Please add your API keys in Profile Settings.";
             }
 
             if (!_exchangeConnectors.ContainsKey(request.LongExchange))
@@ -477,6 +518,7 @@ public class ArbitrageExecutionService
             // Create lightweight Execution record (minimal tracking only)
             var execution = new Execution
             {
+                UserId = _currentUser.UserId,
                 Symbol = request.Symbol,
                 Exchange = request.Exchange,
                 StartedAt = DateTime.UtcNow,
@@ -493,6 +535,7 @@ public class ArbitrageExecutionService
             // Create Position records for tracking (one for perpetual, one for spot)
             var perpPosition = new Position
             {
+                UserId = _currentUser.UserId,
                 ExecutionId = execution.Id,
                 Symbol = request.Symbol,
                 Exchange = request.Exchange,
@@ -511,6 +554,7 @@ public class ArbitrageExecutionService
 
             var spotPosition = new Position
             {
+                UserId = _currentUser.UserId,
                 ExecutionId = execution.Id,
                 Symbol = request.Symbol,
                 Exchange = request.Exchange,
@@ -753,6 +797,7 @@ public class ArbitrageExecutionService
             // Create Execution record for cross-exchange (shared across both positions)
             var execution = new Execution
             {
+                UserId = _currentUser.UserId,
                 Symbol = request.Symbol,
                 Exchange = $"{request.LongExchange}/{request.ShortExchange}", // Both exchanges
                 StartedAt = DateTime.UtcNow,
@@ -769,6 +814,7 @@ public class ArbitrageExecutionService
             // Create Position records for both exchanges
             var longPosition = new Position
             {
+                UserId = _currentUser.UserId,
                 ExecutionId = execution.Id,
                 Symbol = request.Symbol,
                 Exchange = request.LongExchange,
@@ -787,6 +833,7 @@ public class ArbitrageExecutionService
 
             var shortPosition = new Position
             {
+                UserId = _currentUser.UserId,
                 ExecutionId = execution.Id,
                 Symbol = request.Symbol,
                 Exchange = request.ShortExchange,
@@ -829,27 +876,36 @@ public class ArbitrageExecutionService
 
     private async Task EnsureConnectedAsync(string exchangeName, IExchangeConnector connector)
     {
-        // Get exchange credentials from configuration
-        var exchange = _config.Exchanges.FirstOrDefault(e => e.Name == exchangeName);
-        if (exchange == null)
+        // CRITICAL: Get user's API key for this exchange from database
+        var userApiKey = await _dbContext.UserExchangeApiKeys
+            .FirstOrDefaultAsync(k => k.UserId == _currentUser.UserId
+                && k.ExchangeName == exchangeName
+                && k.IsEnabled);
+
+        if (userApiKey == null)
         {
-            throw new Exception($"Exchange '{exchangeName}' not found in configuration");
+            throw new Exception($"User has no API credentials configured for '{exchangeName}'. Please add your API keys in Profile Settings.");
         }
 
-        if (string.IsNullOrEmpty(exchange.ApiKey) || string.IsNullOrEmpty(exchange.ApiSecret))
+        // Decrypt user's credentials
+        var apiKey = _encryption.Decrypt(userApiKey.EncryptedApiKey);
+        var apiSecret = _encryption.Decrypt(userApiKey.EncryptedApiSecret);
+
+        if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(apiSecret))
         {
-            throw new Exception($"Exchange '{exchangeName}' has no API credentials configured");
+            throw new Exception($"Failed to decrypt API credentials for '{exchangeName}'");
         }
 
-        // Connect the exchange connector
-        var connected = await connector.ConnectAsync(exchange.ApiKey, exchange.ApiSecret, exchange.UseDemoTrading);
+        // Connect using user's credentials
+        var connected = await connector.ConnectAsync(apiKey, apiSecret, userApiKey.UseDemoTrading);
         if (!connected)
         {
-            throw new Exception($"Failed to connect to {exchangeName}");
+            throw new Exception($"Failed to connect to {exchangeName} using your API credentials. Please verify your API keys are correct.");
         }
 
-        var environment = exchange.UseDemoTrading ? "Demo Trading" : "Live";
-        _logger.LogInformation("Connected to {Exchange} ({Environment}) for trade execution", exchangeName, environment);
+        var environment = userApiKey.UseDemoTrading ? "Demo Trading" : "Live";
+        _logger.LogInformation("Connected to {Exchange} ({Environment}) for user {UserId}",
+            exchangeName, environment, _currentUser.UserId);
     }
 
     private decimal RoundQuantity(decimal quantity, string symbol)

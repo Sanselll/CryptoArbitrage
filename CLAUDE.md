@@ -199,7 +199,199 @@ This is a financial trading application. Exercise extreme caution:
 - **ArbitrageOpportunities**: Log of detected opportunities (for backtesting/analysis)
 - **PerformanceMetrics**: Daily aggregated performance statistics
 
-Database is created automatically via `db.Database.EnsureCreated()` on startup. For production, use proper migrations (`dotnet ef migrations add`).
+Database is created automatically via migrations on startup. For production, use proper migrations (`dotnet ef migrations add`).
+
+## Database Migrations - CRITICAL SAFETY RULES
+
+**NEVER drop the database to fix migration issues in development or production. ALWAYS use migrations to alter the schema.**
+
+### Safe Migration Workflow
+
+1. **BEFORE creating ANY migration:**
+   ```bash
+   # ALWAYS backup the database first
+   ./backup-db.sh
+   ```
+
+2. **Create a migration (adds/modifies tables or columns):**
+   ```bash
+   cd src/CryptoArbitrage.API
+   dotnet ef migrations add DescriptiveMigrationName
+   ```
+
+3. **Review the generated migration file:**
+   - Check `Migrations/YYYYMMDDHHMMSS_MigrationName.cs`
+   - Verify it only contains ADD/ALTER operations, NO DROP TABL ES
+   - If you see `DropTable()` or `DropColumn()` - **STOP and review carefully**
+
+4. **Apply the migration:**
+   ```bash
+   dotnet ef database update
+   ```
+
+5. **If migration fails:**
+   - **DO NOT** drop the database
+   - **DO NOT** delete all migrations and start fresh
+   - **DO** create a new migration to fix the issue
+   - **DO** restore from backup if data is corrupted
+
+### Fixing Schema Issues WITHOUT Losing Data
+
+If you need to fix an entity configuration (like adding `ValueGeneratedOnAdd()`):
+
+1. Update `ArbitrageDbContext.cs` with the correct configuration
+2. Create a new migration: `dotnet ef migrations add FixEntityConfiguration`
+3. The migration will generate ALTER TABLE statements
+4. Apply it: `dotnet ef database update`
+
+### When You MUST Drop the Database
+
+Only drop the database if:
+- It's a fresh development start with NO real data
+- You have a verified backup
+- User explicitly approves data loss
+
+**Commands to drop database:**
+```bash
+# PostgreSQL
+/opt/homebrew/opt/postgresql@16/bin/dropdb --force crypto_arbitrage
+/opt/homebrew/opt/postgresql@16/bin/createdb crypto_arbitrage
+
+# Then apply migrations
+dotnet ef database update
+```
+
+### Database Backup and Restore
+
+```bash
+# Backup
+./backup-db.sh
+
+# Restore
+./restore-db.sh backups/crypto_arbitrage_YYYYMMDD_HHMMSS.sql
+```
+
+## Docker Deployment
+
+The project is containerized with Docker and ready for deployment to any cloud platform or local environment.
+
+### Quick Start with Docker
+
+```bash
+# Local development deployment
+./deploy-local.sh
+
+# View logs
+./deploy-local.sh logs
+
+# Stop services
+./deploy-local.sh down
+```
+
+### Docker Commands
+
+```bash
+# Build and start all services (PostgreSQL, Backend, Frontend)
+docker-compose up -d
+
+# Build with fresh images
+docker-compose up -d --build
+
+# View logs
+docker-compose logs -f
+docker-compose logs -f backend  # Specific service
+
+# Check status
+docker-compose ps
+
+# Stop services (preserves database)
+docker-compose down
+
+# Stop and remove all data (WARNING: deletes database!)
+docker-compose down -v
+
+# Access database
+docker-compose exec postgres psql -U postgres -d crypto_arbitrage
+```
+
+### Database Management
+
+```bash
+# Run migrations in Docker
+docker-compose exec backend dotnet ef database update
+
+# Create new migration
+cd src/CryptoArbitrage.API
+dotnet ef migrations add MigrationName
+
+# Backup database
+docker-compose exec postgres pg_dump -U postgres crypto_arbitrage > backup.sql
+
+# Restore database
+cat backup.sql | docker-compose exec -T postgres psql -U postgres crypto_arbitrage
+```
+
+### Production Deployment
+
+```bash
+# Deploy to production
+./deploy-production.sh deploy
+
+# Create database backup
+./deploy-production.sh backup
+
+# Restore from backup
+./deploy-production.sh restore backup-20241018-120000.sql.gz
+
+# Check service health
+./deploy-production.sh health
+
+# View production logs
+./deploy-production.sh logs backend
+```
+
+### Environment Configuration
+
+- **Development**: `.env` file (copy from `.env.example`)
+- **Production**: `.env.production` file (copy from `.env.production.example`)
+
+**IMPORTANT**: Never commit `.env` or `.env.production` files. Always change default passwords and secrets!
+
+### Docker Image Structure
+
+- **Backend**: Multi-stage .NET 8 build (SDK → Runtime)
+- **Frontend**: Multi-stage React build (Node → Nginx)
+- **Database**: PostgreSQL 16 Alpine with persistent volumes
+
+### CI/CD
+
+GitHub Actions workflows are configured for:
+- **CI** (`.github/workflows/ci.yml`): Runs on every push/PR, builds and tests code
+- **Docker Build** (`.github/workflows/docker-build-push.yml`): Builds and pushes images to GitHub Container Registry
+
+Trigger manual deployment:
+```bash
+gh workflow run docker-build-push.yml
+```
+
+### Cloud Deployment
+
+The Docker setup is cloud-agnostic and works with:
+- **AWS**: ECS, Fargate, or EC2
+- **Azure**: Container Instances or App Service
+- **GCP**: Cloud Run or GKE
+- **DigitalOcean**: Droplets or App Platform
+- **Any VPS**: With Docker installed
+
+See `DEPLOYMENT.md` for detailed deployment guides for each platform.
+
+## Database
+
+**Database**: PostgreSQL 16 (migrated from SQLite for production readiness)
+
+**Connection**: Configured via environment variables in `appsettings.json` and `.env` files
+
+**Persistence**: Docker volumes ensure data persists across container restarts and deployments
 
 ## Git Commit Guidelines
 

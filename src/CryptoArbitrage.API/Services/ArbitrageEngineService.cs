@@ -5,6 +5,7 @@ using CryptoArbitrage.API.Data;
 using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Config;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace CryptoArbitrage.API.Services;
 
@@ -34,14 +35,14 @@ public class ArbitrageEngineService : BackgroundService
     {
         _logger.LogInformation("Arbitrage Engine Service starting...");
 
-        // Initialize exchange connectors
+        // Initialize global exchange connectors (for shared funding rate fetching)
         await InitializeExchangesAsync();
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await RunArbitrageAnalysisAsync();
+                await RunArbitrageAnalysisAsync(stoppingToken);
                 await Task.Delay(TimeSpan.FromSeconds(_config.DataRefreshIntervalSeconds), stoppingToken);
             }
             catch (Exception ex)
@@ -70,12 +71,14 @@ public class ArbitrageEngineService : BackgroundService
 
                 if (connector != null)
                 {
-                    var connected = await connector.ConnectAsync(exchange.ApiKey, exchange.ApiSecret, exchange.UseDemoTrading);
+                    // For multi-user system: Initialize without API keys to use public APIs
+                    // User-specific API keys are stored in database and used for trading operations
+                    var connected = await connector.ConnectAsync(null, null, exchange.UseDemoTrading);
                     if (connected)
                     {
                         _exchangeConnectors[exchange.Name] = connector;
-                        var environment = exchange.UseDemoTrading ? "Demo Trading" : "Live";
-                        _logger.LogInformation("Connected to {Exchange} ({Environment})", exchange.Name, environment);
+                        var environment = exchange.UseDemoTrading ? "Demo/Testnet" : "Live";
+                        _logger.LogInformation("Connected to {Exchange} public API ({Environment})", exchange.Name, environment);
                     }
                 }
             }
@@ -152,7 +155,7 @@ public class ArbitrageEngineService : BackgroundService
         }
     }
 
-    private async Task RunArbitrageAnalysisAsync()
+    private async Task RunArbitrageAnalysisAsync(CancellationToken stoppingToken)
     {
         // Periodically refresh symbol list
         await RefreshActiveSymbolsAsync();
@@ -167,7 +170,7 @@ public class ArbitrageEngineService : BackgroundService
         var spotPrices = new Dictionary<string, Dictionary<string, SpotPriceDto>>();
         var perpPrices = new Dictionary<string, Dictionary<string, decimal>>();
 
-        // Fetch funding rates, spot prices, and perpetual prices from all exchanges
+        // PHASE 1: Fetch GLOBAL funding rates (shared across all users)
         foreach (var (exchangeName, connector) in _exchangeConnectors)
         {
             try
@@ -201,7 +204,7 @@ public class ArbitrageEngineService : BackgroundService
                     });
                 }
 
-                await dbContext.SaveChangesAsync();
+                await dbContext.SaveChangesAsync(stoppingToken);
             }
             catch (Exception ex)
             {
@@ -209,9 +212,9 @@ public class ArbitrageEngineService : BackgroundService
             }
         }
 
-        // Broadcast funding rates via SignalR
+        // Broadcast funding rates to ALL users (shared global data)
         var allRates = fundingRates.Values.SelectMany(r => r).ToList();
-        await _hubContext.Clients.All.SendAsync("ReceiveFundingRates", allRates);
+        await _hubContext.Clients.All.SendAsync("ReceiveFundingRates", allRates, stoppingToken);
 
         // Detect all types of arbitrage opportunities
         var opportunities = new List<ArbitrageOpportunityDto>();
@@ -296,7 +299,7 @@ public class ArbitrageEngineService : BackgroundService
 
                 var runningExecutions = await dbContext.Executions
                     .Where(e => e.State == ExecutionState.Running)
-                    .ToListAsync();
+                    .ToListAsync(stoppingToken);
 
                 foreach (var opp in opportunities)
                 {
@@ -326,7 +329,7 @@ public class ArbitrageEngineService : BackgroundService
             _logger.LogInformation("Found {Count} arbitrage opportunities", opportunities.Count);
 
             // Broadcast opportunities via SignalR (in-memory only, not persisted to database)
-            await _hubContext.Clients.All.SendAsync("ReceiveOpportunities", opportunities);
+            await _hubContext.Clients.All.SendAsync("ReceiveOpportunities", opportunities, stoppingToken);
 
             // Auto-execute if enabled
             if (_config.AutoExecute)
@@ -335,11 +338,8 @@ public class ArbitrageEngineService : BackgroundService
             }
         }
 
-        // Update positions and balances
-        await UpdatePositionsAndBalancesAsync();
-
-        // Send dashboard update
-        await SendDashboardUpdateAsync();
+        // PHASE 2: Process each user individually for user-specific data (positions, balances, P&L)
+        await ProcessAllUsersDataAsync(stoppingToken);
     }
 
     private async Task<List<ArbitrageOpportunityDto>> DetectCrossExchangeFuturesOpportunitiesAsync(
@@ -637,6 +637,318 @@ public class ArbitrageEngineService : BackgroundService
         return opportunities.OrderByDescending(o => o.EstimatedProfitPercentage).ToList();
     }
 
+
+    /// <summary>
+    /// Process user-specific data for all active users.
+    /// Each user gets their own exchange connectors with decrypted API keys,
+    /// and user-specific data (positions, balances, P&L) is broadcast only to that user.
+    /// </summary>
+    private async Task ProcessAllUsersDataAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+
+            // Get all users who have enabled API keys
+            var activeUsers = await db.Users
+                .Include(u => u.ExchangeApiKeys)
+                .Where(u => u.ExchangeApiKeys.Any(k => k.IsEnabled))
+                .ToListAsync(stoppingToken);
+
+            // Filter keys in memory after loading
+            foreach (var user in activeUsers)
+            {
+                user.ExchangeApiKeys = user.ExchangeApiKeys.Where(k => k.IsEnabled).ToList();
+            }
+
+            if (!activeUsers.Any())
+            {
+                _logger.LogDebug("No active users with enabled API keys");
+                return;
+            }
+
+            _logger.LogInformation("Processing data for {Count} active users", activeUsers.Count);
+
+            // Process each user individually
+            foreach (var user in activeUsers)
+            {
+                try
+                {
+                    await ProcessUserDataAsync(user, stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing data for user {UserId}", user.Id);
+                    // Continue with next user on error
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in ProcessAllUsersDataAsync");
+        }
+    }
+
+    /// <summary>
+    /// Process user-specific data for a single user.
+    /// Gets user's exchange API keys, creates user-specific connectors,
+    /// fetches positions/balances, and broadcasts to user's SignalR group only.
+    /// </summary>
+    private async Task ProcessUserDataAsync(ApplicationUser user, CancellationToken stoppingToken)
+    {
+        var userId = user.Id;
+        var email = user.Email;
+
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+            var encryptionService = scope.ServiceProvider.GetRequiredService<IEncryptionService>();
+
+            // Get user's enabled API keys
+            var userApiKeys = user.ExchangeApiKeys.Where(k => k.IsEnabled).ToList();
+            if (!userApiKeys.Any())
+            {
+                _logger.LogDebug("User {UserId} has no enabled API keys", userId);
+                return;
+            }
+
+            // Create user-specific exchange connectors with decrypted API keys
+            var userConnectors = new Dictionary<string, IExchangeConnector>();
+            foreach (var apiKey in userApiKeys)
+            {
+                try
+                {
+                    var decryptedKey = encryptionService.Decrypt(apiKey.EncryptedApiKey);
+                    var decryptedSecret = encryptionService.Decrypt(apiKey.EncryptedApiSecret);
+
+                    IExchangeConnector? connector = apiKey.ExchangeName.ToLower() switch
+                    {
+                        "binance" => new BinanceConnector(
+                            scope.ServiceProvider.GetRequiredService<ILogger<BinanceConnector>>()),
+                        "bybit" => new BybitConnector(
+                            scope.ServiceProvider.GetRequiredService<ILogger<BybitConnector>>()),
+                        _ => null
+                    };
+
+                    if (connector != null)
+                    {
+                        var connected = await connector.ConnectAsync(
+                            decryptedKey,
+                            decryptedSecret,
+                            apiKey.UseDemoTrading);
+
+                        if (connected)
+                        {
+                            userConnectors[apiKey.ExchangeName] = connector;
+                            _logger.LogDebug(
+                                "User {UserId} connected to {Exchange} ({Mode})",
+                                userId, apiKey.ExchangeName,
+                                apiKey.UseDemoTrading ? "Demo" : "Live");
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "Failed to connect user {UserId} to {Exchange}",
+                                userId, apiKey.ExchangeName);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Error creating connector for user {UserId}, exchange {Exchange}",
+                        userId, apiKey.ExchangeName);
+                }
+            }
+
+            if (!userConnectors.Any())
+            {
+                _logger.LogWarning("User {UserId} ({Email}) has no working connectors", userId, email);
+                return;
+            }
+
+            // Fetch user-specific positions (filtered by UserId)
+            var userPositions = await db.Positions
+                .Where(p => p.UserId == userId)
+                .ToListAsync(stoppingToken);
+
+            var positionDtos = new List<PositionDto>();
+
+            // Update positions with live data from user's exchanges
+            foreach (var position in userPositions)
+            {
+                if (userConnectors.TryGetValue(position.Exchange, out var connector))
+                {
+                    try
+                    {
+                        decimal unrealizedPnL = position.UnrealizedPnL;
+                        decimal realizedPnL = position.RealizedPnL;
+                        decimal fundingPaid = position.TotalFundingFeePaid;
+                        decimal fundingReceived = position.TotalFundingFeeReceived;
+
+                        if (position.Type == PositionType.Perpetual)
+                        {
+                            var livePositions = await connector.GetOpenPositionsAsync();
+                            var livePosition = livePositions.FirstOrDefault(p =>
+                                p.Symbol == position.Symbol &&
+                                p.Side == position.Side &&
+                                p.Type == position.Type);
+
+                            if (livePosition != null)
+                            {
+                                unrealizedPnL = livePosition.UnrealizedPnL;
+                                realizedPnL = livePosition.RealizedPnL;
+                                fundingPaid = livePosition.TotalFundingFeePaid;
+                                fundingReceived = livePosition.TotalFundingFeeReceived;
+                            }
+                            else
+                            {
+                                // Fallback: calculate P&L manually
+                                var perpPrices = await connector.GetPerpetualPricesAsync(
+                                    new List<string> { position.Symbol });
+
+                                if (perpPrices.TryGetValue(position.Symbol, out var currentPrice))
+                                {
+                                    decimal priceDiff = currentPrice - position.EntryPrice;
+                                    if (position.Side == PositionSide.Long)
+                                    {
+                                        unrealizedPnL = priceDiff * position.Quantity;
+                                    }
+                                    else
+                                    {
+                                        unrealizedPnL = -priceDiff * position.Quantity;
+                                    }
+                                }
+                            }
+                        }
+                        else if (position.Type == PositionType.Spot)
+                        {
+                            var spotPrices = await connector.GetSpotPricesAsync(
+                                new List<string> { position.Symbol });
+
+                            if (spotPrices.TryGetValue(position.Symbol, out var spotPrice))
+                            {
+                                decimal currentPrice = spotPrice.Price;
+                                decimal priceDiff = currentPrice - position.EntryPrice;
+
+                                if (position.Side == PositionSide.Long)
+                                {
+                                    unrealizedPnL = priceDiff * position.Quantity;
+                                }
+                                else
+                                {
+                                    unrealizedPnL = -priceDiff * position.Quantity;
+                                }
+                            }
+                        }
+
+                        // Create DTO with live data
+                        var positionDto = new PositionDto
+                        {
+                            Id = position.Id,
+                            ExecutionId = position.ExecutionId,
+                            Exchange = position.Exchange,
+                            Symbol = position.Symbol,
+                            Type = position.Type,
+                            Side = position.Side,
+                            Status = position.Status,
+                            EntryPrice = position.EntryPrice,
+                            ExitPrice = position.ExitPrice ?? 0,
+                            Quantity = position.Quantity,
+                            Leverage = position.Leverage,
+                            InitialMargin = position.InitialMargin,
+                            RealizedPnL = realizedPnL,
+                            UnrealizedPnL = unrealizedPnL,
+                            TotalFundingFeePaid = fundingPaid,
+                            TotalFundingFeeReceived = fundingReceived,
+                            OpenedAt = position.OpenedAt,
+                            ClosedAt = position.ClosedAt,
+                            ActiveOpportunityId = position.ExecutionId
+                        };
+
+                        positionDtos.Add(positionDto);
+
+                        // Update database with latest values
+                        position.UnrealizedPnL = unrealizedPnL;
+                        position.RealizedPnL = realizedPnL;
+                        position.TotalFundingFeePaid = fundingPaid;
+                        position.TotalFundingFeeReceived = fundingReceived;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Error enriching position {PositionId} for user {UserId}",
+                            position.Id, userId);
+                    }
+                }
+            }
+
+            // Save position updates
+            if (userPositions.Any())
+            {
+                await db.SaveChangesAsync(stoppingToken);
+            }
+
+            // Fetch user-specific balances
+            var balances = new List<AccountBalanceDto>();
+            foreach (var (exchangeName, connector) in userConnectors)
+            {
+                try
+                {
+                    var balance = await connector.GetAccountBalanceAsync();
+                    balances.Add(balance);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Error fetching balance for user {UserId} from {Exchange}",
+                        userId, exchangeName);
+                }
+            }
+
+            // Calculate user-specific P&L
+            var totalPnL = userPositions.Sum(p => p.UnrealizedPnL + p.RealizedPnL);
+            var today = DateTime.UtcNow.Date;
+            var todayMetric = await db.PerformanceMetrics
+                .Where(m => m.UserId == userId && m.Date == today)
+                .FirstOrDefaultAsync(stoppingToken);
+            var todayPnL = todayMetric?.TotalPnL ?? 0;
+
+            // BROADCAST USER-SPECIFIC DATA - only to this user's group
+            _logger.LogDebug("Broadcasting data for user {UserId} to group user_{UserId}", userId, userId);
+
+            // Send positions to user's group only
+            await _hubContext.Clients.Group($"user_{userId}")
+                .SendAsync("ReceivePositions", positionDtos, stoppingToken);
+
+            // Send balances to user's group only
+            await _hubContext.Clients.Group($"user_{userId}")
+                .SendAsync("ReceiveBalances", balances, stoppingToken);
+
+            // Send P&L to user's group only
+            await _hubContext.Clients.Group($"user_{userId}")
+                .SendAsync("ReceivePnLUpdate", new { totalPnL, todayPnL, timestamp = DateTime.UtcNow }, stoppingToken);
+
+            // Disconnect user-specific connectors
+            foreach (var connector in userConnectors.Values)
+            {
+                try
+                {
+                    await connector.DisconnectAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error disconnecting user {UserId} connector", userId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing data for user {UserId}", userId);
+        }
+    }
 
     private async Task ExecuteOpportunitiesAsync(List<ArbitrageOpportunityDto> opportunities)
     {

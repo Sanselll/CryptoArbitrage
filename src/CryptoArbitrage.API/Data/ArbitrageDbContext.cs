@@ -1,9 +1,10 @@
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using CryptoArbitrage.API.Data.Entities;
 
 namespace CryptoArbitrage.API.Data;
 
-public class ArbitrageDbContext : DbContext
+public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
 {
     public ArbitrageDbContext(DbContextOptions<ArbitrageDbContext> options)
         : base(options)
@@ -14,15 +15,17 @@ public class ArbitrageDbContext : DbContext
     public DbSet<Execution> Executions { get; set; }
     public DbSet<Position> Positions { get; set; }
     public DbSet<PerformanceMetric> PerformanceMetrics { get; set; }
+    public DbSet<UserExchangeApiKey> UserExchangeApiKeys { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        base.OnModelCreating(modelBuilder);
+        base.OnModelCreating(modelBuilder); // IMPORTANT: Call base for Identity tables
 
         // FundingRate configuration
         modelBuilder.Entity<FundingRate>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd(); // Ensure auto-increment
             entity.HasIndex(e => new { e.Exchange, e.Symbol, e.RecordedAt });
             entity.Property(e => e.Exchange).IsRequired().HasMaxLength(50);
             entity.Property(e => e.Symbol).IsRequired().HasMaxLength(20);
@@ -89,6 +92,44 @@ public class ArbitrageDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.ExecutionId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            // Foreign key to ApplicationUser
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.Positions)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
+
+        // Configure relationships for multi-user support
+        modelBuilder.Entity<ApplicationUser>()
+            .HasMany(u => u.ExchangeApiKeys)
+            .WithOne(k => k.User)
+            .HasForeignKey(k => k.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ApplicationUser>()
+            .HasMany(u => u.Executions)
+            .WithOne(e => e.User)
+            .HasForeignKey(e => e.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ApplicationUser>()
+            .HasMany(u => u.PerformanceMetrics)
+            .WithOne(pm => pm.User)
+            .HasForeignKey(pm => pm.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Indexes for performance
+        modelBuilder.Entity<Position>()
+            .HasIndex(p => p.UserId);
+
+        modelBuilder.Entity<Execution>()
+            .HasIndex(e => e.UserId);
+
+        modelBuilder.Entity<PerformanceMetric>()
+            .HasIndex(pm => new { pm.UserId, pm.Date });
+
+        modelBuilder.Entity<UserExchangeApiKey>()
+            .HasIndex(k => new { k.UserId, k.ExchangeName });
     }
 }

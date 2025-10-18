@@ -12,14 +12,23 @@ class SignalRService {
     onAlert: [] as ((data: { message: string; severity: string; timestamp: string }) => void)[],
   };
 
-  async connect(url: string = 'http://localhost:5052/arbitragehub') {
+  async connect(url: string = 'http://localhost:5052/hubs/arbitrage') {
     if (this.connection?.state === signalR.HubConnectionState.Connected) {
       console.log('Already connected');
       return;
     }
 
+    const token = localStorage.getItem('jwt_token');
+    if (!token) {
+      console.error('No authentication token available');
+      throw new Error('Not authenticated');
+    }
+
     this.connection = new signalR.HubConnectionBuilder()
-      .withUrl(url)
+      .withUrl(url, {
+        // CRITICAL: Send JWT token with connection
+        accessTokenFactory: () => token
+      })
       .withAutomaticReconnect()
       .configureLogging(signalR.LogLevel.Information)
       .build();

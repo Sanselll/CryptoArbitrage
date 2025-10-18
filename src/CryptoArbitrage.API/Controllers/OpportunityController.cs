@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using CryptoArbitrage.API.Data;
@@ -6,6 +7,12 @@ using CryptoArbitrage.API.Services;
 
 namespace CryptoArbitrage.API.Controllers;
 
+/// <summary>
+/// Handles arbitrage opportunity detection and execution.
+/// All endpoints require [Authorize] attribute for multi-user support.
+/// User identity is extracted from JWT token via ICurrentUserService.
+/// </summary>
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class OpportunityController : ControllerBase
@@ -13,15 +20,18 @@ public class OpportunityController : ControllerBase
     private readonly ArbitrageDbContext _context;
     private readonly ILogger<OpportunityController> _logger;
     private readonly ArbitrageExecutionService _executionService;
+    private readonly ICurrentUserService _currentUser;
 
     public OpportunityController(
         ArbitrageDbContext context,
         ILogger<OpportunityController> logger,
-        ArbitrageExecutionService executionService)
+        ArbitrageExecutionService executionService,
+        ICurrentUserService currentUser)
     {
         _context = context;
         _logger = logger;
         _executionService = executionService;
+        _currentUser = currentUser;
     }
 
     // COMMENTED OUT: ArbitrageOpportunities table no longer exists - opportunities are now in-memory only
@@ -163,10 +173,14 @@ public class OpportunityController : ControllerBase
     {
         try
         {
-            _logger.LogInformation(
-                "Execute request received for {Symbol} on {Exchange}, Strategy: {Strategy}",
-                request.Symbol, request.Exchange, request.Strategy);
+            if (string.IsNullOrEmpty(_currentUser.UserId))
+                return Unauthorized(new { error = "User not authenticated" });
 
+            _logger.LogInformation(
+                "Execute request received by user {UserId} for {Symbol} on {Exchange}, Strategy: {Strategy}",
+                _currentUser.UserId, request.Symbol, request.Exchange, request.Strategy);
+
+            // Execute opportunity (user ID is tracked in Execution record via controller)
             var response = await _executionService.ExecuteOpportunityAsync(request);
 
             if (!response.Success)
@@ -174,11 +188,15 @@ public class OpportunityController : ControllerBase
                 return BadRequest(response);
             }
 
+            _logger.LogInformation(
+                "Execution successful for user {UserId}: {Response}",
+                _currentUser.UserId, response);
+
             return Ok(response);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in execute endpoint");
+            _logger.LogError(ex, "Error in execute endpoint for user {UserId}", _currentUser.UserId);
             return StatusCode(500, new ExecuteOpportunityResponse
             {
                 Success = false,
@@ -201,7 +219,28 @@ public class OpportunityController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("Stop request received for Execution {Id}", executionId);
+            if (string.IsNullOrEmpty(_currentUser.UserId))
+                return Unauthorized(new { error = "User not authenticated" });
+
+            _logger.LogInformation("Stop request received by user {UserId} for Execution {Id}",
+                _currentUser.UserId, executionId);
+
+            // CRITICAL: Validate user owns this execution before allowing stop
+            var execution = await _context.Executions.FindAsync(executionId);
+            if (execution == null)
+                return NotFound(new { error = "Execution not found" });
+
+            // Verify user owns this execution
+            try
+            {
+                _currentUser.ValidateUserOwnsResource(execution.UserId);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                _logger.LogWarning("User {UserId} attempted to stop execution {ExecutionId} owned by {Owner}",
+                    _currentUser.UserId, executionId, execution.UserId);
+                return Forbid();
+            }
 
             var response = await _executionService.StopExecutionAsync(executionId);
 
@@ -210,11 +249,14 @@ public class OpportunityController : ControllerBase
                 return BadRequest(response);
             }
 
+            _logger.LogInformation("Execution {Id} stopped successfully for user {UserId}",
+                executionId, _currentUser.UserId);
+
             return Ok(response);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in stop execution endpoint");
+            _logger.LogError(ex, "Error in stop execution endpoint for user {UserId}", _currentUser.UserId);
             return StatusCode(500, new CloseOpportunityResponse
             {
                 Success = false,

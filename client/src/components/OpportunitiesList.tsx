@@ -1,4 +1,5 @@
 import { Target, ArrowUpCircle, ArrowDownCircle, Play, Clock, StopCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
 import { Badge } from './ui/Badge';
@@ -78,6 +79,7 @@ const formatExecutionTime = (openedAt: string) => {
 };
 
 export const OpportunitiesList = () => {
+  const navigate = useNavigate();
   const { opportunities, positions } = useArbitrageStore();
   const [timeUntilFunding, setTimeUntilFunding] = useState('');
   const [executionTimes, setExecutionTimes] = useState<{ [key: string]: string }>({});
@@ -122,9 +124,48 @@ export const OpportunitiesList = () => {
     .sort((a, b) => b.annualizedSpread - a.annualizedSpread)
     .slice(0, 20); // Show top 20 opportunities
 
-  const handleExecute = (opp: any) => {
-    setSelectedOpportunity(opp);
-    setIsDialogOpen(true);
+  const handleExecute = async (opp: any) => {
+    try {
+      // Fetch user's connected exchanges
+      const userApiKeys = await apiService.getUserApiKeys();
+      const connectedExchanges = userApiKeys
+        .filter((key) => key.isEnabled)
+        .map((key) => key.exchangeName);
+
+      // Determine which exchanges are needed
+      const isSpotPerp = opp.strategy === 1;
+      const requiredExchanges = isSpotPerp
+        ? [opp.exchange]
+        : [opp.longExchange, opp.shortExchange];
+
+      // Check if user has all required exchanges connected
+      const missingExchanges = requiredExchanges.filter(
+        (exchange) => !connectedExchanges.includes(exchange)
+      );
+
+      if (missingExchanges.length > 0) {
+        showError(
+          `To execute this opportunity, you need to connect the following exchange(s):\n\n${missingExchanges.join(', ')}\n\nPlease add your API keys in Profile Settings to continue.`,
+          'Exchange Connection Required',
+          'Go to Profile Settings',
+          () => {
+            // Navigate to Profile Settings
+            navigate('/profile');
+          }
+        );
+        return;
+      }
+
+      // All required exchanges are connected - open dialog
+      setSelectedOpportunity(opp);
+      setIsDialogOpen(true);
+    } catch (error: any) {
+      console.error('Error validating exchanges:', error);
+      showError(
+        `Failed to validate exchange connections: ${error.message}`,
+        'Validation Error'
+      );
+    }
   };
 
   const handleStop = async (opp: any) => {
@@ -451,6 +492,8 @@ export const OpportunitiesList = () => {
       title={alertState.title}
       message={alertState.message}
       variant={alertState.variant}
+      actionText={alertState.actionText}
+      onAction={alertState.onAction}
     />
 
     <ConfirmDialog

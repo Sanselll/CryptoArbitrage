@@ -18,6 +18,8 @@ interface ExecuteDialogProps {
     spotPrice?: number;
     perpetualPrice?: number;
     fundingRate?: number;
+    longFundingRate?: number;
+    shortFundingRate?: number;
     annualizedSpread?: number;
     estimatedProfitPercentage?: number;
   };
