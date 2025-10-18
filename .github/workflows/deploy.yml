@@ -80,26 +80,26 @@ jobs:
           PROD_DOMAIN: ${{ secrets.PROD_DOMAIN }}
         run: |
           
-          ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST << 'SSHEOF'
+          ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST bash << 'SSHEOF'
           set -e
-          
+
           APP_DIR="/home/deploy/crypto-arbitrage"
-          mkdir -p $APP_DIR
-          cd $APP_DIR
+          mkdir -p "$APP_DIR"
+          cd "$APP_DIR"
 
           if [ ! -d .git ]; then
-            git clone $GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git .
+            git clone "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
           fi
 
           git fetch origin
           git checkout develop
           git pull origin develop
-          
+
           if [ ! -f .env.production ]; then
             cp .env.production.example .env.production
           fi
-          
-          cat > .env.production << 'ENVEOF'
+
+          cat > .env.production << EOF
           POSTGRES_DB=crypto_arbitrage
           POSTGRES_USER=postgres
           POSTGRES_PASSWORD=$PROD_POSTGRES_PASSWORD
@@ -113,7 +113,7 @@ jobs:
           GOOGLE_CLIENT_SECRET=$PROD_GOOGLE_CLIENT_SECRET
           ASPNETCORE_ENVIRONMENT=Production
           IMAGE_TAG=$GITHUB_SHA
-          ENVEOF
+          EOF
           
           REPO_OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f1)
           docker pull ghcr.io/$REPO_OWNER/crypto-arbitrage/api:latest || true
