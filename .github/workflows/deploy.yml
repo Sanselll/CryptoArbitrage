@@ -95,6 +95,7 @@ jobs:
             PROD_ENCRYPTION_KEY="$PROD_ENCRYPTION_KEY" \
             PROD_GOOGLE_CLIENT_ID="$PROD_GOOGLE_CLIENT_ID" \
             PROD_GOOGLE_CLIENT_SECRET="$PROD_GOOGLE_CLIENT_SECRET" \
+            PROD_DOMAIN="$PROD_DOMAIN" \
             bash /tmp/deploy.sh "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
 
           rm ~/.ssh/deploy_key
