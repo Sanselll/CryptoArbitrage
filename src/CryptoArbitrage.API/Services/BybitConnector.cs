@@ -19,15 +19,19 @@ public class BybitConnector : IExchangeConnector
         _logger = logger;
     }
 
-    public async Task<bool> ConnectAsync(string apiKey, string apiSecret, bool useDemoTrading = false)
+    public async Task<bool> ConnectAsync(string? apiKey, string? apiSecret, bool useDemoTrading = false)
     {
         try
         {
-            var credentials = new ApiCredentials(apiKey, apiSecret);
+            // For public API access (funding rates, prices), credentials are optional
+            var hasCredentials = !string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(apiSecret);
 
             _restClient = new BybitRestClient(options =>
             {
-                options.ApiCredentials = credentials;
+                if (hasCredentials)
+                {
+                    options.ApiCredentials = new ApiCredentials(apiKey!, apiSecret!);
+                }
                 // Demo trading uses Bybit's demo trading environment
                 if (useDemoTrading)
                 {
@@ -37,24 +41,43 @@ public class BybitConnector : IExchangeConnector
 
             _socketClient = new BybitSocketClient(options =>
             {
-                options.ApiCredentials = credentials;
+                if (hasCredentials)
+                {
+                    options.ApiCredentials = new ApiCredentials(apiKey!, apiSecret!);
+                }
                 if (useDemoTrading)
                 {
                     options.Environment = Bybit.Net.BybitEnvironment.DemoTrading;
                 }
             });
 
-            // Test connection
-            var accountInfo = await _restClient.V5Api.Account.GetBalancesAsync(AccountType.Unified);
-
-            if (accountInfo.Success)
+            // Test connection - use public API if no credentials
+            if (hasCredentials)
             {
-                _logger.LogInformation("Successfully connected to Bybit");
-                return true;
-            }
+                var accountInfo = await _restClient.V5Api.Account.GetBalancesAsync(AccountType.Unified);
 
-            _logger.LogError("Failed to connect to Bybit: {Error}", accountInfo.Error);
-            return false;
+                if (accountInfo.Success)
+                {
+                    _logger.LogInformation("Successfully connected to Bybit");
+                    return true;
+                }
+
+                _logger.LogError("Failed to connect to Bybit: {Error}", accountInfo.Error);
+                return false;
+            }
+            else
+            {
+                // For public API access, test with a funding rates query
+                var fundingTest = await _restClient.V5Api.ExchangeData.GetFundingRateHistoryAsync(Category.Linear, "BTCUSDT", limit: 1);
+                if (fundingTest.Success)
+                {
+                    _logger.LogInformation("Successfully connected to Bybit (public data only - no API credentials)");
+                    return true;
+                }
+
+                _logger.LogError("Failed to connect to Bybit public API: {Error}", fundingTest.Error);
+                return false;
+            }
         }
         catch (Exception ex)
         {

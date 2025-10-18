@@ -70,6 +70,8 @@ interface AlertDialogProps {
   title: string;
   message: string;
   variant?: 'default' | 'success' | 'danger' | 'warning' | 'info';
+  actionText?: string;
+  onAction?: () => void;
 }
 
 export const AlertDialog = ({
@@ -78,20 +80,50 @@ export const AlertDialog = ({
   title,
   message,
   variant = 'info',
+  actionText,
+  onAction,
 }: AlertDialogProps) => {
+  const handleAction = () => {
+    if (onAction) {
+      onAction();
+    }
+    onClose();
+  };
+
   return (
     <Dialog isOpen={isOpen} onClose={onClose} title={title} variant={variant} showCloseButton={false}>
       <div className="space-y-4">
         <p className="text-sm text-binance-text whitespace-pre-line">{message}</p>
-        <div className="flex justify-end">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={onClose}
-            className="min-w-[80px]"
-          >
-            OK
-          </Button>
+        <div className="flex gap-2 justify-end">
+          {actionText && onAction ? (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={onClose}
+                className="min-w-[80px]"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleAction}
+                className="min-w-[120px]"
+              >
+                {actionText}
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={onClose}
+              className="min-w-[80px]"
+            >
+              OK
+            </Button>
+          )}
         </div>
       </div>
     </Dialog>

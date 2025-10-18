@@ -1,8 +1,15 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace CryptoArbitrage.API.Data.Entities;
 
 public class Position
 {
     public int Id { get; set; }
+
+    // Multi-user support
+    [Required]
+    public string UserId { get; set; } = string.Empty;
+    public ApplicationUser User { get; set; } = null!;
 
     // Link to Execution (nullable for historical positions)
     public int? ExecutionId { get; set; }

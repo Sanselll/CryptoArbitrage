@@ -43,10 +43,43 @@ interface ExecutionBalances {
   maxPositionSize: number;
 }
 
+interface UserApiKey {
+  id: number;
+  exchangeName: string;
+  isEnabled: boolean;
+}
+
 export const apiService = {
+  async getUserApiKeys(): Promise<UserApiKey[]> {
+    try {
+      const token = localStorage.getItem('jwt_token');
+      const response = await fetch(`${API_BASE_URL}/api/user/apikeys`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch user API keys');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching user API keys:', error);
+      throw error;
+    }
+  },
+
   async getPositions(): Promise<any[]> {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/position`);
+      const token = localStorage.getItem('jwt_token');
+      const response = await fetch(`${API_BASE_URL}/api/position`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
 
       if (!response.ok) {
         throw new Error('Failed to fetch positions');
@@ -61,9 +94,11 @@ export const apiService = {
 
   async executeOpportunity(request: ExecuteOpportunityRequest): Promise<ExecuteOpportunityResponse> {
     try {
+      const token = localStorage.getItem('jwt_token');
       const response = await fetch(`${API_BASE_URL}/api/opportunity/execute`, {
         method: 'POST',
         headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(request),
@@ -84,9 +119,11 @@ export const apiService = {
 
   async closeOpportunity(activeOpportunityId: number): Promise<CloseOpportunityResponse> {
     try {
+      const token = localStorage.getItem('jwt_token');
       const response = await fetch(`${API_BASE_URL}/api/opportunity/close/${activeOpportunityId}`, {
         method: 'POST',
         headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json',
         },
       });
@@ -106,9 +143,11 @@ export const apiService = {
 
   async stopExecution(executionId: number): Promise<CloseOpportunityResponse> {
     try {
+      const token = localStorage.getItem('jwt_token');
       const response = await fetch(`${API_BASE_URL}/api/opportunity/stop/${executionId}`, {
         method: 'POST',
         headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json',
         },
       });
@@ -128,8 +167,15 @@ export const apiService = {
 
   async getExecutionBalances(exchange: string, maxLeverage: number = 5): Promise<ExecutionBalances> {
     try {
+      const token = localStorage.getItem('jwt_token');
       const response = await fetch(
-        `${API_BASE_URL}/api/opportunity/execution-balances?exchange=${encodeURIComponent(exchange)}&maxLeverage=${maxLeverage}`
+        `${API_BASE_URL}/api/opportunity/execution-balances?exchange=${encodeURIComponent(exchange)}&maxLeverage=${maxLeverage}`,
+        {
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Content-Type': 'application/json',
+          },
+        }
       );
 
       if (!response.ok) {
