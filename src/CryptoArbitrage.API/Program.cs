@@ -148,8 +148,21 @@ var app = builder.Build();
 // Initialize database with migrations
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
-    db.Database.Migrate();
+    try
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        var db = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+
+        logger.LogInformation("Applying database migrations...");
+        db.Database.Migrate();
+        logger.LogInformation("Database migrations applied successfully");
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "An error occurred while migrating the database");
+        throw; // Re-throw to prevent app from starting with broken database
+    }
 }
 
 // Configure the HTTP request pipeline.
