@@ -9,33 +9,39 @@ using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Options;
 using Binance.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 
 namespace CryptoArbitrage.API.Services;
 
 public class BinanceConnector : IExchangeConnector
 {
     private readonly ILogger<BinanceConnector> _logger;
+    private readonly IConfiguration _configuration;
     private BinanceRestClient? _restClient;
     private BinanceSocketClient? _socketClient;
 
     public string ExchangeName => "Binance";
 
-    public BinanceConnector(ILogger<BinanceConnector> logger)
+    public BinanceConnector(ILogger<BinanceConnector> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _configuration = configuration;
     }
 
-    public async Task<bool> ConnectAsync(string apiKey, string apiSecret, bool useDemoTrading = false)
+    public async Task<bool> ConnectAsync(string apiKey, string apiSecret)
     {
         try
         {
+            // Read IsLive setting from configuration
+            var isLive = _configuration.GetValue<bool>("Environment:IsLive");
+
             // Check if API credentials are provided
             bool hasCredentials = !string.IsNullOrWhiteSpace(apiKey) && !string.IsNullOrWhiteSpace(apiSecret);
 
             if (hasCredentials)
             {
                 var credentials = new ApiCredentials(apiKey, apiSecret);
-                var environment = useDemoTrading ? BinanceEnvironment.Demo : BinanceEnvironment.Live;
+                var environment = isLive ? BinanceEnvironment.Live : BinanceEnvironment.Demo;
 
                 _restClient = new BinanceRestClient(options =>
                 {
@@ -64,15 +70,17 @@ public class BinanceConnector : IExchangeConnector
             else
             {
                 // Create client without credentials for public data only
+                var environment = isLive ? BinanceEnvironment.Live : BinanceEnvironment.Demo;
+
                 _restClient = new BinanceRestClient(options =>
                 {
                     // No credentials - public data only
-                    options.Environment = BinanceEnvironment.Demo; // Use demo for public data
+                    options.Environment = environment;
                 });
 
                 _socketClient = new BinanceSocketClient(options =>
                 {
-                    options.Environment = BinanceEnvironment.Demo;
+                    options.Environment = environment;
                 });
 
                 // Test connection with public endpoint
@@ -80,11 +88,12 @@ public class BinanceConnector : IExchangeConnector
 
                 if (exchangeInfo.Success)
                 {
-                    _logger.LogInformation("Successfully connected to Binance Demo (public data only - no API credentials)");
+                    var mode = isLive ? "Live" : "Demo";
+                    _logger.LogInformation("Successfully connected to Binance {Mode} (public data only - no API credentials)", mode);
                     return true;
                 }
 
-                _logger.LogError("Failed to connect to Binance Demo: {Error}", exchangeInfo.Error);
+                _logger.LogError("Failed to connect to Binance: {Error}", exchangeInfo.Error);
                 return false;
             }
         }

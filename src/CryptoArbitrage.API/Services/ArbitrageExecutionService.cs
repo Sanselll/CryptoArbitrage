@@ -897,15 +897,14 @@ public class ArbitrageExecutionService
         }
 
         // Connect using user's credentials
-        var connected = await connector.ConnectAsync(apiKey, apiSecret, userApiKey.UseDemoTrading);
+        var connected = await connector.ConnectAsync(apiKey, apiSecret);
         if (!connected)
         {
             throw new Exception($"Failed to connect to {exchangeName} using your API credentials. Please verify your API keys are correct.");
         }
 
-        var environment = userApiKey.UseDemoTrading ? "Demo Trading" : "Live";
-        _logger.LogInformation("Connected to {Exchange} ({Environment}) for user {UserId}",
-            exchangeName, environment, _currentUser.UserId);
+        _logger.LogInformation("Connected to {Exchange} for user {UserId}",
+            exchangeName, _currentUser.UserId);
     }
 
     private decimal RoundQuantity(decimal quantity, string symbol)

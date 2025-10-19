@@ -21,7 +21,12 @@
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", COUNT(*) as count FROM \"\"FundingRates\"\" GROUP BY \"\"Exchange\"\" ORDER BY \"\"Exchange\"\";\")",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Symbol\"\" = ''COAIUSDT'' ORDER BY \"\"Exchange\"\";\")",
       "WebFetch(domain:developers.binance.com)",
-      "WebFetch(domain:jkorf.github.io)"
+      "WebFetch(domain:jkorf.github.io)",
+      "Bash(chmod +x /Users/sansel/Projects/CryptoArbitrage/docker-init-db.sh)",
+      "Bash(ASPNETCORE_ENVIRONMENT=DevelopmentDemo dotnet run --no-build)",
+      "Bash(ASPNETCORE_ENVIRONMENT=DevelopmentDemo dotnet run)",
+      "Bash(ASPNETCORE_ENVIRONMENT=DevelopmentLive dotnet run)",
+      "Bash(export ASPNETCORE_ENVIRONMENT=DevelopmentLive)"
     ],
     "deny": [],
     "ask": []

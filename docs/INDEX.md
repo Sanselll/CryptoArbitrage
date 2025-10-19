@@ -105,6 +105,24 @@ Welcome to the Crypto Funding Arbitrage Platform documentation. This index will 
 
 ---
 
+### 6. Environment Configuration
+**File**: [ENVIRONMENT_CONFIGURATION.md](./ENVIRONMENT_CONFIGURATION.md)
+
+**Contents**:
+- Demo vs Live environment overview
+- Global configuration architecture
+- Database separation strategy
+- Running different environments (local, Docker, production)
+- Environment verification and monitoring
+- Security considerations for Live mode
+- Migration from old per-user demo trading
+- Troubleshooting environment issues
+- Best practices for environment management
+
+**Best for**: DevOps engineers, system administrators, developers deploying to different environments
+
+---
+
 ## Documentation by Role
 
 ### For Traders
@@ -134,7 +152,8 @@ Welcome to the Crypto Funding Arbitrage Platform documentation. This index will 
 **Essential Reading**:
 1. [README.md](../README.md) - Project overview
 2. [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - Deployment procedures
-3. [ARCHITECTURE.md](./ARCHITECTURE.md) - System architecture
+3. [ENVIRONMENT_CONFIGURATION.md](./ENVIRONMENT_CONFIGURATION.md) - Environment setup and management
+4. [ARCHITECTURE.md](./ARCHITECTURE.md) - System architecture
 
 **Optional**:
 - [API_REFERENCE.md](./API_REFERENCE.md) - Health checks and monitoring
@@ -172,6 +191,7 @@ Welcome to the Crypto Funding Arbitrage Platform documentation. This index will 
 
 ### Operations & Deployment
 - [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - Complete deployment guide
+- [ENVIRONMENT_CONFIGURATION.md](./ENVIRONMENT_CONFIGURATION.md) - Environment setup
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Deployment architecture
 
 ### API & Integration
@@ -305,6 +325,7 @@ Documentation is versioned with the codebase:
 | DEPLOYMENT_GUIDE.md | 2025-01-15 | ✅ Complete |
 | TRADING_STRATEGY.md | 2025-01-15 | ✅ Complete |
 | DEVELOPMENT_GUIDE.md | 2025-01-15 | ✅ Complete |
+| ENVIRONMENT_CONFIGURATION.md | 2025-10-19 | ✅ Complete |
 
 ---
 

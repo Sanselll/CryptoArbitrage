@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database (shared by both Live and Demo)
   postgres:
     image: postgres:16-alpine
     container_name: crypto-arbitrage-db
@@ -14,6 +14,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker-init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -22,24 +23,24 @@ services:
     networks:
       - arbitrage-network
 
-  # Backend API
-  backend:
+  # Backend API - Live Mode (Port 8080)
+  backend-live:
     build:
       context: ./src/CryptoArbitrage.API
       dockerfile: Dockerfile
-    container_name: crypto-arbitrage-api
+    container_name: crypto-arbitrage-api-live
     restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-8080}:8080"
+      - "8080:8080"
     environment:
-      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
-      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=${POSTGRES_DB:-crypto_arbitrage};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
+      - ASPNETCORE_ENVIRONMENT=ProductionLive
+      - ASPNETCORE_URLS=http://+:8080
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - Jwt__Issuer=${JWT_ISSUER:-CryptoArbitrage}
-      - Jwt__Audience=${JWT_AUDIENCE:-CryptoArbitrageClient}
-      - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
-      - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
-      - Encryption__Key=${ENCRYPTION_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,20 +53,72 @@ services:
       retries: 3
       start_period: 40s
 
-  # Frontend
-  frontend:
+  # Backend API - Demo Mode (Port 8081)
+  backend-demo:
+    build:
+      context: ./src/CryptoArbitrage.API
+      dockerfile: Dockerfile
+    container_name: crypto-arbitrage-api-demo
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=ProductionDemo
+      - ASPNETCORE_URLS=http://+:8080
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - arbitrage-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+
+  # Frontend - Live Mode (Port 80)
+  frontend-live:
     build:
       context: ./client
       dockerfile: Dockerfile
       args:
         VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api}
-    container_name: crypto-arbitrage-frontend
+        VITE_API_BASE_URL: http://localhost:8080/api
+    container_name: crypto-arbitrage-frontend-live
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3000}:80"
+      - "80:80"
     depends_on:
-      - backend
+      - backend-live
+    networks:
+      - arbitrage-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # Frontend - Demo Mode (Port 81)
+  frontend-demo:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+        VITE_API_BASE_URL: http://localhost:8081/api
+    container_name: crypto-arbitrage-frontend-demo
+    restart: unless-stopped
+    ports:
+      - "81:80"
+    depends_on:
+      - backend-demo
     networks:
       - arbitrage-network
     healthcheck:

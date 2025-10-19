@@ -72,7 +72,6 @@ public class UserController : ControllerBase
                 k.ExchangeName,
                 apiKey = MaskApiKey(k.EncryptedApiKey),
                 k.IsEnabled,
-                k.UseDemoTrading,
                 k.CreatedAt,
                 k.LastTestedAt,
                 k.LastTestResult
@@ -139,7 +138,7 @@ public class UserController : ControllerBase
                 }
 
                 // Test the API credentials by connecting to the exchange
-                var connectionSuccess = await connector.ConnectAsync(request.ApiKey, request.ApiSecret, request.UseDemoTrading);
+                var connectionSuccess = await connector.ConnectAsync(request.ApiKey, request.ApiSecret);
 
                 if (!connectionSuccess)
                 {
@@ -177,7 +176,6 @@ public class UserController : ControllerBase
                 EncryptedApiKey = encryptedKey,
                 EncryptedApiSecret = encryptedSecret,
                 IsEnabled = true,
-                UseDemoTrading = request.UseDemoTrading,
                 CreatedAt = DateTime.UtcNow,
                 LastTestedAt = DateTime.UtcNow,
                 LastTestResult = "Success: Connected to exchange"
@@ -187,8 +185,8 @@ public class UserController : ControllerBase
             await _db.SaveChangesAsync();
 
             _logger.LogInformation(
-                "User {UserId} added and validated API key for {Exchange} (DemoMode: {DemoMode})",
-                _currentUser.UserId, request.ExchangeName, request.UseDemoTrading);
+                "User {UserId} added and validated API key for {Exchange}",
+                _currentUser.UserId, request.ExchangeName);
 
             return Ok(new { id = apiKey.Id, message = "API key added and validated successfully" });
         }
@@ -234,9 +232,6 @@ public class UserController : ControllerBase
 
             if (request.IsEnabled.HasValue)
                 apiKey.IsEnabled = request.IsEnabled.Value;
-
-            if (request.UseDemoTrading.HasValue)
-                apiKey.UseDemoTrading = request.UseDemoTrading.Value;
 
             await _db.SaveChangesAsync();
 
@@ -361,7 +356,7 @@ public class UserController : ControllerBase
                 }
 
                 // Attempt connection with actual API credentials
-                var connectionSuccess = await connector.ConnectAsync(key, secret, apiKey.UseDemoTrading);
+                var connectionSuccess = await connector.ConnectAsync(key, secret);
 
                 apiKey.LastTestedAt = DateTime.UtcNow;
                 apiKey.LastTestResult = connectionSuccess ? "Success: Connected to exchange" : "Failed: Invalid API credentials";
@@ -432,10 +427,10 @@ public class UserController : ControllerBase
 /// <summary>
 /// Request model for adding a new API key.
 /// </summary>
-public record AddApiKeyRequest(string ExchangeName, string ApiKey, string ApiSecret, bool UseDemoTrading);
+public record AddApiKeyRequest(string ExchangeName, string ApiKey, string ApiSecret);
 
 /// <summary>
 /// Request model for updating an existing API key.
 /// All fields are optional - only provided fields will be updated.
 /// </summary>
-public record UpdateApiKeyRequest(string? ApiKey, string? ApiSecret, bool? IsEnabled, bool? UseDemoTrading);
+public record UpdateApiKeyRequest(string? ApiKey, string? ApiSecret, bool? IsEnabled);

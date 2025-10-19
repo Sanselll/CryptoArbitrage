@@ -1,15 +1,29 @@
 import { Activity, TrendingUp, TrendingDown, Wifi, WifiOff, User, Settings, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { useAuthStore } from '../stores/authStore';
 import { Badge } from './ui/Badge';
+import apiClient from '../services/apiClient';
 
 export const Header = () => {
   const { totalPnL, todayPnL, isConnected, disconnect } = useArbitrageStore();
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const [showMenu, setShowMenu] = useState(false);
+  const [environmentMode, setEnvironmentMode] = useState<string>('Demo');
+
+  useEffect(() => {
+    const fetchEnvironment = async () => {
+      try {
+        const response = await apiClient.get('/environment/status');
+        setEnvironmentMode(response.data.mode);
+      } catch (error) {
+        console.error('Failed to fetch environment status:', error);
+      }
+    };
+    fetchEnvironment();
+  }, []);
 
   const handleLogout = () => {
     disconnect();
@@ -44,6 +58,14 @@ export const Header = () => {
             <WifiOff className="w-3 h-3" />
           )}
           {isConnected ? 'Live' : 'Offline'}
+        </Badge>
+
+        {/* Environment Mode Badge */}
+        <Badge
+          variant={environmentMode === 'Live' ? 'warning' : 'info'}
+          size="sm"
+        >
+          {environmentMode}
         </Badge>
       </div>
 

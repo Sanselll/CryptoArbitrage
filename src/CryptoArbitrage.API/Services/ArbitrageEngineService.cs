@@ -6,6 +6,7 @@ using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Config;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 
 namespace CryptoArbitrage.API.Services;
 
@@ -64,8 +65,12 @@ public class ArbitrageEngineService : BackgroundService
             {
                 IExchangeConnector? connector = exchange.Name.ToLower() switch
                 {
-                    "binance" => new BinanceConnector(_serviceProvider.GetRequiredService<ILogger<BinanceConnector>>()),
-                    "bybit" => new BybitConnector(_serviceProvider.GetRequiredService<ILogger<BybitConnector>>()),
+                    "binance" => new BinanceConnector(
+                        _serviceProvider.GetRequiredService<ILogger<BinanceConnector>>(),
+                        _serviceProvider.GetRequiredService<IConfiguration>()),
+                    "bybit" => new BybitConnector(
+                        _serviceProvider.GetRequiredService<ILogger<BybitConnector>>(),
+                        _serviceProvider.GetRequiredService<IConfiguration>()),
                     _ => null
                 };
 
@@ -73,12 +78,11 @@ public class ArbitrageEngineService : BackgroundService
                 {
                     // For multi-user system: Initialize without API keys to use public APIs
                     // User-specific API keys are stored in database and used for trading operations
-                    var connected = await connector.ConnectAsync(null, null, exchange.UseDemoTrading);
+                    var connected = await connector.ConnectAsync(null, null);
                     if (connected)
                     {
                         _exchangeConnectors[exchange.Name] = connector;
-                        var environment = exchange.UseDemoTrading ? "Demo/Testnet" : "Live";
-                        _logger.LogInformation("Connected to {Exchange} public API ({Environment})", exchange.Name, environment);
+                        _logger.LogInformation("Connected to {Exchange} public API", exchange.Name);
                     }
                 }
             }
@@ -758,9 +762,11 @@ public class ArbitrageEngineService : BackgroundService
                     IExchangeConnector? connector = apiKey.ExchangeName.ToLower() switch
                     {
                         "binance" => new BinanceConnector(
-                            scope.ServiceProvider.GetRequiredService<ILogger<BinanceConnector>>()),
+                            scope.ServiceProvider.GetRequiredService<ILogger<BinanceConnector>>(),
+                            scope.ServiceProvider.GetRequiredService<IConfiguration>()),
                         "bybit" => new BybitConnector(
-                            scope.ServiceProvider.GetRequiredService<ILogger<BybitConnector>>()),
+                            scope.ServiceProvider.GetRequiredService<ILogger<BybitConnector>>(),
+                            scope.ServiceProvider.GetRequiredService<IConfiguration>()),
                         _ => null
                     };
 
@@ -768,16 +774,14 @@ public class ArbitrageEngineService : BackgroundService
                     {
                         var connected = await connector.ConnectAsync(
                             decryptedKey,
-                            decryptedSecret,
-                            apiKey.UseDemoTrading);
+                            decryptedSecret);
 
                         if (connected)
                         {
                             userConnectors[apiKey.ExchangeName] = connector;
                             _logger.LogDebug(
-                                "User {UserId} connected to {Exchange} ({Mode})",
-                                userId, apiKey.ExchangeName,
-                                apiKey.UseDemoTrading ? "Demo" : "Live");
+                                "User {UserId} connected to {Exchange}",
+                                userId, apiKey.ExchangeName);
                         }
                         else
                         {
