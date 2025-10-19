@@ -148,31 +148,20 @@ var app = builder.Build();
 // Apply database migrations on startup
 using (var scope = app.Services.CreateScope())
 {
-    var services = scope.ServiceProvider;
-    var logger = services.GetRequiredService<ILogger<Program>>();
-
     try
     {
-        var context = services.GetRequiredService<ArbitrageDbContext>();
-        logger.LogInformation("Checking for pending migrations...");
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        var db = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
 
-        var pendingMigrations = context.Database.GetPendingMigrations().ToList();
-        if (pendingMigrations.Any())
-        {
-            logger.LogInformation($"Found {pendingMigrations.Count} pending migrations: {string.Join(", ", pendingMigrations)}");
-            logger.LogInformation("Applying database migrations...");
-            context.Database.Migrate();
-            logger.LogInformation("Database migrations applied successfully");
-        }
-        else
-        {
-            logger.LogInformation("Database is already up to date");
-        }
+        logger.LogInformation("Applying database migrations...");
+        db.Database.Migrate();
+        logger.LogInformation("Database migrations applied successfully");
     }
     catch (Exception ex)
     {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         logger.LogError(ex, "An error occurred while migrating the database");
-        throw;
+        throw; // Re-throw to prevent app from starting with broken database
     }
 }
 
