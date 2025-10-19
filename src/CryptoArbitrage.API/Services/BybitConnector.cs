@@ -32,11 +32,8 @@ public class BybitConnector : IExchangeConnector
                 {
                     options.ApiCredentials = new ApiCredentials(apiKey!, apiSecret!);
                 }
-                // Demo trading uses Bybit's demo trading environment
-                if (useDemoTrading)
-                {
-                    options.Environment = Bybit.Net.BybitEnvironment.DemoTrading;
-                }
+                // Use demo trading environment
+                options.Environment = Bybit.Net.BybitEnvironment.DemoTrading;
             });
 
             _socketClient = new BybitSocketClient(options =>
@@ -45,10 +42,8 @@ public class BybitConnector : IExchangeConnector
                 {
                     options.ApiCredentials = new ApiCredentials(apiKey!, apiSecret!);
                 }
-                if (useDemoTrading)
-                {
-                    options.Environment = Bybit.Net.BybitEnvironment.DemoTrading;
-                }
+                // Use demo trading environment
+                options.Environment = Bybit.Net.BybitEnvironment.DemoTrading;
             });
 
             // Test connection - use public API if no credentials
@@ -234,6 +229,21 @@ public class BybitConnector : IExchangeConnector
 
         try
         {
+            // First, fetch instruments info to get funding interval for each symbol
+            var instrumentsInfo = await _restClient.V5Api.ExchangeData.GetLinearInverseSymbolsAsync(Category.Linear);
+            var fundingIntervalMap = new Dictionary<string, int>();
+
+            if (instrumentsInfo.Success && instrumentsInfo.Data != null)
+            {
+                foreach (var info in instrumentsInfo.Data.List)
+                {
+                    // FundingInterval is in minutes, convert to hours
+                    int intervalMinutes = info.FundingInterval > 0 ? info.FundingInterval : 480; // Default: 480 minutes = 8 hours
+                    fundingIntervalMap[info.Name] = intervalMinutes / 60;
+                }
+                _logger.LogInformation("Loaded funding intervals for {Count} symbols from Bybit", fundingIntervalMap.Count);
+            }
+
             // Get all linear perpetual contracts
             var instruments = await _restClient.V5Api.ExchangeData.GetLinearInverseTickersAsync(Category.Linear);
 
@@ -243,17 +253,51 @@ public class BybitConnector : IExchangeConnector
                     .Where(i => symbols.Count == 0 || symbols.Contains(i.Symbol))
                     .ToList();
 
+                _logger.LogInformation("Fetching funding rates for {Count} symbols from Bybit", relevantInstruments.Count);
+
                 foreach (var instrument in relevantInstruments)
                 {
                     if (instrument.FundingRate.HasValue && instrument.NextFundingTime.HasValue)
                     {
+                        var currentRate = instrument.FundingRate.Value;
+
+                        // Get funding interval from map, fallback to 8 hours
+                        int fundingIntervalHours = 8; // Default
+                        if (fundingIntervalMap.TryGetValue(instrument.Symbol, out var intervalHours))
+                        {
+                            fundingIntervalHours = intervalHours;
+                        }
+
+                        // Note: We skip fetching historical rates per-symbol as it requires 228+ sequential API calls
+                        // which is too slow. Previous rate will be populated from database on next fetch cycle.
+                        decimal? previousRate = null;
+                        decimal? previousAnnualizedRate = null;
+
+                        // Calculate annualized rate: Rate × (24 / interval) × 365 × 100
+                        var annualizedRate = currentRate * (24m / fundingIntervalHours) * 365 * 100;
+
+                        // Determine direction
+                        var direction = currentRate < 0
+                            ? Data.Entities.FundingDirection.ShortPaysLong
+                            : Data.Entities.FundingDirection.LongPaysShort;
+
+                        // Bybit doesn't expose funding cap/floor in API
+                        decimal? fundingCap = null;
+                        decimal? fundingFloor = null;
+
                         fundingRates.Add(new FundingRateDto
                         {
                             Exchange = ExchangeName,
                             Symbol = instrument.Symbol,
-                            Rate = instrument.FundingRate.Value,
-                            AnnualizedRate = instrument.FundingRate.Value * 3 * 365, // 3 times per day
-                            FundingTime = DateTime.UtcNow, // Current time as funding time
+                            Rate = currentRate,
+                            AnnualizedRate = annualizedRate,
+                            FundingIntervalHours = fundingIntervalHours,
+                            Direction = direction,
+                            PreviousRate = previousRate,
+                            PreviousAnnualizedRate = previousAnnualizedRate,
+                            FundingCap = fundingCap,
+                            FundingFloor = fundingFloor,
+                            FundingTime = DateTime.UtcNow,
                             NextFundingTime = instrument.NextFundingTime.Value,
                             RecordedAt = DateTime.UtcNow
                         });

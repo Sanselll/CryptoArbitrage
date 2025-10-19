@@ -19,7 +19,9 @@
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Symbol\"\" = ''COAIUSDT'' ORDER BY \"\"RecordedAt\"\" DESC LIMIT 10;\")",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT COUNT(*) as total_records, COUNT(DISTINCT \"\"Exchange\"\") as exchanges, MIN(\"\"RecordedAt\"\") as oldest, MAX(\"\"RecordedAt\"\") as newest FROM \"\"FundingRates\"\";\")",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", COUNT(*) as count FROM \"\"FundingRates\"\" GROUP BY \"\"Exchange\"\" ORDER BY \"\"Exchange\"\";\")",
-      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Symbol\"\" = ''COAIUSDT'' ORDER BY \"\"Exchange\"\";\")"
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Symbol\"\" = ''COAIUSDT'' ORDER BY \"\"Exchange\"\";\")",
+      "WebFetch(domain:developers.binance.com)",
+      "WebFetch(domain:jkorf.github.io)"
     ],
     "deny": [],
     "ask": []

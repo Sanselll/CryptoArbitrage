@@ -8,6 +8,7 @@ using Binance.Net.Enums;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Options;
 using Binance.Net;
+using System.Text.Json;
 
 namespace CryptoArbitrage.API.Services;
 
@@ -66,12 +67,12 @@ public class BinanceConnector : IExchangeConnector
                 _restClient = new BinanceRestClient(options =>
                 {
                     // No credentials - public data only
-                    options.Environment = BinanceEnvironment.Live; // Use live for public data
+                    options.Environment = BinanceEnvironment.Demo; // Use demo for public data
                 });
 
                 _socketClient = new BinanceSocketClient(options =>
                 {
-                    options.Environment = BinanceEnvironment.Live;
+                    options.Environment = BinanceEnvironment.Demo;
                 });
 
                 // Test connection with public endpoint
@@ -79,11 +80,11 @@ public class BinanceConnector : IExchangeConnector
 
                 if (exchangeInfo.Success)
                 {
-                    _logger.LogInformation("Successfully connected to Binance (public data only - no API credentials)");
+                    _logger.LogInformation("Successfully connected to Binance Demo (public data only - no API credentials)");
                     return true;
                 }
 
-                _logger.LogError("Failed to connect to Binance: {Error}", exchangeInfo.Error);
+                _logger.LogError("Failed to connect to Binance Demo: {Error}", exchangeInfo.Error);
                 return false;
             }
         }
@@ -171,6 +172,23 @@ public class BinanceConnector : IExchangeConnector
 
         try
         {
+            // First, fetch funding info for all symbols to get interval hours and caps/floors
+            var fundingInfo = await _restClient.UsdFuturesApi.ExchangeData.GetFundingInfoAsync();
+            var fundingInfoMap = new Dictionary<string, (int intervalHours, decimal cap, decimal floor)>();
+
+            if (fundingInfo.Success && fundingInfo.Data != null)
+            {
+                foreach (var info in fundingInfo.Data)
+                {
+                    fundingInfoMap[info.Symbol] = (
+                        info.FundingIntervalHours,
+                        info.AdjustedFundingRateCap,
+                        info.AdjustedFundingRateFloor
+                    );
+                }
+                _logger.LogInformation("Loaded funding info for {Count} symbols from Binance", fundingInfoMap.Count);
+            }
+
             // Use premium index to get current funding rate (shown on Binance website)
             // This is the rate that will be applied at the next funding time
             var premiumIndex = await _restClient.UsdFuturesApi.ExchangeData.GetMarkPricesAsync();
@@ -179,22 +197,56 @@ public class BinanceConnector : IExchangeConnector
             {
                 var symbolsToFetch = symbols.Count > 0 ? symbols : new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT" };
 
-                foreach (var symbol in symbolsToFetch)
+                // Filter mark prices to only requested symbols to avoid processing all 621 symbols
+                var relevantMarkPrices = premiumIndex.Data.Where(p => symbolsToFetch.Contains(p.Symbol)).ToList();
+
+                _logger.LogInformation("Fetching funding rates for {Count} symbols from Binance", relevantMarkPrices.Count);
+
+                foreach (var markPrice in relevantMarkPrices)
                 {
-                    var markPrice = premiumIndex.Data.FirstOrDefault(p => p.Symbol == symbol);
-                    if (markPrice != null)
+                    var currentRate = markPrice.FundingRate ?? 0;
+
+                    // Get funding interval and caps from API, fallback to defaults
+                    int fundingIntervalHours = 8; // Default: 8h (3 times per day)
+                    decimal? fundingCap = 0.00375m; // Default: 0.375%
+                    decimal? fundingFloor = -0.00375m; // Default: -0.375%
+
+                    if (fundingInfoMap.TryGetValue(markPrice.Symbol, out var info))
                     {
-                        fundingRates.Add(new FundingRateDto
-                        {
-                            Exchange = ExchangeName,
-                            Symbol = markPrice.Symbol,
-                            Rate = markPrice.FundingRate ?? 0, // Current predicted funding rate for next funding time
-                            AnnualizedRate = (markPrice.FundingRate ?? 0) * 3 * 365, // 3 times per day
-                            FundingTime = DateTime.UtcNow,
-                            NextFundingTime = markPrice.NextFundingTime,
-                            RecordedAt = DateTime.UtcNow
-                        });
+                        fundingIntervalHours = info.intervalHours;
+                        fundingCap = info.cap;
+                        fundingFloor = info.floor;
                     }
+
+                    // Note: We skip fetching historical rates per-symbol as it requires 228+ sequential API calls
+                    // which is too slow. Previous rate will be populated from database on next fetch cycle.
+                    decimal? previousRate = null;
+                    decimal? previousAnnualizedRate = null;
+
+                    // Calculate annualized rate: Rate × (24 / interval) × 365 × 100
+                    var annualizedRate = currentRate * (24m / fundingIntervalHours) * 365 * 100;
+
+                    // Determine direction
+                    var direction = currentRate < 0
+                        ? Data.Entities.FundingDirection.ShortPaysLong
+                        : Data.Entities.FundingDirection.LongPaysShort;
+
+                    fundingRates.Add(new FundingRateDto
+                    {
+                        Exchange = ExchangeName,
+                        Symbol = markPrice.Symbol,
+                        Rate = currentRate,
+                        AnnualizedRate = annualizedRate,
+                        FundingIntervalHours = fundingIntervalHours,
+                        Direction = direction,
+                        PreviousRate = previousRate,
+                        PreviousAnnualizedRate = previousAnnualizedRate,
+                        FundingCap = fundingCap,
+                        FundingFloor = fundingFloor,
+                        FundingTime = DateTime.UtcNow,
+                        NextFundingTime = markPrice.NextFundingTime,
+                        RecordedAt = DateTime.UtcNow
+                    });
                 }
             }
         }

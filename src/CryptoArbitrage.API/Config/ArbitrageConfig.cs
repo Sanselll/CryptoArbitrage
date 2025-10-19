@@ -1,3 +1,5 @@
+using CryptoArbitrage.API.Models;
+
 namespace CryptoArbitrage.API.Config;
 
 public class ExchangeConfig
@@ -28,6 +30,23 @@ public class ArbitrageConfig
     public decimal MinHighPriorityFundingRate { get; set; } = 0.01m; // 1% = 365% APR - always include these
     public double SymbolRefreshIntervalHours { get; set; } = 24; // Refresh symbol list daily
 
+    // Strategy configuration (enable/disable each strategy type)
+    public bool EnableSpotPerpetualSameExchange { get; set; } = true;       // Buy spot + short perp on same exchange
+    public bool EnableCrossExchangeFuturesFutures { get; set; } = true;     // Long perp on one exchange + short perp on another
+    public bool EnableCrossExchangeSpotFutures { get; set; } = true;        // Buy spot on one exchange + short perp on another
+
     // Exchange configurations (moved from database)
     public List<ExchangeConfig> Exchanges { get; set; } = new();
+
+    // Helper method to check if a strategy is enabled
+    public bool IsStrategyEnabled(StrategySubType strategy)
+    {
+        return strategy switch
+        {
+            StrategySubType.SpotPerpetualSameExchange => EnableSpotPerpetualSameExchange,
+            StrategySubType.CrossExchangeFuturesFutures => EnableCrossExchangeFuturesFutures,
+            StrategySubType.CrossExchangeSpotFutures => EnableCrossExchangeSpotFutures,
+            _ => false
+        };
+    }
 }
