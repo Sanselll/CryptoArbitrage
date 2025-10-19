@@ -1,4 +1,4 @@
-import { Activity, TrendingUp, TrendingDown, Wifi, WifiOff, User, Settings, LogOut } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wifi, WifiOff, User, Settings, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useArbitrageStore } from '../stores/arbitrageStore';
@@ -42,7 +42,24 @@ export const Header = () => {
       <div className="flex items-center gap-4">
         {/* Logo/Brand */}
         <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-binance-yellow" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="url(#activity-gradient)"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-4 h-4"
+          >
+            <defs>
+              <linearGradient id="activity-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style={{ stopColor: '#FFFF00', stopOpacity: 1 }} />
+                <stop offset="100%" style={{ stopColor: '#FFA500', stopOpacity: 1 }} />
+              </linearGradient>
+            </defs>
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
           <h1 className="text-sm font-bold text-binance-yellow">Crypto Arbitrage</h1>
         </div>
 
