@@ -26,7 +26,10 @@
       "Bash(ASPNETCORE_ENVIRONMENT=DevelopmentDemo dotnet run --no-build)",
       "Bash(ASPNETCORE_ENVIRONMENT=DevelopmentDemo dotnet run)",
       "Bash(ASPNETCORE_ENVIRONMENT=DevelopmentLive dotnet run)",
-      "Bash(export ASPNETCORE_ENVIRONMENT=DevelopmentLive)"
+      "Bash(export ASPNETCORE_ENVIRONMENT=DevelopmentLive)",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''FundingRates'' ORDER BY ordinal_position;\")",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''ActiveExecutions'' ORDER BY ordinal_position;\")",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" ORDER BY \"\"RecordedAt\"\" DESC LIMIT 5;\")"
     ],
     "deny": [],
     "ask": []

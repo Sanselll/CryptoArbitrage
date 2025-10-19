@@ -239,6 +239,48 @@ public class ArbitrageEngineService : BackgroundService
         fetchStopwatch.Stop();
         _logger.LogInformation("⏱️  Total funding rate fetch and save time: {ElapsedMs}ms", fetchStopwatch.ElapsedMilliseconds);
 
+        // Enrich funding rates with 24h volume data before broadcasting
+        try
+        {
+            var allSymbols = fundingRates.Values.SelectMany(r => r.Select(fr => fr.Symbol)).Distinct().ToList();
+            var volumeByExchange = new Dictionary<string, Dictionary<string, decimal>>();
+
+            foreach (var (exchangeName, connector) in _exchangeConnectors)
+            {
+                try
+                {
+                    var volumes = await connector.Get24hVolumeAsync(allSymbols);
+                    volumeByExchange[exchangeName] = volumes;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to fetch 24h volumes from {Exchange}", exchangeName);
+                }
+            }
+
+            // Populate volume for each funding rate
+            foreach (var (exchangeName, rates) in fundingRates)
+            {
+                if (volumeByExchange.TryGetValue(exchangeName, out var exchangeVolumes))
+                {
+                    foreach (var rate in rates)
+                    {
+                        if (exchangeVolumes.TryGetValue(rate.Symbol, out var volume))
+                        {
+                            rate.Volume24h = volume;
+                        }
+                    }
+                }
+            }
+
+            _logger.LogInformation("Enriched {Count} funding rates with 24h volume data",
+                fundingRates.Values.Sum(r => r.Count));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error enriching funding rates with volume data");
+        }
+
         // Broadcast funding rates to ALL users (shared global data)
         var allRates = fundingRates.Values.SelectMany(r => r).ToList();
         await _hubContext.Clients.All.SendAsync("ReceiveFundingRates", allRates, stoppingToken);

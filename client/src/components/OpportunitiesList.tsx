@@ -1,4 +1,4 @@
-import { Target, ArrowUpCircle, ArrowDownCircle, Play, Clock, StopCircle } from 'lucide-react';
+import { Target, ArrowUpCircle, ArrowDownCircle, Play, Clock, StopCircle, TrendingUp, TrendingDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
@@ -52,6 +52,16 @@ const getNextFundingTime = () => {
   return nextFunding;
 };
 
+// Helper function to get exchange-specific time until next funding
+const getExchangeFundingTime = (nextFundingTimeStr?: string): string => {
+  if (!nextFundingTimeStr) {
+    // Fallback to default calculation
+    return formatTimeUntil(getNextFundingTime());
+  }
+  const nextFundingDate = new Date(nextFundingTimeStr);
+  return formatTimeUntil(nextFundingDate);
+};
+
 const formatTimeUntil = (targetDate: Date) => {
   const now = new Date();
   const diff = targetDate.getTime() - now.getTime();
@@ -80,9 +90,10 @@ const formatExecutionTime = (openedAt: string) => {
 
 export const OpportunitiesList = () => {
   const navigate = useNavigate();
-  const { opportunities, positions } = useArbitrageStore();
+  const { opportunities, positions, fundingRates } = useArbitrageStore();
   const [timeUntilFunding, setTimeUntilFunding] = useState('');
   const [executionTimes, setExecutionTimes] = useState<{ [key: string]: string }>({});
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const [selectedOpportunity, setSelectedOpportunity] = useState<any>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -122,7 +133,7 @@ export const OpportunitiesList = () => {
       return true; // Show all detected opportunities, including those being executed
     })
     .sort((a, b) => b.annualizedSpread - a.annualizedSpread)
-    .slice(0, 20); // Show top 20 opportunities
+    .slice(0, 50); // Show top 50 opportunities
 
   const handleExecute = async (opp: any) => {
     try {
@@ -297,15 +308,9 @@ export const OpportunitiesList = () => {
               <Target className="w-3 h-3 text-binance-yellow" />
               Arbitrage Opportunities
             </CardTitle>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 text-binance-text-secondary text-[10px]">
-                <Clock className="w-3 h-3" />
-                <span className="font-mono">{timeUntilFunding}</span>
-              </div>
-              <Badge variant="info" size="sm" className="text-[10px]">
-                {activeOpportunities.length} Active
-              </Badge>
-            </div>
+            <Badge variant="info" size="sm" className="text-[10px]">
+              {activeOpportunities.length} Active
+            </Badge>
           </div>
         </CardHeader>
 
@@ -323,10 +328,14 @@ export const OpportunitiesList = () => {
                 <TableHead>Symbol</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Exchange</TableHead>
+                <TableHead>Side</TableHead>
+                <TableHead className="text-right">Fee Rate</TableHead>
+                <TableHead className="text-right">Fee Interval</TableHead>
+                <TableHead className="text-right">Next Funding</TableHead>
+                <TableHead className="text-right">24h Volume</TableHead>
                 <TableHead className="text-right">Spread</TableHead>
                 <TableHead className="text-right">8h Profit</TableHead>
                 <TableHead className="text-right">APR</TableHead>
-                <TableHead className="text-right">24h Vol</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -334,6 +343,7 @@ export const OpportunitiesList = () => {
               {activeOpportunities.map((opp, index) => {
                 // Determine if this is spot-perpetual or cross-exchange
                 const isSpotPerp = opp.strategy === 1; // SpotPerpetual = 1
+                const isCrossFut = opp.subType === StrategySubType.CrossExchangeFuturesFutures;
                 const uniqueKey = `${opp.symbol}-${opp.exchange || opp.longExchange}-${index}`;
                 const strategyLabel = getStrategyLabel(opp.subType);
 
@@ -346,33 +356,44 @@ export const OpportunitiesList = () => {
                 );
 
                 const isExecuting = matchingPositions.length > 0;
-                const totalPnL = matchingPositions.reduce((sum, p) => sum + p.unrealizedPnL, 0);
-                const executionKey = isSpotPerp ? `${opp.symbol}-${opp.exchange}` : `${opp.symbol}-${opp.longExchange}`;
 
-                // Calculate estimated funding fee for next settlement
-                // Note: Binance pays the FULL funding fee if you hold at settlement time (00:00, 08:00, 16:00 UTC)
-                // regardless of when you opened the position during the 8-hour period
-                let estimatedEarnings = 0;
-                if (isExecuting && matchingPositions.length > 0) {
-                  // Funding rate for the period (funding happens every 8 hours)
-                  const fundingRate = isSpotPerp ? opp.fundingRate : (opp.longFundingRate + opp.shortFundingRate) / 2;
+                // Calculate 8-hour profit and spread for merged cells
+                const apr = isSpotPerp
+                  ? opp.estimatedProfitPercentage
+                  : opp.annualizedSpread * 100;
+                const profit8h = apr / 365 / 3;
 
-                  // ONLY perpetual positions pay/receive funding fees (spot positions don't)
-                  // Import PositionType to filter correctly
-                  const perpPositions = matchingPositions.filter((p) => p.type === 0); // 0 = Perpetual
-                  const perpPositionValue = perpPositions.reduce((sum, p) => sum + (p.quantity * p.entryPrice), 0);
+                const spotPrice = opp.spotPrice || 0;
+                const perpPrice = opp.perpetualPrice || 0;
+                const spread = (spotPrice > 0 && perpPrice > 0)
+                  ? ((perpPrice - spotPrice) / spotPrice) * 100
+                  : 0;
 
-                  // Calculate the FULL funding fee you'll receive at next settlement
-                  // Negative funding rate = you RECEIVE funding (short pays long)
-                  // Positive funding rate = you PAY funding (long pays short)
-                  // Since we're SHORT perpetual, negative rate means we receive (positive earnings)
-                  estimatedEarnings = -fundingRate * perpPositionValue;
-                }
+                // Get funding rates for each exchange
+                const longFundingData = fundingRates.find(fr =>
+                  fr.symbol === opp.symbol &&
+                  fr.exchange === (isSpotPerp ? opp.exchange : opp.longExchange)
+                );
+                const shortFundingData = isCrossFut ? fundingRates.find(fr =>
+                  fr.symbol === opp.symbol &&
+                  fr.exchange === opp.shortExchange
+                ) : null;
 
-                return (
-                  <TableRow key={uniqueKey}>
-                    <TableCell className="font-bold text-xs py-1">{opp.symbol}</TableCell>
-                    <TableCell className="py-1">
+                const rows = [];
+
+                const isHovered = hoveredRow === uniqueKey;
+
+                // First row (perp position for spot-perp, or long exchange for cross-exchange)
+                rows.push(
+                  <TableRow
+                    key={`${uniqueKey}-1`}
+                    className={`border-b-0 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                    hover={false}
+                    onMouseEnter={() => setHoveredRow(uniqueKey)}
+                    onMouseLeave={() => setHoveredRow(null)}
+                  >
+                    <TableCell className="font-bold text-xs py-1" rowSpan={2}>{opp.symbol}</TableCell>
+                    <TableCell rowSpan={2} className="py-1">
                       <Badge
                         size="sm"
                         className={`text-[10px] ${strategyLabel.color}`}
@@ -381,66 +402,78 @@ export const OpportunitiesList = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="py-1">
-                      {isSpotPerp ? (
-                        <ExchangeBadge exchange={opp.exchange} />
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          <ExchangeBadge exchange={opp.longExchange} />
-                          <span className="text-binance-text-muted">/</span>
-                          <ExchangeBadge exchange={opp.shortExchange} />
-                        </div>
-                      )}
+                      <ExchangeBadge exchange={isSpotPerp ? opp.exchange : opp.longExchange} />
                     </TableCell>
-                    <TableCell className="text-right py-1">
-                      <span className="font-mono text-[11px] font-bold text-binance-text-primary">
-                        {(() => {
-                          // Calculate spread (price difference)
-                          // Based on strategy subtype:
-                          // - Spot-Perp: (perpPrice - spotPrice) / spotPrice
-                          // - Cross-Fut: (shortExchangePrice - longExchangePrice) / longExchangePrice
-                          // - Cross-Spot: (shortExchangeFutPrice - longExchangeSpotPrice) / longExchangeSpotPrice
-
-                          const spotPrice = opp.spotPrice || 0;
-                          const perpPrice = opp.perpetualPrice || 0;
-
-                          if (spotPrice > 0 && perpPrice > 0) {
-                            // For all types: spotPrice represents the long side, perpPrice represents the short side
-                            const spread = ((perpPrice - spotPrice) / spotPrice) * 100;
-                            return `${spread >= 0 ? '+' : ''}${spread.toFixed(4)}%`;
-                          }
-                          return '-';
-                        })()}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right py-1">
-                      <span className="font-mono text-[11px] font-bold text-binance-green">
-                        {(() => {
-                          // Calculate 8-hour profit: APR / 365 days / 3 funding periods per day
-                          const apr = isSpotPerp
-                            ? opp.estimatedProfitPercentage
-                            : opp.annualizedSpread * 100;
-                          const profit8h = apr / 365 / 3;
-                          return `${profit8h >= 0 ? '+' : ''}${profit8h.toFixed(4)}%`;
-                        })()}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right py-1">
-                      <Badge variant="success" size="sm" className="text-[10px]">
-                        <span className="font-mono font-bold">
-                          {isSpotPerp
-                            ? (opp.estimatedProfitPercentage).toFixed(2)
-                            : (opp.annualizedSpread * 100).toFixed(2)}%
-                        </span>
+                    <TableCell className="py-1">
+                      <Badge
+                        variant={isSpotPerp ? "danger" : (isCrossFut ? "success" : "danger")}
+                        size="sm"
+                        className="gap-0.5 text-[10px]"
+                      >
+                        {isSpotPerp ? (
+                          <>
+                            <TrendingDown className="w-2.5 h-2.5" />
+                            Short
+                          </>
+                        ) : (isCrossFut ? (
+                          <>
+                            <TrendingUp className="w-2.5 h-2.5" />
+                            Long
+                          </>
+                        ) : (
+                          <>
+                            <TrendingDown className="w-2.5 h-2.5" />
+                            Short
+                          </>
+                        ))}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right py-1">
-                      <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.volume24h
-                          ? `$${(opp.volume24h / 1000000).toFixed(2)}M`
-                          : '-'}
+                      <span className="font-mono text-[11px]">
+                        {longFundingData
+                          ? `${(longFundingData.rate * 100).toFixed(4)}%`
+                          : (isSpotPerp
+                            ? `${(opp.fundingRate * 100).toFixed(4)}%`
+                            : `${(opp.longFundingRate * 100).toFixed(4)}%`)
+                        }
                       </span>
                     </TableCell>
                     <TableCell className="text-right py-1">
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {longFundingData?.fundingIntervalHours || 8}h
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1">
+                      <div className="flex items-center justify-end gap-0.5">
+                        <Clock className="w-2.5 h-2.5 text-binance-text-secondary" />
+                        <span className="font-mono text-[11px] text-binance-text-secondary">
+                          {getExchangeFundingTime(longFundingData?.nextFundingTime)}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right py-1">
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {longFundingData?.volume24h ? `$${(longFundingData.volume24h / 1000000).toFixed(2)}M` : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1" rowSpan={2}>
+                      <span className="font-mono text-[11px] font-bold text-binance-text-primary">
+                        {spread !== 0 ? `${spread >= 0 ? '+' : ''}${spread.toFixed(4)}%` : '-'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1" rowSpan={2}>
+                      <span className="font-mono text-[11px] font-bold text-binance-green">
+                        {`${profit8h >= 0 ? '+' : ''}${profit8h.toFixed(4)}%`}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1" rowSpan={2}>
+                      <Badge variant="success" size="sm" className="text-[10px]">
+                        <span className="font-mono font-bold">
+                          {apr.toFixed(2)}%
+                        </span>
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right py-1" rowSpan={2}>
                       {opp.executionId ? (
                         <Button
                           variant="danger"
@@ -469,6 +502,78 @@ export const OpportunitiesList = () => {
                     </TableCell>
                   </TableRow>
                 );
+
+                // Second row (spot position for spot-perp, or short exchange for cross-exchange)
+                rows.push(
+                  <TableRow
+                    key={`${uniqueKey}-2`}
+                    className={`border-t border-binance-border/30 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                    hover={false}
+                    onMouseEnter={() => setHoveredRow(uniqueKey)}
+                    onMouseLeave={() => setHoveredRow(null)}
+                  >
+                    <TableCell className="py-1">
+                      <ExchangeBadge exchange={isSpotPerp ? opp.exchange : (isCrossFut ? opp.shortExchange : opp.shortExchange)} />
+                    </TableCell>
+                    <TableCell className="py-1">
+                      <Badge
+                        variant={isSpotPerp ? "success" : (isCrossFut ? "danger" : "success")}
+                        size="sm"
+                        className="gap-0.5 text-[10px]"
+                      >
+                        {isSpotPerp ? (
+                          <>
+                            <TrendingUp className="w-2.5 h-2.5" />
+                            Long
+                          </>
+                        ) : (isCrossFut ? (
+                          <>
+                            <TrendingDown className="w-2.5 h-2.5" />
+                            Short
+                          </>
+                        ) : (
+                          <>
+                            <TrendingUp className="w-2.5 h-2.5" />
+                            Long
+                          </>
+                        ))}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right py-1">
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {isSpotPerp ? '--' : (
+                          shortFundingData
+                            ? `${(shortFundingData.rate * 100).toFixed(4)}%`
+                            : `${(opp.shortFundingRate * 100).toFixed(4)}%`
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1">
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {isSpotPerp ? '--' : `${shortFundingData?.fundingIntervalHours || 8}h`}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1">
+                      {isSpotPerp ? (
+                        <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
+                      ) : (
+                        <div className="flex items-center justify-end gap-0.5">
+                          <Clock className="w-2.5 h-2.5 text-binance-text-secondary" />
+                          <span className="font-mono text-[11px] text-binance-text-secondary">
+                            {getExchangeFundingTime(shortFundingData?.nextFundingTime)}
+                          </span>
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right py-1">
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {isSpotPerp ? '--' : (shortFundingData?.volume24h ? `$${(shortFundingData.volume24h / 1000000).toFixed(2)}M` : '--')}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                );
+
+                return rows;
               })}
             </TableBody>
           </Table>

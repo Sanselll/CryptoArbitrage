@@ -150,7 +150,7 @@ namespace CryptoArbitrage.API.Migrations
 
                     b.HasIndex("Symbol", "Exchange");
 
-                    b.ToTable("Executions");
+                    b.ToTable("Executions", (string)null);
                 });
 
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.FundingRate", b =>
@@ -216,7 +216,7 @@ namespace CryptoArbitrage.API.Migrations
                     b.HasIndex("Exchange", "Symbol")
                         .IsUnique();
 
-                    b.ToTable("FundingRates");
+                    b.ToTable("FundingRates", (string)null);
                 });
 
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.PerformanceMetric", b =>
@@ -297,7 +297,7 @@ namespace CryptoArbitrage.API.Migrations
 
                     b.HasIndex("UserId", "Date");
 
-                    b.ToTable("PerformanceMetrics");
+                    b.ToTable("PerformanceMetrics", (string)null);
                 });
 
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.Position", b =>
@@ -393,7 +393,7 @@ namespace CryptoArbitrage.API.Migrations
 
                     b.HasIndex("Symbol", "Exchange");
 
-                    b.ToTable("Positions");
+                    b.ToTable("Positions", (string)null);
                 });
 
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.UserExchangeApiKey", b =>
@@ -437,7 +437,7 @@ namespace CryptoArbitrage.API.Migrations
 
                     b.HasIndex("UserId", "ExchangeName");
 
-                    b.ToTable("UserExchangeApiKeys");
+                    b.ToTable("UserExchangeApiKeys", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
