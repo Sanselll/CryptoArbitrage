@@ -42,7 +42,14 @@
       "Bash(export GOOGLE_CLIENT_ID=\"test\")",
       "Bash(export GOOGLE_CLIENT_SECRET=\"test\")",
       "Bash(export ENCRYPTION_KEY=\"12345678901234567890123456789012\")",
-      "Bash(export ConnectionStrings__DefaultConnection=\"Host=localhost;Port=5432;Database=crypto_arbitrage;Username=sansel;Password=\")"
+      "Bash(export ConnectionStrings__DefaultConnection=\"Host=localhost;Port=5432;Database=crypto_arbitrage;Username=sansel;Password=\")",
+      "Read(//tmp/**)",
+      "Bash(dotnet publish -c Release -o /tmp/test-publish)",
+      "Bash(dotnet /tmp/test-publish/CryptoArbitrage.API.dll ef migrations list)",
+      "Bash(export ConnectionStrings__DefaultConnection=\"Host=localhost;Port=5432;Database=crypto_arbitrage_test;Username=sansel;Password=\")",
+      "Bash(export JWT_SECRET_KEY=\"test\")",
+      "Bash(export Jwt__Issuer=\"test\")",
+      "Bash(export Jwt__Audience=\"test\")"
     ],
     "deny": [],
     "ask": []
