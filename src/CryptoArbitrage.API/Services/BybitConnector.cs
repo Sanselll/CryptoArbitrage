@@ -3,26 +3,36 @@ using Bybit.Net.Enums;
 using CryptoExchange.Net.Authentication;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Data.Entities;
+using Microsoft.Extensions.Configuration;
 
 namespace CryptoArbitrage.API.Services;
 
 public class BybitConnector : IExchangeConnector
 {
     private readonly ILogger<BybitConnector> _logger;
+    private readonly IConfiguration _configuration;
     private BybitRestClient? _restClient;
     private BybitSocketClient? _socketClient;
 
     public string ExchangeName => "Bybit";
 
-    public BybitConnector(ILogger<BybitConnector> logger)
+    public BybitConnector(ILogger<BybitConnector> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _configuration = configuration;
     }
 
-    public async Task<bool> ConnectAsync(string? apiKey, string? apiSecret, bool useDemoTrading = false)
+    public async Task<bool> ConnectAsync(string? apiKey, string? apiSecret)
     {
         try
         {
+            // Read environment configuration to determine live vs demo mode
+            var isLive = _configuration.GetValue<bool>("Environment:IsLive");
+            var environment = isLive ? Bybit.Net.BybitEnvironment.Live : Bybit.Net.BybitEnvironment.DemoTrading;
+
+            _logger.LogInformation("Connecting to Bybit using {Environment} environment (IsLive: {IsLive})",
+                environment == Bybit.Net.BybitEnvironment.Live ? "Live" : "Demo", isLive);
+
             // For public API access (funding rates, prices), credentials are optional
             var hasCredentials = !string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(apiSecret);
 
@@ -32,8 +42,7 @@ public class BybitConnector : IExchangeConnector
                 {
                     options.ApiCredentials = new ApiCredentials(apiKey!, apiSecret!);
                 }
-                // Use demo trading environment
-                options.Environment = Bybit.Net.BybitEnvironment.DemoTrading;
+                options.Environment = environment;
             });
 
             _socketClient = new BybitSocketClient(options =>
@@ -42,8 +51,7 @@ public class BybitConnector : IExchangeConnector
                 {
                     options.ApiCredentials = new ApiCredentials(apiKey!, apiSecret!);
                 }
-                // Use demo trading environment
-                options.Environment = Bybit.Net.BybitEnvironment.DemoTrading;
+                options.Environment = environment;
             });
 
             // Test connection - use public API if no credentials

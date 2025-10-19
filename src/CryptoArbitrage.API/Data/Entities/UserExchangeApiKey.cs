@@ -21,7 +21,6 @@ public class UserExchangeApiKey
     public string EncryptedApiSecret { get; set; } = string.Empty;
 
     public bool IsEnabled { get; set; } = true;
-    public bool UseDemoTrading { get; set; } = false;
 
     public DateTime CreatedAt { get; set; }
     public DateTime? LastTestedAt { get; set; }

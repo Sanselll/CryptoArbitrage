@@ -15,6 +15,14 @@ var builder = WebApplication.CreateBuilder(args);
 var arbitrageConfig = builder.Configuration.GetSection("ArbitrageConfig").Get<ArbitrageConfig>() ?? new ArbitrageConfig();
 builder.Services.AddSingleton(arbitrageConfig);
 
+// Add environment configuration
+var environmentConfig = builder.Configuration.GetSection("Environment").Get<EnvironmentConfig>() ?? new EnvironmentConfig();
+builder.Services.AddSingleton(environmentConfig);
+
+var startupLogger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Startup");
+startupLogger.LogInformation("Starting application in {Mode} mode (IsLive: {IsLive})",
+    environmentConfig.Mode, environmentConfig.IsLive);
+
 // Add PostgreSQL database
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 

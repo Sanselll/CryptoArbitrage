@@ -13,7 +13,6 @@ interface ApiKey {
   exchangeName: string;
   apiKey: string;
   isEnabled: boolean;
-  useDemoTrading: boolean;
   createdAt: string;
   lastTestedAt?: string;
   lastTestResult?: string;
@@ -28,8 +27,7 @@ export const ProfileSettings = () => {
   const [newKey, setNewKey] = useState({
     exchangeName: 'Binance',
     apiKey: '',
-    apiSecret: '',
-    useDemoTrading: true
+    apiSecret: ''
   });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: number | null }>({ isOpen: false, id: null });
@@ -73,7 +71,7 @@ export const ProfileSettings = () => {
         variant: 'success'
       });
 
-      setNewKey({ exchangeName: 'Binance', apiKey: '', apiSecret: '', useDemoTrading: true });
+      setNewKey({ exchangeName: 'Binance', apiKey: '', apiSecret: '' });
       setIsAdding(false);
       setMessage(null);
 
@@ -258,18 +256,6 @@ export const ProfileSettings = () => {
                       placeholder="Paste your API secret"
                     />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="demoTrading"
-                      checked={newKey.useDemoTrading}
-                      disabled
-                      className="w-3 h-3 opacity-50 cursor-not-allowed"
-                    />
-                    <label htmlFor="demoTrading" className="text-[10px] text-binance-text-secondary">
-                      Use Demo/Testnet Trading (enabled for all keys)
-                    </label>
-                  </div>
                   <div className="flex gap-2 pt-1">
                     <Button
                       variant="success"
@@ -307,11 +293,6 @@ export const ProfileSettings = () => {
                         >
                           {key.isEnabled ? 'Enabled' : 'Disabled'}
                         </Badge>
-                        {key.useDemoTrading && (
-                          <Badge variant="info" size="sm" className="text-[10px]">
-                            Demo
-                          </Badge>
-                        )}
                       </div>
                       <div className="text-[10px] text-binance-text-muted font-mono truncate">
                         {key.apiKey}

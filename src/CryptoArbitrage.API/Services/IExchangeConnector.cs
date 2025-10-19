@@ -6,7 +6,7 @@ namespace CryptoArbitrage.API.Services;
 public interface IExchangeConnector
 {
     string ExchangeName { get; }
-    Task<bool> ConnectAsync(string apiKey, string apiSecret, bool useDemoTrading = false);
+    Task<bool> ConnectAsync(string apiKey, string apiSecret);
     Task DisconnectAsync();
     Task<List<string>> GetActiveSymbolsAsync(decimal minDailyVolumeUsd, int maxSymbols, decimal minHighPriorityFundingRate = 0);
     Task<List<FundingRateDto>> GetFundingRatesAsync(List<string> symbols);
