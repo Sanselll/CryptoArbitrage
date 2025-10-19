@@ -72,6 +72,7 @@ export const PositionsGrid = () => {
   const { positions, opportunities, fundingRates } = useArbitrageStore();
   const [isClosing, setIsClosing] = useState(false);
   const [executionTimes, setExecutionTimes] = useState<{ [key: number]: string }>({});
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const { alertState, showSuccess, showError, closeAlert, confirmState, showConfirm, closeConfirm } = useDialog();
 
   useEffect(() => {
@@ -326,8 +327,17 @@ export const PositionsGrid = () => {
                   const longValue = longPerpPosition.quantity * longPerpPosition.entryPrice;
                   const longEstimatedFunding = -longRate * longValue;
 
+                  const uniqueKey = `cross-fut-${pair.executionId}-${pairIndex}`;
+                  const isHovered = hoveredRow === uniqueKey;
+
                   rows.push(
-                    <TableRow key={`long-perp-${longPerpPosition.id}-${pairIndex}`} className="border-b-0">
+                    <TableRow
+                      key={`long-perp-${longPerpPosition.id}-${pairIndex}`}
+                      className={`border-b-0 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                      hover={false}
+                      onMouseEnter={() => setHoveredRow(uniqueKey)}
+                      onMouseLeave={() => setHoveredRow(null)}
+                    >
                       <TableCell className="font-bold text-xs py-1" rowSpan={2}>{pair.symbol}</TableCell>
                       <TableCell rowSpan={2} className="py-1">
                         <Badge
@@ -446,7 +456,13 @@ export const PositionsGrid = () => {
                   const shortEstimatedFunding = shortRate * shortValue;
 
                   rows.push(
-                    <TableRow key={`short-perp-${shortPerpPosition.id}-${pairIndex}`} className="border-t border-binance-border/30">
+                    <TableRow
+                      key={`short-perp-${shortPerpPosition.id}-${pairIndex}`}
+                      className={`border-t border-binance-border/30 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                      hover={false}
+                      onMouseEnter={() => setHoveredRow(uniqueKey)}
+                      onMouseLeave={() => setHoveredRow(null)}
+                    >
                       <TableCell className="py-1">
                         <ExchangeBadge exchange={shortPerpPosition.exchange} />
                       </TableCell>
@@ -521,8 +537,17 @@ export const PositionsGrid = () => {
                       ? (perpPosition.unrealizedPnL / (perpPosition.entryPrice * perpPosition.quantity)) * 100
                       : 0;
 
+                  const uniqueKey = `perp-spot-${pair.executionId}-${pairIndex}`;
+                  const isHovered = hoveredRow === uniqueKey;
+
                   rows.push(
-                    <TableRow key={`perp-${perpPosition.id}-${pairIndex}`} className="border-b-0">
+                    <TableRow
+                      key={`perp-${perpPosition.id}-${pairIndex}`}
+                      className={`border-b-0 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                      hover={false}
+                      onMouseEnter={() => setHoveredRow(uniqueKey)}
+                      onMouseLeave={() => setHoveredRow(null)}
+                    >
                       <TableCell className="font-bold text-xs py-1" rowSpan={2}>{pair.symbol}</TableCell>
                       <TableCell rowSpan={2} className="py-1">
                         <Badge
@@ -639,8 +664,17 @@ export const PositionsGrid = () => {
                       ? (spotPosition.unrealizedPnL / (spotPosition.entryPrice * spotPosition.quantity)) * 100
                       : 0;
 
+                  const uniqueKey = `perp-spot-${pair.executionId}-${pairIndex}`;
+                  const isHovered = hoveredRow === uniqueKey;
+
                   rows.push(
-                    <TableRow key={`spot-${spotPosition.id}-${pairIndex}`} className="border-t border-binance-border/30">
+                    <TableRow
+                      key={`spot-${spotPosition.id}-${pairIndex}`}
+                      className={`border-t border-binance-border/30 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                      hover={false}
+                      onMouseEnter={() => setHoveredRow(uniqueKey)}
+                      onMouseLeave={() => setHoveredRow(null)}
+                    >
                       <TableCell className="py-1">
                         <Badge variant="secondary" size="sm" className="text-[10px]">Spot</Badge>
                       </TableCell>

@@ -3,6 +3,7 @@ export interface FundingRate {
   symbol: string;
   rate: number;
   annualizedRate: number;
+  volume24h?: number;
   fundingTime: string;
   nextFundingTime: string;
   recordedAt: string;
