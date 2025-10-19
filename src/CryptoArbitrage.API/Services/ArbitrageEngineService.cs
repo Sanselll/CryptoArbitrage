@@ -171,11 +171,42 @@ public class ArbitrageEngineService : BackgroundService
         var perpPrices = new Dictionary<string, Dictionary<string, decimal>>();
 
         // PHASE 1: Fetch GLOBAL funding rates (shared across all users)
+        var fetchStopwatch = System.Diagnostics.Stopwatch.StartNew();
         foreach (var (exchangeName, connector) in _exchangeConnectors)
         {
             try
             {
+                // Load previous rates from database for enrichment
+                using var scope1 = _serviceProvider.CreateScope();
+                var dbContext1 = scope1.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+
+                var dbLoadSw = System.Diagnostics.Stopwatch.StartNew();
+                var previousRates = await dbContext1.FundingRates
+                    .Where(f => f.Exchange == exchangeName)
+                    .GroupBy(f => f.Symbol)
+                    .Select(g => g.OrderByDescending(f => f.RecordedAt).FirstOrDefault())
+                    .ToDictionaryAsync(f => f!.Symbol, f => f!, stoppingToken);
+                dbLoadSw.Stop();
+                _logger.LogInformation("📖 Loaded {Count} previous rates from database for {Exchange} in {ElapsedMs}ms",
+                    previousRates.Count, exchangeName, dbLoadSw.ElapsedMilliseconds);
+
+                // Fetch current rates from API
+                var exchangeFetchSw = System.Diagnostics.Stopwatch.StartNew();
                 var rates = await connector.GetFundingRatesAsync(_activeSymbols);
+                exchangeFetchSw.Stop();
+                _logger.LogInformation("⏱️  Fetched {Count} funding rates from {Exchange} in {ElapsedMs}ms",
+                    rates.Count, exchangeName, exchangeFetchSw.ElapsedMilliseconds);
+
+                // Enrich current rates with previous rate data from database
+                foreach (var rate in rates)
+                {
+                    if (previousRates.TryGetValue(rate.Symbol, out var prevRate))
+                    {
+                        rate.PreviousRate = prevRate.Rate;
+                        rate.PreviousAnnualizedRate = prevRate.AnnualizedRate;
+                    }
+                }
+
                 fundingRates[exchangeName] = rates;
 
                 // Fetch spot prices for spot-perpetual arbitrage
@@ -187,16 +218,22 @@ public class ArbitrageEngineService : BackgroundService
                 perpPrices[exchangeName] = perps;
 
                 // Save to database using efficient bulk upsert
-                using var scope = _serviceProvider.CreateScope();
-                var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+                using var scope2 = _serviceProvider.CreateScope();
+                var dbContext2 = scope2.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
 
-                await UpsertFundingRatesAsync(dbContext, exchangeName, rates, stoppingToken);
+                var dbSaveSw = System.Diagnostics.Stopwatch.StartNew();
+                await UpsertFundingRatesAsync(dbContext2, exchangeName, rates, stoppingToken);
+                dbSaveSw.Stop();
+                _logger.LogInformation("💾 Saved {Count} funding rates for {Exchange} to database in {ElapsedMs}ms",
+                    rates.Count, exchangeName, dbSaveSw.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error fetching funding rates from {Exchange}", exchangeName);
             }
         }
+        fetchStopwatch.Stop();
+        _logger.LogInformation("⏱️  Total funding rate fetch and save time: {ElapsedMs}ms", fetchStopwatch.ElapsedMilliseconds);
 
         // Broadcast funding rates to ALL users (shared global data)
         var allRates = fundingRates.Values.SelectMany(r => r).ToList();
@@ -209,17 +246,26 @@ public class ArbitrageEngineService : BackgroundService
         if (fundingRates.Count >= 2)
         {
             // Futures/Futures cross-exchange
-            var crossExchangeFuturesOpps = await DetectCrossExchangeFuturesOpportunitiesAsync(fundingRates, perpPrices);
-            opportunities.AddRange(crossExchangeFuturesOpps);
+            if (_config.IsStrategyEnabled(StrategySubType.CrossExchangeFuturesFutures))
+            {
+                var crossExchangeFuturesOpps = await DetectCrossExchangeFuturesOpportunitiesAsync(fundingRates, perpPrices);
+                opportunities.AddRange(crossExchangeFuturesOpps);
+            }
 
             // Spot/Futures cross-exchange
-            var crossExchangeSpotFuturesOpps = await DetectCrossExchangeSpotFuturesOpportunitiesAsync(fundingRates, spotPrices, perpPrices);
-            opportunities.AddRange(crossExchangeSpotFuturesOpps);
+            if (_config.IsStrategyEnabled(StrategySubType.CrossExchangeSpotFutures))
+            {
+                var crossExchangeSpotFuturesOpps = await DetectCrossExchangeSpotFuturesOpportunitiesAsync(fundingRates, spotPrices, perpPrices);
+                opportunities.AddRange(crossExchangeSpotFuturesOpps);
+            }
         }
 
         // Spot-perpetual arbitrage (same exchange)
-        var spotPerpOpps = await DetectSpotPerpetualOpportunitiesAsync(fundingRates, spotPrices, perpPrices);
-        opportunities.AddRange(spotPerpOpps);
+        if (_config.IsStrategyEnabled(StrategySubType.SpotPerpetualSameExchange))
+        {
+            var spotPerpOpps = await DetectSpotPerpetualOpportunitiesAsync(fundingRates, spotPrices, perpPrices);
+            opportunities.AddRange(spotPerpOpps);
+        }
 
         if (opportunities.Any())
         {
@@ -1207,15 +1253,17 @@ public class ArbitrageEngineService : BackgroundService
             {
                 valuesClauses.Add($@"
                     (@Exchange{j}, @Symbol{j}, @Rate{j}, @AnnualizedRate{j},
-                     @FundingIntervalHours{j}, @Average3DayRate{j}, @FundingTime{j},
-                     @NextFundingTime{j}, @RecordedAt{j})");
+                     @FundingIntervalHours{j}, @Average3DayRate{j}, @Direction{j},
+                     @PreviousRate{j}, @PreviousAnnualizedRate{j}, @FundingCap{j}, @FundingFloor{j},
+                     @FundingTime{j}, @NextFundingTime{j}, @RecordedAt{j})");
             }
 
             // Construct final SQL with all VALUES
             var batchSql = $@"
                 INSERT INTO ""FundingRates""
                     (""Exchange"", ""Symbol"", ""Rate"", ""AnnualizedRate"", ""FundingIntervalHours"",
-                     ""Average3DayRate"", ""FundingTime"", ""NextFundingTime"", ""RecordedAt"")
+                     ""Average3DayRate"", ""Direction"", ""PreviousRate"", ""PreviousAnnualizedRate"",
+                     ""FundingCap"", ""FundingFloor"", ""FundingTime"", ""NextFundingTime"", ""RecordedAt"")
                 VALUES
                     {string.Join(",", valuesClauses)}
                 ON CONFLICT (""Exchange"", ""Symbol"")
@@ -1224,6 +1272,11 @@ public class ArbitrageEngineService : BackgroundService
                     ""AnnualizedRate"" = EXCLUDED.""AnnualizedRate"",
                     ""FundingIntervalHours"" = EXCLUDED.""FundingIntervalHours"",
                     ""Average3DayRate"" = EXCLUDED.""Average3DayRate"",
+                    ""Direction"" = EXCLUDED.""Direction"",
+                    ""PreviousRate"" = EXCLUDED.""PreviousRate"",
+                    ""PreviousAnnualizedRate"" = EXCLUDED.""PreviousAnnualizedRate"",
+                    ""FundingCap"" = EXCLUDED.""FundingCap"",
+                    ""FundingFloor"" = EXCLUDED.""FundingFloor"",
                     ""FundingTime"" = EXCLUDED.""FundingTime"",
                     ""NextFundingTime"" = EXCLUDED.""NextFundingTime"",
                     ""RecordedAt"" = EXCLUDED.""RecordedAt""";
@@ -1240,6 +1293,16 @@ public class ArbitrageEngineService : BackgroundService
                 npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@FundingIntervalHours{j}", rate.FundingIntervalHours));
                 npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@Average3DayRate{j}",
                     rate.Average3DayRate.HasValue ? (object)rate.Average3DayRate.Value : DBNull.Value));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@Direction{j}",
+                    rate.Direction.HasValue ? (object)(int)rate.Direction.Value : DBNull.Value));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@PreviousRate{j}",
+                    rate.PreviousRate.HasValue ? (object)rate.PreviousRate.Value : DBNull.Value));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@PreviousAnnualizedRate{j}",
+                    rate.PreviousAnnualizedRate.HasValue ? (object)rate.PreviousAnnualizedRate.Value : DBNull.Value));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@FundingCap{j}",
+                    rate.FundingCap.HasValue ? (object)rate.FundingCap.Value : DBNull.Value));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@FundingFloor{j}",
+                    rate.FundingFloor.HasValue ? (object)rate.FundingFloor.Value : DBNull.Value));
                 npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@FundingTime{j}", rate.FundingTime));
                 npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@NextFundingTime{j}", rate.NextFundingTime));
                 npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@RecordedAt{j}", rate.RecordedAt));
