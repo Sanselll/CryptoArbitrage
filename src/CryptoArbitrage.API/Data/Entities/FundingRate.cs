@@ -7,6 +7,8 @@ public class FundingRate
     public string Symbol { get; set; } = string.Empty;
     public decimal Rate { get; set; }
     public decimal AnnualizedRate { get; set; }
+    public int FundingIntervalHours { get; set; } = 8; // Default 8h interval
+    public decimal? Average3DayRate { get; set; } // 3-day average rate
     public DateTime FundingTime { get; set; }
     public DateTime NextFundingTime { get; set; }
     public DateTime RecordedAt { get; set; } = DateTime.UtcNow;

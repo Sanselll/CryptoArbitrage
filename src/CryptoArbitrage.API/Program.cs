@@ -150,6 +150,7 @@ using (var scope = app.Services.CreateScope())
 {
     try
     {
+        
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         var db = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
 

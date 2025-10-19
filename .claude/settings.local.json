@@ -1,7 +1,25 @@
 {
   "permissions": {
     "allow": [
-      "Bash(docker exec crypto-arbitrage-api ls -la /app/Migrations/)"
+      "Bash(docker exec crypto-arbitrage-api ls -la /app/Migrations/)",
+      "Bash(docker compose stop backend)",
+      "Bash(export JWT_SECRET_KEY=\"test_key_32_chars_long_minimum\")",
+      "Bash(export GOOGLE_CLIENT_ID=\"121080436019-2vk5qlofthm2c9iqq4sa2b8vmrkep5u2.apps.googleusercontent.com\")",
+      "Bash(export GOOGLE_CLIENT_SECRET=\"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\")",
+      "WebFetch(domain:www.binance.com)",
+      "Bash(docker exec crypto-arbitrage-db psql -U postgres -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Symbol\"\" = ''COAIUSDT'' ORDER BY \"\"RecordedAt\"\" DESC LIMIT 10;\")",
+      "Bash(docker exec crypto-arbitrage-db psql -U postgres -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\" FROM \"\"FundingRates\"\" WHERE \"\"Symbol\"\" = ''COAIUSDT'' ORDER BY \"\"RecordedAt\"\" DESC LIMIT 5;\")",
+      "Bash(export JWT_SECRET_KEY=\"test_key_32_chars_long_minimum!!\")",
+      "Bash(docker exec crypto-arbitrage-db psql -U postgres -d crypto_arbitrage -c \"SELECT COUNT(*) FROM \"\"FundingRates\"\";\")",
+      "Bash(docker exec crypto-arbitrage-db psql -U postgres -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", COUNT(*) as count FROM \"\"FundingRates\"\" GROUP BY \"\"Exchange\"\", \"\"Symbol\"\" ORDER BY count DESC LIMIT 10;\")",
+      "Bash(docker exec crypto-arbitrage-db psql -U postgres -d crypto_arbitrage -c \"SELECT COUNT(DISTINCT \"\"Exchange\"\" || ''-'' || \"\"Symbol\"\") as unique_symbols, MIN(\"\"RecordedAt\"\") as first_record, MAX(\"\"RecordedAt\"\") as last_record, COUNT(*) as total_records FROM \"\"FundingRates\"\";\")",
+      "Bash(docker exec crypto-arbitrage-db psql -U postgres -d crypto_arbitrage -c \"TRUNCATE TABLE \"\"FundingRates\"\" RESTART IDENTITY;\")",
+      "Bash(docker exec crypto-arbitrage-db psql -U postgres -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" ORDER BY \"\"RecordedAt\"\" DESC LIMIT 10;\")",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT COUNT(*) FROM \"\"FundingRates\"\";\")",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Symbol\"\" = ''COAIUSDT'' ORDER BY \"\"RecordedAt\"\" DESC LIMIT 10;\")",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT COUNT(*) as total_records, COUNT(DISTINCT \"\"Exchange\"\") as exchanges, MIN(\"\"RecordedAt\"\") as oldest, MAX(\"\"RecordedAt\"\") as newest FROM \"\"FundingRates\"\";\")",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", COUNT(*) as count FROM \"\"FundingRates\"\" GROUP BY \"\"Exchange\"\" ORDER BY \"\"Exchange\"\";\")",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Symbol\"\" = ''COAIUSDT'' ORDER BY \"\"Exchange\"\";\")"
     ],
     "deny": [],
     "ask": []

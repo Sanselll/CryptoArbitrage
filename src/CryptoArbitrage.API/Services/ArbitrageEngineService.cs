@@ -186,25 +186,11 @@ public class ArbitrageEngineService : BackgroundService
                 var perps = await connector.GetPerpetualPricesAsync(_activeSymbols);
                 perpPrices[exchangeName] = perps;
 
-                // Save to database
+                // Save to database using efficient bulk upsert
                 using var scope = _serviceProvider.CreateScope();
                 var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
 
-                foreach (var rate in rates)
-                {
-                    dbContext.FundingRates.Add(new FundingRate
-                    {
-                        Exchange = exchangeName,
-                        Symbol = rate.Symbol,
-                        Rate = rate.Rate,
-                        AnnualizedRate = rate.AnnualizedRate,
-                        FundingTime = rate.FundingTime,
-                        NextFundingTime = rate.NextFundingTime,
-                        RecordedAt = rate.RecordedAt
-                    });
-                }
-
-                await dbContext.SaveChangesAsync(stoppingToken);
+                await UpsertFundingRatesAsync(dbContext, exchangeName, rates, stoppingToken);
             }
             catch (Exception ex)
             {
@@ -1192,6 +1178,77 @@ public class ArbitrageEngineService : BackgroundService
             totalPnL,
             todayPnL = todayMetric?.TotalPnL ?? 0
         });
+    }
+
+    /// <summary>
+    /// Efficiently upsert funding rates using PostgreSQL's ON CONFLICT clause.
+    /// Updates existing records or inserts new ones based on Exchange + Symbol uniqueness.
+    /// This is optimized for bulk operations (500+ records).
+    /// </summary>
+    private async Task UpsertFundingRatesAsync(
+        ArbitrageDbContext dbContext,
+        string exchangeName,
+        List<FundingRateDto> rates,
+        CancellationToken cancellationToken)
+    {
+        if (!rates.Any())
+            return;
+
+        // Process in batches of 100 to avoid parameter limit (PostgreSQL has a 65535 param limit)
+        const int batchSize = 100;
+        for (int i = 0; i < rates.Count; i += batchSize)
+        {
+            var batch = rates.Skip(i).Take(batchSize).ToList();
+
+            // Build VALUES clause for batch
+            var valuesClauses = new List<string>();
+
+            for (int j = 0; j < batch.Count; j++)
+            {
+                valuesClauses.Add($@"
+                    (@Exchange{j}, @Symbol{j}, @Rate{j}, @AnnualizedRate{j},
+                     @FundingIntervalHours{j}, @Average3DayRate{j}, @FundingTime{j},
+                     @NextFundingTime{j}, @RecordedAt{j})");
+            }
+
+            // Construct final SQL with all VALUES
+            var batchSql = $@"
+                INSERT INTO ""FundingRates""
+                    (""Exchange"", ""Symbol"", ""Rate"", ""AnnualizedRate"", ""FundingIntervalHours"",
+                     ""Average3DayRate"", ""FundingTime"", ""NextFundingTime"", ""RecordedAt"")
+                VALUES
+                    {string.Join(",", valuesClauses)}
+                ON CONFLICT (""Exchange"", ""Symbol"")
+                DO UPDATE SET
+                    ""Rate"" = EXCLUDED.""Rate"",
+                    ""AnnualizedRate"" = EXCLUDED.""AnnualizedRate"",
+                    ""FundingIntervalHours"" = EXCLUDED.""FundingIntervalHours"",
+                    ""Average3DayRate"" = EXCLUDED.""Average3DayRate"",
+                    ""FundingTime"" = EXCLUDED.""FundingTime"",
+                    ""NextFundingTime"" = EXCLUDED.""NextFundingTime"",
+                    ""RecordedAt"" = EXCLUDED.""RecordedAt""";
+
+            // Create parameter objects for Npgsql
+            var npgsqlParams = new List<Npgsql.NpgsqlParameter>();
+            for (int j = 0; j < batch.Count; j++)
+            {
+                var rate = batch[j];
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@Exchange{j}", exchangeName));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@Symbol{j}", rate.Symbol));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@Rate{j}", rate.Rate));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@AnnualizedRate{j}", rate.AnnualizedRate));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@FundingIntervalHours{j}", rate.FundingIntervalHours));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@Average3DayRate{j}",
+                    rate.Average3DayRate.HasValue ? (object)rate.Average3DayRate.Value : DBNull.Value));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@FundingTime{j}", rate.FundingTime));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@NextFundingTime{j}", rate.NextFundingTime));
+                npgsqlParams.Add(new Npgsql.NpgsqlParameter($"@RecordedAt{j}", rate.RecordedAt));
+            }
+
+            await dbContext.Database.ExecuteSqlRawAsync(batchSql, npgsqlParams.ToArray(), cancellationToken);
+        }
+
+        _logger.LogDebug("Upserted {Count} funding rates for {Exchange}", rates.Count, exchangeName);
     }
 
     public override async Task StopAsync(CancellationToken stoppingToken)

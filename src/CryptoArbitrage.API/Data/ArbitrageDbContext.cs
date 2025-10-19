@@ -26,7 +26,13 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd(); // Ensure auto-increment
-            entity.HasIndex(e => new { e.Exchange, e.Symbol, e.RecordedAt });
+
+            // Unique index on Exchange + Symbol for efficient upserts
+            entity.HasIndex(e => new { e.Exchange, e.Symbol }).IsUnique();
+
+            // Additional index for querying by timestamp
+            entity.HasIndex(e => e.RecordedAt);
+
             entity.Property(e => e.Exchange).IsRequired().HasMaxLength(50);
             entity.Property(e => e.Symbol).IsRequired().HasMaxLength(20);
             entity.Property(e => e.Rate).HasPrecision(18, 8);
