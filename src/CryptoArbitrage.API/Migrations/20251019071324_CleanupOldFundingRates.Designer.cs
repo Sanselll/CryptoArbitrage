@@ -3,6 +3,7 @@ using System;
 using CryptoArbitrage.API.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CryptoArbitrage.API.Migrations
 {
     [DbContext(typeof(ArbitrageDbContext))]
-    partial class ArbitrageDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251019071324_CleanupOldFundingRates")]
+    partial class CleanupOldFundingRates
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -196,10 +199,7 @@ namespace CryptoArbitrage.API.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("RecordedAt");
-
-                    b.HasIndex("Exchange", "Symbol")
-                        .IsUnique();
+                    b.HasIndex("Exchange", "Symbol", "RecordedAt");
 
                     b.ToTable("FundingRates");
                 });
