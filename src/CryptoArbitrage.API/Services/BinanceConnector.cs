@@ -593,11 +593,51 @@ public class BinanceConnector : IExchangeConnector
                 _logger.LogDebug("Hedge mode setting: {Error}", ex.Message);
             }
 
+            // Validate symbol exists and is trading
+            var exchangeInfo = await _restClient.UsdFuturesApi.ExchangeData.GetExchangeInfoAsync();
+            var symbolInfo = exchangeInfo.Data?.Symbols.FirstOrDefault(s => s.Name == symbol);
+
+            if (symbolInfo == null)
+            {
+                throw new Exception($"Symbol {symbol} not found on Binance Futures");
+            }
+
+            if (symbolInfo.Status != Binance.Net.Enums.SymbolStatus.Trading)
+            {
+                throw new Exception($"Symbol {symbol} is not currently trading (Status: {symbolInfo.Status})");
+            }
+
+            // Log all filters for debugging (without serialization to avoid circular references)
+            if (symbolInfo.Filters != null && symbolInfo.Filters.Any())
+            {
+                var filterNames = string.Join(", ", symbolInfo.Filters.Select(f => f.GetType().Name));
+                _logger.LogInformation("Symbol {Symbol} has {Count} filters: {Filters}", symbol, symbolInfo.Filters.Count(), filterNames);
+
+                // Get current mark price for validation
+                var markPriceResult = await _restClient.UsdFuturesApi.ExchangeData.GetMarkPricesAsync();
+                if (markPriceResult.Success && markPriceResult.Data != null)
+                {
+                    var currentPrice = markPriceResult.Data.FirstOrDefault(p => p.Symbol == symbol)?.MarkPrice ?? 0;
+                    _logger.LogInformation("Current mark price for {Symbol}: ${Price}", symbol, currentPrice);
+
+                    // Log expected order value to help diagnose PERCENT_PRICE issues
+                    var estimatedOrderValue = quantity * currentPrice;
+                    _logger.LogInformation("Order details: Quantity={Quantity}, EstimatedValue=${EstimatedValue}", quantity, estimatedOrderValue);
+                }
+            }
+            else
+            {
+                _logger.LogWarning("Symbol {Symbol} has no filters defined", symbol);
+            }
+
             // Set leverage first
             await _restClient.UsdFuturesApi.Account.ChangeInitialLeverageAsync(symbol, (int)leverage);
 
             var orderSide = side == Data.Entities.PositionSide.Long ? OrderSide.Buy : OrderSide.Sell;
             var positionSide = side == Data.Entities.PositionSide.Long ? Binance.Net.Enums.PositionSide.Long : Binance.Net.Enums.PositionSide.Short;
+
+            _logger.LogInformation("Placing market order on Binance: {Symbol} {Side} {Quantity} @ Leverage {Leverage}",
+                symbol, side, quantity, leverage);
 
             var order = await _restClient.UsdFuturesApi.Trading.PlaceOrderAsync(
                 symbol,
@@ -609,12 +649,18 @@ public class BinanceConnector : IExchangeConnector
 
             if (order.Success && order.Data != null)
             {
-                _logger.LogInformation("Order placed on Binance: {OrderId}", order.Data.Id);
+                _logger.LogInformation("Market order placed on Binance: {OrderId}", order.Data.Id);
                 return order.Data.Id.ToString();
             }
 
-            _logger.LogError("Failed to place order on Binance: {Error}", order.Error);
-            throw new Exception($"Failed to place order: {order.Error}");
+            // Log detailed error information
+            var errorCode = order.Error?.Code;
+            var errorMessage = order.Error?.Message;
+
+            _logger.LogError("Failed to place order on Binance - Code: {Code}, Message: {Message}",
+                errorCode, errorMessage);
+
+            throw new Exception($"Failed to place order - Code: {errorCode}, Message: {errorMessage}");
         }
         catch (Exception ex)
         {
