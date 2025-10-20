@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database (shared by both Live and Demo)
+  # PostgreSQL Database (shared by both Real and Demo)
   postgres:
     image: postgres:16-alpine
     container_name: crypto-arbitrage-db
@@ -23,17 +23,17 @@ services:
     networks:
       - arbitrage-network
 
-  # Backend API - Live Mode (Port 8080)
-  backend-live:
+  # Backend API - Real Mode (Port 8080)
+  backend-real:
     build:
       context: ./src/CryptoArbitrage.API
       dockerfile: Dockerfile
-    container_name: crypto-arbitrage-api-live
+    container_name: crypto-arbitrage-api-real
     restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
-      - ASPNETCORE_ENVIRONMENT=ProductionLive
+      - ASPNETCORE_ENVIRONMENT=ProductionReal
       - ASPNETCORE_URLS=http://+:8080
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
@@ -83,41 +83,21 @@ services:
       retries: 3
       start_period: 40s
 
-  # Frontend - Live Mode (Port 80)
-  frontend-live:
+  # Frontend - Single instance with mode selector
+  frontend:
     build:
       context: ./client
       dockerfile: Dockerfile
       args:
         VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-        VITE_API_BASE_URL: http://localhost:8080/api
-    container_name: crypto-arbitrage-frontend-live
+        VITE_API_BASE_URL_DEMO: http://localhost:8081/api
+        VITE_API_BASE_URL_REAL: http://localhost:8080/api
+    container_name: crypto-arbitrage-frontend
     restart: unless-stopped
     ports:
       - "80:80"
     depends_on:
-      - backend-live
-    networks:
-      - arbitrage-network
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-
-  # Frontend - Demo Mode (Port 81)
-  frontend-demo:
-    build:
-      context: ./client
-      dockerfile: Dockerfile
-      args:
-        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-        VITE_API_BASE_URL: http://localhost:8081/api
-    container_name: crypto-arbitrage-frontend-demo
-    restart: unless-stopped
-    ports:
-      - "81:80"
-    depends_on:
+      - backend-real
       - backend-demo
     networks:
       - arbitrage-network

@@ -1,4 +1,7 @@
 import { create } from 'zustand';
+import { setApiBaseUrl } from '../services/apiClient';
+
+export type TradingMode = 'Demo' | 'Real';
 
 interface User {
   id: string;
@@ -13,13 +16,17 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
 
-  login: (googleToken: string) => Promise<void>;
+  login: (googleToken: string, mode: TradingMode) => Promise<void>;
   logout: () => void;
   checkAuth: () => void;
   clearError: () => void;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5052/api';
+const getApiBaseUrl = (mode: TradingMode): string => {
+  return mode === 'Real'
+    ? import.meta.env.VITE_API_BASE_URL_REAL || 'http://localhost:5053/api'
+    : import.meta.env.VITE_API_BASE_URL_DEMO || 'http://localhost:5052/api';
+};
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
@@ -28,10 +35,17 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: false,
   error: null,
 
-  login: async (googleToken: string) => {
+  login: async (googleToken: string, mode: TradingMode) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/google-signin`, {
+      // Set the API base URL for the selected mode
+      setApiBaseUrl(mode);
+      const apiBaseUrl = getApiBaseUrl(mode);
+
+      console.log('Login attempt with mode:', mode);
+      console.log('Connecting to:', apiBaseUrl);
+
+      const response = await fetch(`${apiBaseUrl}/auth/google-signin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idToken: googleToken })
@@ -54,6 +68,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: () => {
     localStorage.removeItem('jwt_token');
+    sessionStorage.removeItem('trading_mode');
     set({ user: null, token: null, isAuthenticated: false, error: null });
   },
 
