@@ -418,6 +418,78 @@ public class BybitConnector : IExchangeConnector
         return volumes;
     }
 
+    public async Task<LiquidityMetricsDto?> GetLiquidityMetricsAsync(string symbol)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Bybit");
+
+        try
+        {
+            // Get orderbook depth for linear perpetuals
+            // Note: Bybit.Net V5 API - GetOrderbookAsync may have different signature
+            // Adjust based on your Bybit.Net library version
+            var orderbook = await _restClient.V5Api.ExchangeData.GetOrderbookAsync(Category.Linear, symbol, 100);
+
+            if (!orderbook.Success || orderbook.Data == null)
+            {
+                _logger.LogWarning("Failed to fetch orderbook for {Symbol} from Bybit", symbol);
+                return null;
+            }
+
+            var bids = orderbook.Data.Bids.ToList();
+            var asks = orderbook.Data.Asks.ToList();
+
+            if (bids.Count() == 0 || asks.Count() == 0)
+            {
+                _logger.LogWarning("Empty orderbook for {Symbol} from Bybit", symbol);
+                return null;
+            }
+
+            // Calculate best bid and ask
+            var bestBid = bids.First().Price;
+            var bestAsk = asks.First().Price;
+
+            // Calculate bid/ask spread percentage
+            var midPrice = (bestBid + bestAsk) / 2;
+            var bidAskSpread = ((bestAsk - bestBid) / midPrice) * 100;
+
+            // Calculate orderbook depth within 1% of mid price
+            var lowerBound = midPrice * 0.99m;
+            var upperBound = midPrice * 1.01m;
+
+            var depthUsd = 0m;
+
+            // Sum bid depth within 1% below mid price
+            foreach (var bid in bids.Where(b => b.Price >= lowerBound))
+            {
+                depthUsd += bid.Quantity * bid.Price;
+            }
+
+            // Sum ask depth within 1% above mid price
+            foreach (var ask in asks.Where(a => a.Price <= upperBound))
+            {
+                depthUsd += ask.Quantity * ask.Price;
+            }
+
+            _logger.LogInformation(
+                "Liquidity metrics for {Symbol} from Bybit: Spread={Spread:F3}%, Depth=${Depth:N0}",
+                symbol, bidAskSpread, depthUsd);
+
+            return new LiquidityMetricsDto
+            {
+                BidAskSpreadPercent = bidAskSpread,
+                OrderbookDepthUsd = depthUsd,
+                Status = LiquidityStatus.Good, // Will be evaluated by ArbitrageEngineService
+                WarningMessage = null
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching liquidity metrics for {Symbol} from Bybit", symbol);
+            return null;
+        }
+    }
+
     public async Task<AccountBalanceDto> GetAccountBalanceAsync()
     {
         // Call the overload with empty active positions dictionary

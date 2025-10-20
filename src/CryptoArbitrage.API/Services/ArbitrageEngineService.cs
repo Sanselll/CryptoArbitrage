@@ -16,7 +16,9 @@ public class ArbitrageEngineService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly IHubContext<ArbitrageHub> _hubContext;
     private readonly ArbitrageConfig _config;
+    private readonly LiquidityThresholds _liquidityThresholds;
     private readonly Dictionary<string, IExchangeConnector> _exchangeConnectors = new();
+    private readonly SemaphoreSlim _liquiditySemaphore;
     private List<string> _activeSymbols = new();
     private DateTime _lastSymbolRefresh = DateTime.MinValue;
 
@@ -24,12 +26,15 @@ public class ArbitrageEngineService : BackgroundService
         ILogger<ArbitrageEngineService> logger,
         IServiceProvider serviceProvider,
         IHubContext<ArbitrageHub> hubContext,
-        ArbitrageConfig config)
+        ArbitrageConfig config,
+        LiquidityThresholds liquidityThresholds)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
         _hubContext = hubContext;
         _config = config;
+        _liquidityThresholds = liquidityThresholds;
+        _liquiditySemaphore = new SemaphoreSlim(config.MaxConcurrentLiquidityRequests);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -157,6 +162,63 @@ public class ArbitrageEngineService : BackgroundService
                 _activeSymbols = _config.WatchedSymbols;
             }
         }
+    }
+
+    /// <summary>
+    /// Evaluates liquidity metrics and returns status with warning message if needed
+    /// </summary>
+    private (LiquidityStatus status, string? warning) EvaluateLiquidity(
+        decimal bidAskSpread,
+        decimal orderbookDepth,
+        decimal volume24h)
+    {
+        var warnings = new List<string>();
+        var status = LiquidityStatus.Good;
+
+        // Check bid/ask spread
+        if (bidAskSpread > _liquidityThresholds.MaxBidAskSpreadPercent)
+        {
+            warnings.Add($"Wide bid/ask spread ({bidAskSpread:F3}%)");
+            status = LiquidityStatus.Low;
+        }
+        else if (bidAskSpread > _liquidityThresholds.MaxBidAskSpreadPercent * 0.7m)
+        {
+            warnings.Add($"Moderate bid/ask spread ({bidAskSpread:F3}%)");
+            if (status == LiquidityStatus.Good)
+                status = LiquidityStatus.Medium;
+        }
+
+        // Check orderbook depth
+        if (orderbookDepth < _liquidityThresholds.MinOrderbookDepthUsd)
+        {
+            warnings.Add($"Low orderbook depth (${orderbookDepth:N0})");
+            status = LiquidityStatus.Low;
+        }
+        else if (orderbookDepth < _liquidityThresholds.MinOrderbookDepthUsd * 1.5m)
+        {
+            warnings.Add($"Moderate orderbook depth (${orderbookDepth:N0})");
+            if (status == LiquidityStatus.Good)
+                status = LiquidityStatus.Medium;
+        }
+
+        // Check 24h volume
+        if (volume24h < _liquidityThresholds.MinVolume24hUsd)
+        {
+            warnings.Add($"Low 24h volume (${volume24h:N0})");
+            status = LiquidityStatus.Low;
+        }
+        else if (volume24h < _liquidityThresholds.MinVolume24hUsd * 1.5m)
+        {
+            warnings.Add($"Moderate 24h volume (${volume24h:N0})");
+            if (status == LiquidityStatus.Good)
+                status = LiquidityStatus.Medium;
+        }
+
+        var warningMessage = warnings.Any()
+            ? string.Join("; ", warnings) + ". Consider using limit orders."
+            : null;
+
+        return (status, warningMessage);
     }
 
     private async Task RunArbitrageAnalysisAsync(CancellationToken stoppingToken)
@@ -368,6 +430,111 @@ public class ArbitrageEngineService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error enriching opportunities with volume data");
+            }
+
+            // Enrich opportunities with liquidity metrics
+            try
+            {
+                var liquidityByExchange = new Dictionary<string, Dictionary<string, LiquidityMetricsDto>>();
+
+                // Fetch liquidity metrics for all exchanges in parallel
+                var liquidityTasks = new List<Task>();
+
+                foreach (var (exchangeName, connector) in _exchangeConnectors)
+                {
+                    var exchangeLiquidity = new Dictionary<string, LiquidityMetricsDto>();
+                    var exchangeSymbols = opportunities
+                        .Where(o => o.Strategy == ArbitrageStrategy.SpotPerpetual && o.Exchange == exchangeName ||
+                                    o.Strategy == ArbitrageStrategy.CrossExchange && (o.LongExchange == exchangeName || o.ShortExchange == exchangeName))
+                        .Select(o => o.Symbol)
+                        .Distinct()
+                        .ToList();
+
+                    // Create parallel tasks for each symbol on this exchange
+                    var symbolTasks = exchangeSymbols.Select(async symbol =>
+                    {
+                        await _liquiditySemaphore.WaitAsync();
+                        try
+                        {
+                            var liquidity = await connector.GetLiquidityMetricsAsync(symbol);
+                            if (liquidity != null)
+                            {
+                                lock (exchangeLiquidity)
+                                {
+                                    exchangeLiquidity[symbol] = liquidity;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to fetch liquidity for {Symbol} from {Exchange}", symbol, exchangeName);
+                        }
+                        finally
+                        {
+                            _liquiditySemaphore.Release();
+                        }
+                    });
+
+                    // Wait for all symbols on this exchange to complete
+                    await Task.WhenAll(symbolTasks);
+                    liquidityByExchange[exchangeName] = exchangeLiquidity;
+                }
+
+                // Populate liquidity for each opportunity
+                foreach (var opp in opportunities)
+                {
+                    LiquidityMetricsDto? primaryLiquidity = null;
+                    LiquidityMetricsDto? secondaryLiquidity = null;
+
+                    // For spot-perp, get liquidity from the exchange
+                    if (opp.Strategy == ArbitrageStrategy.SpotPerpetual && liquidityByExchange.ContainsKey(opp.Exchange))
+                    {
+                        liquidityByExchange[opp.Exchange].TryGetValue(opp.Symbol, out primaryLiquidity);
+                    }
+                    // For cross-exchange, get liquidity from both exchanges
+                    else if (opp.Strategy == ArbitrageStrategy.CrossExchange)
+                    {
+                        if (liquidityByExchange.ContainsKey(opp.LongExchange))
+                        {
+                            liquidityByExchange[opp.LongExchange].TryGetValue(opp.Symbol, out primaryLiquidity);
+                        }
+                        if (liquidityByExchange.ContainsKey(opp.ShortExchange))
+                        {
+                            liquidityByExchange[opp.ShortExchange].TryGetValue(opp.Symbol, out secondaryLiquidity);
+                        }
+                    }
+
+                    // For cross-exchange, use the worst liquidity from both exchanges
+                    if (secondaryLiquidity != null && primaryLiquidity != null)
+                    {
+                        var worstSpread = Math.Max(primaryLiquidity.BidAskSpreadPercent, secondaryLiquidity.BidAskSpreadPercent);
+                        var worstDepth = Math.Min(primaryLiquidity.OrderbookDepthUsd, secondaryLiquidity.OrderbookDepthUsd);
+
+                        var (status, warning) = EvaluateLiquidity(worstSpread, worstDepth, opp.Volume24h);
+                        opp.BidAskSpreadPercent = worstSpread;
+                        opp.OrderbookDepthUsd = worstDepth;
+                        opp.LiquidityStatus = status;
+                        opp.LiquidityWarning = warning;
+                    }
+                    else if (primaryLiquidity != null)
+                    {
+                        var (status, warning) = EvaluateLiquidity(
+                            primaryLiquidity.BidAskSpreadPercent,
+                            primaryLiquidity.OrderbookDepthUsd,
+                            opp.Volume24h);
+                        opp.BidAskSpreadPercent = primaryLiquidity.BidAskSpreadPercent;
+                        opp.OrderbookDepthUsd = primaryLiquidity.OrderbookDepthUsd;
+                        opp.LiquidityStatus = status;
+                        opp.LiquidityWarning = warning;
+                    }
+                }
+
+                _logger.LogInformation("Enriched {Count} opportunities with liquidity metrics",
+                    opportunities.Count(o => o.LiquidityStatus != null));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error enriching opportunities with liquidity data");
             }
 
             // Enrich opportunities with execution information from Executions table

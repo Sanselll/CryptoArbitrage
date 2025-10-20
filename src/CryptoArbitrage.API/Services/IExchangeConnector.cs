@@ -13,6 +13,7 @@ public interface IExchangeConnector
     Task<Dictionary<string, SpotPriceDto>> GetSpotPricesAsync(List<string> symbols);
     Task<Dictionary<string, decimal>> GetPerpetualPricesAsync(List<string> symbols);
     Task<Dictionary<string, decimal>> Get24hVolumeAsync(List<string> symbols);
+    Task<LiquidityMetricsDto?> GetLiquidityMetricsAsync(string symbol);
     Task<AccountBalanceDto> GetAccountBalanceAsync();
     Task<AccountBalanceDto> GetAccountBalanceAsync(Dictionary<string, decimal> activeSpotPositions);
     Task<Dictionary<string, decimal>> GetSpotBalancesAsync();

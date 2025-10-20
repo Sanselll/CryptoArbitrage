@@ -19,6 +19,10 @@ builder.Services.AddSingleton(arbitrageConfig);
 var environmentConfig = builder.Configuration.GetSection("Environment").Get<EnvironmentConfig>() ?? new EnvironmentConfig();
 builder.Services.AddSingleton(environmentConfig);
 
+// Add liquidity thresholds configuration
+var liquidityThresholds = builder.Configuration.GetSection("LiquidityThresholds").Get<LiquidityThresholds>() ?? new LiquidityThresholds();
+builder.Services.AddSingleton(liquidityThresholds);
+
 var startupLogger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Startup");
 startupLogger.LogInformation("Starting application in {Mode} mode (IsLive: {IsLive})",
     environmentConfig.Mode, environmentConfig.IsLive);
