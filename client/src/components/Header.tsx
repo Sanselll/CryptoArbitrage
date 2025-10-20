@@ -14,15 +14,9 @@ export const Header = () => {
   const [environmentMode, setEnvironmentMode] = useState<string>('Demo');
 
   useEffect(() => {
-    const fetchEnvironment = async () => {
-      try {
-        const response = await apiClient.get('/environment/status');
-        setEnvironmentMode(response.data.mode);
-      } catch (error) {
-        console.error('Failed to fetch environment status:', error);
-      }
-    };
-    fetchEnvironment();
+    // Get mode from sessionStorage instead of API call
+    const mode = sessionStorage.getItem('trading_mode') || 'Demo';
+    setEnvironmentMode(mode);
   }, []);
 
   const handleLogout = () => {
@@ -79,10 +73,10 @@ export const Header = () => {
 
         {/* Environment Mode Badge */}
         <Badge
-          variant={environmentMode === 'Live' ? 'warning' : 'info'}
+          variant={environmentMode === 'Real' ? 'warning' : 'info'}
           size="sm"
         >
-          {environmentMode}
+          {environmentMode === 'Real' ? 'Real Trading' : 'Demo Trading'}
         </Badge>
       </div>
 

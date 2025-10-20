@@ -8,6 +8,7 @@ import { PositionsGrid } from '../components/PositionsGrid';
 import { Shield, Settings, ArrowRight } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import { Button } from '../components/ui/Button';
+import axios from 'axios';
 
 export function Dashboard() {
   const connect = useArbitrageStore((state) => state.connect);
@@ -15,6 +16,7 @@ export function Dashboard() {
   const navigate = useNavigate();
   const [hasApiKeys, setHasApiKeys] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isBackendOffline, setIsBackendOffline] = useState(false);
 
   useEffect(() => {
     // Check if user has API keys configured
@@ -22,9 +24,20 @@ export function Dashboard() {
       try {
         const response = await apiClient.get('/user/apikeys');
         setHasApiKeys(response.data.length > 0);
+        setIsBackendOffline(false);
       } catch (error) {
         console.error('Error checking API keys:', error);
-        setHasApiKeys(false);
+
+        // Check if it's a network error (backend is down)
+        if (axios.isAxiosError(error) && (!error.response || error.code === 'ERR_NETWORK')) {
+          // Backend is offline - assume user might have API keys, show dashboard
+          setIsBackendOffline(true);
+          setHasApiKeys(true); // Optimistically show dashboard when offline
+        } else {
+          // Other error (like 401, 404, etc.) - likely no API keys
+          setHasApiKeys(false);
+          setIsBackendOffline(false);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -34,8 +47,8 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    // Only connect to SignalR if user has API keys
-    if (hasApiKeys) {
+    // Only connect to SignalR if user has API keys and backend is not offline
+    if (hasApiKeys && !isBackendOffline) {
       connect();
     }
 
@@ -43,7 +56,7 @@ export function Dashboard() {
     return () => {
       disconnect();
     };
-  }, [hasApiKeys, connect, disconnect]);
+  }, [hasApiKeys, isBackendOffline, connect, disconnect]);
 
   return (
     <div className="h-screen flex flex-col bg-binance-bg">
