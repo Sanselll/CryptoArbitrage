@@ -37,6 +37,7 @@ services:
       - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
       - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
       - Encryption__Key=${ENCRYPTION_KEY}
+      - PROD_DOMAIN=${PROD_DOMAIN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,6 +74,7 @@ services:
       - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
       - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
       - Encryption__Key=${ENCRYPTION_KEY}
+      - PROD_DOMAIN=${PROD_DOMAIN}
     depends_on:
       postgres:
         condition: service_healthy
