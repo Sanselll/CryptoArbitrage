@@ -21,17 +21,20 @@ public class UserController : ControllerBase
     private readonly ICurrentUserService _currentUser;
     private readonly IEncryptionService _encryption;
     private readonly ILogger<UserController> _logger;
+    private readonly IApiKeyValidator _apiKeyValidator;
 
     public UserController(
         ArbitrageDbContext db,
         ICurrentUserService currentUser,
         IEncryptionService encryption,
-        ILogger<UserController> logger)
+        ILogger<UserController> logger,
+        IApiKeyValidator apiKeyValidator)
     {
         _db = db;
         _currentUser = currentUser;
         _encryption = encryption;
         _logger = logger;
+        _apiKeyValidator = apiKeyValidator;
     }
 
     /// <summary>
@@ -148,6 +151,28 @@ public class UserController : ControllerBase
                 }
 
                 _logger.LogInformation("API credentials validated successfully for {Exchange}", request.ExchangeName);
+
+                // Validate API key permissions and restrictions
+                _logger.LogInformation("Checking API key permissions and restrictions for {Exchange}...", request.ExchangeName);
+                var validationResult = await _apiKeyValidator.ValidateApiKeyAsync(request.ExchangeName, request.ApiKey, request.ApiSecret);
+
+                if (!validationResult.IsValid)
+                {
+                    _logger.LogWarning("API key permissions check failed for user {UserId} on {Exchange}: {Message}",
+                        _currentUser.UserId, request.ExchangeName, validationResult.DetailedMessage);
+
+                    return BadRequest(new
+                    {
+                        error = "API key validation failed",
+                        detailedMessage = validationResult.DetailedMessage,
+                        missingPermissions = validationResult.MissingPermissions,
+                        isIpRestricted = validationResult.IsIpRestricted,
+                        allowedIps = validationResult.AllowedIps,
+                        serverIp = validationResult.ServerIp
+                    });
+                }
+
+                _logger.LogInformation("API key permissions validated successfully for {Exchange}", request.ExchangeName);
             }
             finally
             {
@@ -289,10 +314,11 @@ public class UserController : ControllerBase
 
     /// <summary>
     /// Tests an API key by attempting to connect to the actual exchange API.
+    /// Uses the same ApiKeyValidator as the Add API Key endpoint for consistency.
     /// CRITICAL: Validates user owns the API key before testing.
     /// </summary>
     [HttpPost("apikeys/{id}/test")]
-    public async Task<IActionResult> TestApiKey(int id, [FromServices] IServiceProvider serviceProvider)
+    public async Task<IActionResult> TestApiKey(int id)
     {
         var apiKey = await _db.UserExchangeApiKeys.FindAsync(id);
         if (apiKey == null)
@@ -330,67 +356,55 @@ public class UserController : ControllerBase
                 });
             }
 
-            // Test actual exchange API connection
-            IExchangeConnector? connector = null;
-            try
+            // Use the same ApiKeyValidator as the Add API Key endpoint
+            _logger.LogInformation("Testing API key {KeyId} for user {UserId} on {Exchange}",
+                id, _currentUser.UserId, apiKey.ExchangeName);
+
+            var validationResult = await _apiKeyValidator.ValidateApiKeyAsync(apiKey.ExchangeName, key, secret);
+
+            // Update last test result
+            apiKey.LastTestedAt = DateTime.UtcNow;
+
+            if (validationResult.IsValid)
             {
-                connector = apiKey.ExchangeName switch
-                {
-                    "Binance" => serviceProvider.GetRequiredService<BinanceConnector>(),
-                    "Bybit" => serviceProvider.GetRequiredService<BybitConnector>(),
-                    _ => null
-                };
+                apiKey.LastTestResult = "Success: Connected to exchange";
+            }
+            else if (validationResult.IsIpRestricted)
+            {
+                apiKey.LastTestResult = $"Failed: IP-restricted (Server IP: {validationResult.ServerIp ?? "unknown"})";
+            }
+            else
+            {
+                apiKey.LastTestResult = $"Failed: {validationResult.DetailedMessage}";
+            }
 
-                if (connector == null)
-                {
-                    apiKey.LastTestedAt = DateTime.UtcNow;
-                    apiKey.LastTestResult = $"Failed: Unsupported exchange {apiKey.ExchangeName}";
-                    await _db.SaveChangesAsync();
+            await _db.SaveChangesAsync();
 
-                    return Ok(new
-                    {
-                        success = false,
-                        message = $"Exchange {apiKey.ExchangeName} is not supported",
-                        testedAt = apiKey.LastTestedAt
-                    });
-                }
+            _logger.LogInformation("User {UserId} tested API key {KeyId} for {Exchange}: {Result}",
+                _currentUser.UserId, id, apiKey.ExchangeName, apiKey.LastTestResult);
 
-                // Attempt connection with actual API credentials
-                var connectionSuccess = await connector.ConnectAsync(key, secret);
-
-                apiKey.LastTestedAt = DateTime.UtcNow;
-                apiKey.LastTestResult = connectionSuccess ? "Success: Connected to exchange" : "Failed: Invalid API credentials";
-                await _db.SaveChangesAsync();
-
-                _logger.LogInformation("User {UserId} tested API key {KeyId} for {Exchange}: {Result}",
-                    _currentUser.UserId, id, apiKey.ExchangeName, apiKey.LastTestResult);
-
-                // Disconnect after test
-                await connector.DisconnectAsync();
-
+            // Return detailed result
+            if (validationResult.IsValid)
+            {
                 return Ok(new
                 {
-                    success = connectionSuccess,
-                    message = connectionSuccess
-                        ? $"Successfully connected to {apiKey.ExchangeName} API"
-                        : $"Failed to connect to {apiKey.ExchangeName} - check your API key and secret",
+                    success = true,
+                    message = $"Successfully connected to {apiKey.ExchangeName} API",
                     testedAt = apiKey.LastTestedAt
                 });
             }
-            finally
+            else
             {
-                // Ensure we disconnect
-                if (connector != null)
+                return Ok(new
                 {
-                    try
-                    {
-                        await connector.DisconnectAsync();
-                    }
-                    catch
-                    {
-                        // Ignore disconnect errors
-                    }
-                }
+                    success = false,
+                    message = validationResult.DetailedMessage,
+                    isIpRestricted = validationResult.IsIpRestricted,
+                    serverIp = validationResult.ServerIp,
+                    allowedIps = validationResult.AllowedIps,
+                    missingPermissions = validationResult.MissingPermissions,
+                    testedAt = apiKey.LastTestedAt
+                });
             }
         }
         catch (Exception ex)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, TestTube, AlertCircle, CheckCircle, Shield, X } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, TestTube, AlertCircle, CheckCircle, Shield, X, Copy, Check } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import { useAuthStore } from '../stores/authStore';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
@@ -31,16 +31,29 @@ export const ProfileSettings = () => {
   });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: number | null }>({ isOpen: false, id: null });
-  const [alertDialog, setAlertDialog] = useState<{ isOpen: boolean; title: string; message: string; variant: 'success' | 'danger' | 'warning' | 'info' }>({
+  const [alertDialog, setAlertDialog] = useState<{ isOpen: boolean; title: string; message: string; variant: 'success' | 'danger' | 'warning' | 'info'; serverIp?: string; missingPermissions?: string[] }>({
     isOpen: false,
     title: '',
     message: '',
     variant: 'info'
   });
+  const [copiedIp, setCopiedIp] = useState(false);
+  const [serverIp, setServerIp] = useState<string | null>(null);
 
   useEffect(() => {
     loadApiKeys();
+    fetchServerIp();
   }, []);
+
+  const fetchServerIp = async () => {
+    try {
+      const response = await fetch('https://api.ipify.org?format=json');
+      const data = await response.json();
+      setServerIp(data.ip);
+    } catch (error) {
+      console.error('Failed to fetch server IP:', error);
+    }
+  };
 
   const loadApiKeys = async () => {
     try {
@@ -78,11 +91,11 @@ export const ProfileSettings = () => {
       // Reload keys to show the new key
       await loadApiKeys();
     } catch (error: any) {
-      const errorMsg = error.response?.data?.error || 'Failed to add API key';
       setMessage(null);
 
       // Handle session expiration (401 Unauthorized)
       if (error.response?.status === 401) {
+        const errorMsg = error.response?.data?.error || 'Session expired';
         setAlertDialog({
           isOpen: true,
           title: 'Session Expired',
@@ -96,11 +109,31 @@ export const ProfileSettings = () => {
           navigate('/login');
         }, 3000);
       } else {
+        // Extract detailed validation error information
+        const errorData = error.response?.data;
+        const detailedMessage = errorData?.detailedMessage;
+        const serverIp = errorData?.serverIp;
+        const isIpRestricted = errorData?.isIpRestricted;
+        const missingPermissions = errorData?.missingPermissions;
+        const fallbackError = errorData?.error || 'Failed to add API key';
+
+        // Build the error message with helpful context
+        let message = detailedMessage || fallbackError;
+
+        // If IP-restricted, emphasize the server IP
+        if (isIpRestricted && serverIp) {
+          message = `Your API key is IP-restricted. Please add this server's IP address to your exchange's API key whitelist:\n\n${serverIp}\n\nThen try adding the key again.`;
+        } else if (missingPermissions && missingPermissions.length > 0) {
+          message = `${message}\n\nRequired permissions:\n${missingPermissions.map((p: string) => `• ${p}`).join('\n')}`;
+        }
+
         setAlertDialog({
           isOpen: true,
-          title: 'Failed to Add API Key',
-          message: errorMsg,
-          variant: 'danger'
+          title: isIpRestricted ? 'IP Restriction Detected' : 'Failed to Add API Key',
+          message,
+          variant: 'danger',
+          serverIp: isIpRestricted ? serverIp : undefined,
+          missingPermissions
         });
       }
     }
@@ -123,12 +156,24 @@ export const ProfileSettings = () => {
     try {
       const response = await apiClient.post(`/user/apikeys/${id}/test`);
 
-      setAlertDialog({
-        isOpen: true,
-        title: response.data.success ? 'Connection Successful' : 'Connection Failed',
-        message: response.data.message,
-        variant: response.data.success ? 'success' : 'danger'
-      });
+      // Handle IP restriction in test result
+      if (!response.data.success && response.data.isIpRestricted && response.data.serverIp) {
+        setAlertDialog({
+          isOpen: true,
+          title: 'IP Restriction Detected',
+          message: `Your API key is IP-restricted. Please add this server's IP address to your exchange's API key whitelist:\n\n${response.data.serverIp}\n\nThen test the key again.`,
+          variant: 'danger',
+          serverIp: response.data.serverIp,
+          missingPermissions: response.data.missingPermissions
+        });
+      } else {
+        setAlertDialog({
+          isOpen: true,
+          title: response.data.success ? 'Connection Successful' : 'Connection Failed',
+          message: response.data.message,
+          variant: response.data.success ? 'success' : 'danger'
+        });
+      }
 
       loadApiKeys();
     } catch (error: any) {
@@ -140,6 +185,16 @@ export const ProfileSettings = () => {
       });
     } finally {
       setIsTesting(null);
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIp(true);
+      setTimeout(() => setCopiedIp(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
     }
   };
 
@@ -212,6 +267,39 @@ export const ProfileSettings = () => {
           </CardHeader>
 
           <CardContent className="p-3 pt-0">
+            {/* Server IP Info */}
+            {serverIp && (
+              <div className="bg-binance-blue/10 border border-binance-blue/30 rounded p-3 mb-3">
+                <div className="flex items-start gap-2">
+                  <Shield className="w-4 h-4 text-binance-blue flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="text-xs font-semibold text-binance-blue mb-1">
+                      Server IP for API Whitelist
+                    </div>
+                    <div className="text-[10px] text-binance-text-secondary mb-2">
+                      Add this IP address to your exchange API key whitelist (required for live trading):
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-binance-bg border border-binance-border rounded px-2 py-1 text-xs font-mono text-binance-yellow">
+                        {serverIp}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(serverIp)}
+                        className="p-1.5 bg-binance-bg-secondary hover:bg-binance-bg-tertiary border border-binance-border rounded transition-colors"
+                        title="Copy IP address"
+                      >
+                        {copiedIp ? (
+                          <Check className="w-3 h-3 text-binance-green" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-binance-text-secondary" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Add Form */}
             {isAdding && (
               <div className="bg-binance-bg-tertiary p-3 rounded mb-3 border border-binance-border">
@@ -370,11 +458,44 @@ export const ProfileSettings = () => {
       {/* Alert Dialog */}
       <AlertDialog
         isOpen={alertDialog.isOpen}
-        onClose={() => setAlertDialog({ ...alertDialog, isOpen: false })}
+        onClose={() => {
+          setAlertDialog({ ...alertDialog, isOpen: false });
+          setCopiedIp(false);
+        }}
         title={alertDialog.title}
         message={alertDialog.message}
         variant={alertDialog.variant}
-      />
+      >
+        {/* Copy IP Address Button for IP-restricted errors */}
+        {alertDialog.serverIp && (
+          <div className="mt-3 p-3 bg-binance-bg-tertiary border border-binance-border rounded">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex-1">
+                <div className="text-[10px] text-binance-text-muted mb-1">Server IP Address:</div>
+                <div className="text-xs font-mono text-binance-text font-semibold">{alertDialog.serverIp}</div>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => copyToClipboard(alertDialog.serverIp!)}
+                className="gap-1 text-xs flex-shrink-0"
+              >
+                {copiedIp ? (
+                  <>
+                    <Check className="w-3 h-3" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3" />
+                    Copy IP
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </AlertDialog>
     </div>
   );
 };
