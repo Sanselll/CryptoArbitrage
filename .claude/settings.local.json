@@ -57,7 +57,8 @@
       "WebFetch(domain:bybit-exchange.github.io)",
       "Bash(curl -s \"https://raw.githubusercontent.com/JKorf/Bybit.Net/e77bef4cb368ba5e74fedba6a9fb5df7b4a511bf/ByBit.Net/Objects/Models/V5/BybitApiKeyInfo.cs\")",
       "Bash(curl -s \"https://raw.githubusercontent.com/JKorf/Bybit.Net/main/ByBit.Net/Interfaces/Clients/V5/IBybitRestClientApiAccount.cs\")",
-      "Bash(curl -s \"https://bybit-exchange.github.io/docs/v5/user/apikey-info\")"
+      "Bash(curl -s \"https://bybit-exchange.github.io/docs/v5/user/apikey-info\")",
+      "Bash(cat .github/workflows/deploy.yml)"
     ],
     "deny": [],
     "ask": []

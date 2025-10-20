@@ -66,9 +66,8 @@ export const ProfileSettings = () => {
 
   const fetchServerIp = async () => {
     try {
-      const response = await fetch('https://api.ipify.org?format=json');
-      const data = await response.json();
-      setServerIp(data.ip);
+      const response = await apiClient.get('/environment/server-ip');
+      setServerIp(response.data.ip);
     } catch (error) {
       console.error('Failed to fetch server IP:', error);
     }

@@ -13,11 +13,13 @@ public class EnvironmentController : ControllerBase
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<EnvironmentController> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public EnvironmentController(IConfiguration configuration, ILogger<EnvironmentController> logger)
+    public EnvironmentController(IConfiguration configuration, ILogger<EnvironmentController> logger, IHttpClientFactory httpClientFactory)
     {
         _configuration = configuration;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
     }
 
     /// <summary>
@@ -61,5 +63,37 @@ public class EnvironmentController : ControllerBase
             exchanges = exchanges,
             timestamp = DateTime.UtcNow
         });
+    }
+
+    /// <summary>
+    /// Gets the server's public IP address for API key whitelisting.
+    /// Public endpoint - no authentication required.
+    /// </summary>
+    [HttpGet("server-ip")]
+    public async Task<IActionResult> GetServerIp()
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
+            var ip = await client.GetStringAsync("https://api.ipify.org");
+
+            _logger.LogDebug("Server IP requested: {ServerIp}", ip?.Trim());
+
+            return Ok(new
+            {
+                ip = ip?.Trim(),
+                timestamp = DateTime.UtcNow
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to detect server IP address");
+            return StatusCode(500, new
+            {
+                error = "Failed to detect server IP address",
+                timestamp = DateTime.UtcNow
+            });
+        }
     }
 }
