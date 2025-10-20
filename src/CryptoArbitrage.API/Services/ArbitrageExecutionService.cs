@@ -14,6 +14,8 @@ public class ArbitrageExecutionService
     private readonly Dictionary<string, IExchangeConnector> _exchangeConnectors;
     private readonly ICurrentUserService _currentUser;
     private readonly IEncryptionService _encryption;
+    private readonly INotificationService _notificationService;
+    private readonly ISignalRStreamingService _signalRStreamingService;
 
     public ArbitrageExecutionService(
         ILogger<ArbitrageExecutionService> _logger,
@@ -22,13 +24,17 @@ public class ArbitrageExecutionService
         BinanceConnector binanceConnector,
         BybitConnector bybitConnector,
         ICurrentUserService currentUser,
-        IEncryptionService encryption)
+        IEncryptionService encryption,
+        INotificationService notificationService,
+        ISignalRStreamingService signalRStreamingService)
     {
         this._logger = _logger;
         _dbContext = dbContext;
         _config = config;
         _currentUser = currentUser;
         _encryption = encryption;
+        _notificationService = notificationService;
+        _signalRStreamingService = signalRStreamingService;
 
         _exchangeConnectors = new Dictionary<string, IExchangeConnector>
         {
@@ -532,6 +538,15 @@ public class ArbitrageExecutionService
             _dbContext.Executions.Add(execution);
             await _dbContext.SaveChangesAsync(); // Save to get execution ID
 
+            // Send notification for execution start
+            await _notificationService.NotifyExecutionStateChangeAsync(
+                _currentUser.UserId,
+                execution.Id,
+                request.Symbol,
+                request.Exchange,
+                ExecutionState.Stopped,
+                ExecutionState.Running);
+
             // Create Position records for tracking (one for perpetual, one for spot)
             var perpPosition = new Position
             {
@@ -582,6 +597,40 @@ public class ArbitrageExecutionService
             _logger.LogInformation(
                 "Spot-perpetual arbitrage executed: {Symbol} on {Exchange}, Spot @ ${SpotPrice}, Perp @ ${PerpPrice}, Execution ID: {Id}",
                 request.Symbol, request.Exchange, spotPrice, perpPrice, execution.Id);
+
+            // CRITICAL: Immediately broadcast fresh positions to user to update UI instantly
+            var userId = _currentUser.UserId;
+            if (!string.IsNullOrEmpty(userId))
+            {
+                var freshPositions = await _dbContext.Positions
+                    .Where(p => p.UserId == userId)
+                    .ToListAsync();
+
+                var positionDtos = freshPositions.Select(p => new PositionDto
+                {
+                    Id = p.Id,
+                    ExecutionId = p.ExecutionId,
+                    Symbol = p.Symbol,
+                    Exchange = p.Exchange,
+                    Type = p.Type,
+                    Side = p.Side,
+                    Status = p.Status,
+                    Quantity = p.Quantity,
+                    EntryPrice = p.EntryPrice,
+                    ExitPrice = p.ExitPrice,
+                    Leverage = p.Leverage,
+                    InitialMargin = p.InitialMargin,
+                    RealizedPnL = p.RealizedPnL,
+                    UnrealizedPnL = p.UnrealizedPnL,
+                    TotalFundingFeePaid = p.TotalFundingFeePaid,
+                    TotalFundingFeeReceived = p.TotalFundingFeeReceived,
+                    OpenedAt = p.OpenedAt,
+                    ClosedAt = p.ClosedAt
+                }).ToList();
+
+                await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positionDtos);
+                _logger.LogInformation("Broadcasted fresh positions to user {UserId} after executing opportunity", userId);
+            }
 
             return response;
         }
@@ -889,6 +938,15 @@ public class ArbitrageExecutionService
             _dbContext.Executions.Add(execution);
             await _dbContext.SaveChangesAsync(); // Save to get execution ID
 
+            // Send notification for execution start
+            await _notificationService.NotifyExecutionStateChangeAsync(
+                _currentUser.UserId,
+                execution.Id,
+                request.Symbol,
+                execution.Exchange,
+                ExecutionState.Stopped,
+                ExecutionState.Running);
+
             // Create Position records for both exchanges
             var longPosition = new Position
             {
@@ -941,6 +999,40 @@ public class ArbitrageExecutionService
             _logger.LogInformation(
                 "Cross-exchange arbitrage executed: {Symbol} LONG on {LongExchange} @ ${LongPrice}, SHORT on {ShortExchange} @ ${ShortPrice}, Execution ID: {Id}",
                 request.Symbol, request.LongExchange, longPrice, request.ShortExchange, shortPrice, execution.Id);
+
+            // CRITICAL: Immediately broadcast fresh positions to user to update UI instantly
+            var userId = _currentUser.UserId;
+            if (!string.IsNullOrEmpty(userId))
+            {
+                var freshPositions = await _dbContext.Positions
+                    .Where(p => p.UserId == userId)
+                    .ToListAsync();
+
+                var positionDtos = freshPositions.Select(p => new PositionDto
+                {
+                    Id = p.Id,
+                    ExecutionId = p.ExecutionId,
+                    Symbol = p.Symbol,
+                    Exchange = p.Exchange,
+                    Type = p.Type,
+                    Side = p.Side,
+                    Status = p.Status,
+                    Quantity = p.Quantity,
+                    EntryPrice = p.EntryPrice,
+                    ExitPrice = p.ExitPrice,
+                    Leverage = p.Leverage,
+                    InitialMargin = p.InitialMargin,
+                    RealizedPnL = p.RealizedPnL,
+                    UnrealizedPnL = p.UnrealizedPnL,
+                    TotalFundingFeePaid = p.TotalFundingFeePaid,
+                    TotalFundingFeeReceived = p.TotalFundingFeeReceived,
+                    OpenedAt = p.OpenedAt,
+                    ClosedAt = p.ClosedAt
+                }).ToList();
+
+                await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positionDtos);
+                _logger.LogInformation("Broadcasted fresh positions to user {UserId} after executing cross-exchange opportunity", userId);
+            }
 
             return response;
         }
@@ -1175,21 +1267,24 @@ public class ArbitrageExecutionService
             execution.State = ExecutionState.Stopped;
             execution.StoppedAt = DateTime.UtcNow;
 
-            // Close related Position records
+            // Send notification for execution stop
+            await _notificationService.NotifyExecutionStateChangeAsync(
+                _currentUser.UserId,
+                execution.Id,
+                execution.Symbol,
+                execution.Exchange,
+                ExecutionState.Running,
+                ExecutionState.Stopped);
+
+            // DELETE related Position records (no need to keep closed positions in database)
             var positions = await _dbContext.Positions
                 .Where(p => p.ExecutionId == execution.Id && p.Status == PositionStatus.Open)
                 .ToListAsync();
 
-            foreach (var position in positions)
-            {
-                position.Status = PositionStatus.Closed;
-                position.ClosedAt = DateTime.UtcNow;
-                position.ExecutionId = null; // Detach from execution (historical record)
-            }
-
+            _dbContext.Positions.RemoveRange(positions);
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Execution {Id} stopped successfully, closed {Count} positions, deleting execution record",
+            _logger.LogInformation("Execution {Id} stopped successfully, deleted {Count} positions, deleting execution record",
                 execution.Id, positions.Count);
 
             // DELETE the Execution record (don't keep stopped records)
@@ -1197,6 +1292,40 @@ public class ArbitrageExecutionService
             await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("Deleted Execution {Id} from database", execution.Id);
+
+            // CRITICAL: Immediately broadcast fresh positions to user to update UI instantly
+            var userId = _currentUser.UserId;
+            if (!string.IsNullOrEmpty(userId))
+            {
+                var freshPositions = await _dbContext.Positions
+                    .Where(p => p.UserId == userId)
+                    .ToListAsync();
+
+                var positionDtos = freshPositions.Select(p => new PositionDto
+                {
+                    Id = p.Id,
+                    Symbol = p.Symbol,
+                    Exchange = p.Exchange,
+                    Type = p.Type,
+                    Side = p.Side,
+                    Status = p.Status,
+                    Quantity = p.Quantity,
+                    EntryPrice = p.EntryPrice,
+                    ExitPrice = p.ExitPrice,
+                    Leverage = p.Leverage,
+                    InitialMargin = p.InitialMargin,
+                    RealizedPnL = p.RealizedPnL,
+                    UnrealizedPnL = p.UnrealizedPnL,
+                    TotalFundingFeePaid = p.TotalFundingFeePaid,
+                    TotalFundingFeeReceived = p.TotalFundingFeeReceived,
+                    OpenedAt = p.OpenedAt,
+                    ClosedAt = p.ClosedAt,
+                    ExecutionId = p.ExecutionId
+                }).ToList();
+
+                await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positionDtos);
+                _logger.LogInformation("Broadcasted fresh positions to user {UserId} after stopping execution", userId);
+            }
 
             response.Success = true;
             response.Message = $"Successfully stopped execution for {execution.Symbol}";
@@ -1290,17 +1419,20 @@ public class ArbitrageExecutionService
         execution.State = ExecutionState.Stopped;
         execution.StoppedAt = DateTime.UtcNow;
 
-        // Close all position records
-        foreach (var position in positions)
-        {
-            position.Status = PositionStatus.Closed;
-            position.ClosedAt = DateTime.UtcNow;
-            position.ExecutionId = null; // Detach from execution (historical record)
-        }
+        // Send notification for execution stop
+        await _notificationService.NotifyExecutionStateChangeAsync(
+            _currentUser.UserId,
+            execution.Id,
+            execution.Symbol,
+            execution.Exchange,
+            ExecutionState.Running,
+            ExecutionState.Stopped);
 
+        // DELETE all position records (no need to keep closed positions in database)
+        _dbContext.Positions.RemoveRange(positions);
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("Cross-exchange execution {Id} stopped successfully, closed {Count} positions on {Exchanges}",
+        _logger.LogInformation("Cross-exchange execution {Id} stopped successfully, deleted {Count} positions on {Exchanges}",
             execution.Id, positions.Count, string.Join(", ", closedExchanges));
 
         // DELETE the Execution record (don't keep stopped records)
@@ -1308,6 +1440,40 @@ public class ArbitrageExecutionService
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("Deleted Execution {Id} from database", execution.Id);
+
+        // CRITICAL: Immediately broadcast fresh positions to user to update UI instantly
+        var userId = _currentUser.UserId;
+        if (!string.IsNullOrEmpty(userId))
+        {
+            var freshPositions = await _dbContext.Positions
+                .Where(p => p.UserId == userId)
+                .ToListAsync();
+
+            var positionDtos = freshPositions.Select(p => new PositionDto
+            {
+                Id = p.Id,
+                Symbol = p.Symbol,
+                Exchange = p.Exchange,
+                Type = p.Type,
+                Side = p.Side,
+                Status = p.Status,
+                Quantity = p.Quantity,
+                EntryPrice = p.EntryPrice,
+                ExitPrice = p.ExitPrice,
+                Leverage = p.Leverage,
+                InitialMargin = p.InitialMargin,
+                RealizedPnL = p.RealizedPnL,
+                UnrealizedPnL = p.UnrealizedPnL,
+                TotalFundingFeePaid = p.TotalFundingFeePaid,
+                TotalFundingFeeReceived = p.TotalFundingFeeReceived,
+                OpenedAt = p.OpenedAt,
+                ClosedAt = p.ClosedAt,
+                ExecutionId = p.ExecutionId
+            }).ToList();
+
+            await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positionDtos);
+            _logger.LogInformation("Broadcasted fresh positions to user {UserId} after stopping cross-exchange execution", userId);
+        }
 
         response.Success = true;
         response.Message = $"Successfully stopped cross-exchange execution for {execution.Symbol} on {string.Join(", ", closedExchanges)}";

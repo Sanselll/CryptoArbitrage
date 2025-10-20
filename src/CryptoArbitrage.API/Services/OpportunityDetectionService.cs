@@ -140,7 +140,20 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                     //              + shortRate (we receive if positive, pay if negative)
                     // Simplifies to: shortRate - longRate
                     netFundingRate = shortRate - longRate;
-                    var annualizedNetFunding = netFundingRate * 3 * 365; // 3 fundings per day, 365 days
+
+                    // Get funding intervals from the rate objects
+                    var longRateObj = (longExchange == exchange1) ? rate1 : rate2;
+                    var shortRateObj = (shortExchange == exchange1) ? rate1 : rate2;
+                    int longFundingIntervalHours = longRateObj.FundingIntervalHours; // Already defaults to 8
+                    int shortFundingIntervalHours = shortRateObj.FundingIntervalHours;
+
+                    // Calculate periods per day for each exchange
+                    decimal longPeriodsPerDay = 24m / longFundingIntervalHours;
+                    decimal shortPeriodsPerDay = 24m / shortFundingIntervalHours;
+
+                    // For cross-exchange, we earn funding on the short position and pay/receive on long position
+                    // Annualized return = (shortRate * shortPeriodsPerDay - longRate * longPeriodsPerDay) * 365
+                    var annualizedNetFunding = (shortRate * shortPeriodsPerDay - longRate * longPeriodsPerDay) * 365;
 
                     // Only profitable if net funding is positive
                     if (annualizedNetFunding * 100 >= _config.MinSpreadPercentage)
@@ -158,6 +171,8 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                             ShortExchange = shortExchange,
                             LongFundingRate = longRate,
                             ShortFundingRate = shortRate,
+                            LongFundingIntervalHours = longFundingIntervalHours,
+                            ShortFundingIntervalHours = shortFundingIntervalHours,
                             // Use SpotPrice for longExchange perp price, PerpetualPrice for shortExchange perp price
                             SpotPrice = longExchangePrice,
                             PerpetualPrice = shortExchangePrice,
@@ -311,8 +326,12 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                     // Calculate price premium between exchanges: (Futures - Spot) / Spot
                     decimal pricePremium = (futuresPrice - spotPrice) / spotPrice;
 
-                    // Annualized funding rate
-                    decimal annualizedFundingRate = fundingRate.AnnualizedRate;
+                    // Use actual funding interval for calculating periods per day
+                    int fundingIntervalHours = fundingRate.FundingIntervalHours; // Already defaults to 8
+                    decimal periodsPerDay = 24m / fundingIntervalHours;
+
+                    // Annualized funding rate using actual intervals
+                    decimal annualizedFundingRate = fundingRate.Rate * periodsPerDay * 365;
 
                     // Estimated trading fees (0.1% spot + 0.05% futures = 0.15%)
                     decimal estimatedTradingFees = 0.0015m;
@@ -334,6 +353,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                             Symbol = symbol,
                             LongExchange = spotExchange,      // Buy spot here
                             ShortExchange = futuresExchange,  // Short futures here
+                            ShortFundingIntervalHours = fundingIntervalHours,  // Only short position has funding
                             Exchange = spotExchange,          // For UI compatibility
                             SpotPrice = spotPrice,
                             PerpetualPrice = futuresPrice,

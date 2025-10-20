@@ -47,6 +47,8 @@ public class BinanceConnector : IExchangeConnector
                 {
                     options.ApiCredentials = credentials;
                     options.Environment = environment;
+                    // Configure request timeout to prevent hanging requests
+                    options.RequestTimeout = TimeSpan.FromSeconds(30);
                 });
 
                 _socketClient = new BinanceSocketClient(options =>
@@ -76,6 +78,8 @@ public class BinanceConnector : IExchangeConnector
                 {
                     // No credentials - public data only
                     options.Environment = environment;
+                    // Configure request timeout to prevent hanging requests
+                    options.RequestTimeout = TimeSpan.FromSeconds(30);
                 });
 
                 _socketClient = new BinanceSocketClient(options =>

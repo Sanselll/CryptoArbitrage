@@ -1,5 +1,6 @@
 import * as signalR from '@microsoft/signalr';
-import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance } from '../types/index';
+import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Notification } from '../types/index';
+import { notificationService } from './notificationService.tsx';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5052/api';
 const HUB_URL = API_BASE_URL.replace('/api', '/hubs/arbitrage');
@@ -13,6 +14,7 @@ class SignalRService {
     onBalances: [] as ((data: AccountBalance[]) => void)[],
     onPnLUpdate: [] as ((data: { totalPnL: number; todayPnL: number }) => void)[],
     onAlert: [] as ((data: { message: string; severity: string; timestamp: string }) => void)[],
+    onNotification: [] as ((data: Notification) => void)[],
   };
 
   async connect(url: string = HUB_URL) {
@@ -86,6 +88,11 @@ class SignalRService {
     this.connection.on('ReceiveAlert', (data: { message: string; severity: string; timestamp: string }) => {
       this.callbacks.onAlert.forEach(cb => cb(data));
     });
+
+    this.connection.on('ReceiveNotification', (data: Notification) => {
+      notificationService.showNotification(data);
+      this.callbacks.onNotification.forEach(cb => cb(data));
+    });
   }
 
   onFundingRates(callback: (data: FundingRate[]) => void) {
@@ -127,6 +134,13 @@ class SignalRService {
     this.callbacks.onAlert.push(callback);
     return () => {
       this.callbacks.onAlert = this.callbacks.onAlert.filter(cb => cb !== callback);
+    };
+  }
+
+  onNotification(callback: (data: Notification) => void) {
+    this.callbacks.onNotification.push(callback);
+    return () => {
+      this.callbacks.onNotification = this.callbacks.onNotification.filter(cb => cb !== callback);
     };
   }
 

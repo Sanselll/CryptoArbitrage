@@ -86,6 +86,8 @@ export interface ArbitrageOpportunity {
   shortExchange: string;
   longFundingRate: number;
   shortFundingRate: number;
+  longFundingIntervalHours?: number;   // Funding interval for long exchange (1h, 4h, 8h, etc.)
+  shortFundingIntervalHours?: number;  // Funding interval for short exchange
 
   // Spot-perpetual fields
   exchange?: string;
@@ -110,7 +112,6 @@ export interface ArbitrageOpportunity {
   status: OpportunityStatus;
   detectedAt: string;
   executedAt?: string;
-  activeOpportunityExecutedAt?: string;
 
   // Execution fields (merged from Execution table)
   executionId?: number;
@@ -186,6 +187,35 @@ export interface AccountBalance {
   marginUsed: number;
   unrealizedPnL: number;
   updatedAt: string;
+}
+
+// Notification types
+export enum NotificationType {
+  NegativeFunding = 0,
+  ExecutionStateChange = 1,
+  ExchangeConnectivity = 2,
+  OpportunityDetected = 3,
+  LiquidationRisk = 4,
+  General = 5
+}
+
+export enum NotificationSeverity {
+  Info = 0,
+  Success = 1,
+  Warning = 2,
+  Error = 3
+}
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  severity: NotificationSeverity;
+  title: string;
+  message: string;
+  data?: any;
+  autoClose: boolean;
+  autoCloseDelay?: number;
+  timestamp: string;
 }
 
 export interface DashboardData {

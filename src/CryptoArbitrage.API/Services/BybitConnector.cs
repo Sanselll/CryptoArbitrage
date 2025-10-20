@@ -43,6 +43,8 @@ public class BybitConnector : IExchangeConnector
                     options.ApiCredentials = new ApiCredentials(apiKey!, apiSecret!);
                 }
                 options.Environment = environment;
+                // Configure request timeout to prevent hanging requests
+                options.RequestTimeout = TimeSpan.FromSeconds(30);
             });
 
             _socketClient = new BybitSocketClient(options =>
@@ -739,10 +741,9 @@ public class BybitConnector : IExchangeConnector
 
         try
         {
-            _logger.LogInformation("🔍 Fetching Bybit positions via GetPositionsAsync(Category.Linear, symbol: COAIUSDT)...");
-            // Bybit V5 API requires either symbol or settleCoin parameter
-            // For now, query the specific symbol we know has a position
-            var result = await _restClient.V5Api.Trading.GetPositionsAsync(Category.Linear, "COAIUSDT");
+            _logger.LogInformation("🔍 Fetching Bybit positions via GetPositionsAsync(Category.Linear)...");
+            // Bybit V5 API - call without symbol parameter to get all positions
+            var result = await _restClient.V5Api.Trading.GetPositionsAsync(Category.Linear);
 
             _logger.LogInformation("📡 Bybit GetPositions API Response - Success: {Success}, HasData: {HasData}, Error: {Error}",
                 result.Success, result.Data != null, result.Error?.Message ?? "None");

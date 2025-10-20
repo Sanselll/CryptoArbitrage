@@ -27,6 +27,8 @@ public class ArbitrageOpportunityDto
     public string ShortExchange { get; set; } = string.Empty;
     public decimal LongFundingRate { get; set; }
     public decimal ShortFundingRate { get; set; }
+    public int? LongFundingIntervalHours { get; set; }  // Funding interval for long exchange (1h, 4h, 8h, etc.)
+    public int? ShortFundingIntervalHours { get; set; } // Funding interval for short exchange
 
     // For spot-perpetual arbitrage
     public string Exchange { get; set; } = string.Empty;
@@ -51,7 +53,6 @@ public class ArbitrageOpportunityDto
     public OpportunityStatus Status { get; set; }
     public DateTime DetectedAt { get; set; }
     public DateTime? ExecutedAt { get; set; }
-    public DateTime? ActiveOpportunityExecutedAt { get; set; } // From ActiveOpportunity.ExecutedAt when executing
 
     // Execution fields (merged from Execution table)
     public int? ExecutionId { get; set; }

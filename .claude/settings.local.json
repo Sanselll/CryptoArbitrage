@@ -36,7 +36,14 @@
       "Bash(export ConnectionStrings__DefaultConnection=\"Host=localhost;Port=5432;Database=crypto_arbitrage;Username=sansel;Password=\")",
       "Bash(export Jwt__Issuer=\"CryptoArbitrage\")",
       "Bash(export Jwt__Audience=\"CryptoArbitrageClient\")",
-      "Bash(npm run build)"
+      "Bash(npm run build)",
+      "Bash(npm install react-toastify)",
+      "Bash(lsof -i :5052 -i :5173)",
+      "Bash(curl -s http://localhost:5052/api/health)",
+      "Bash(pkill -f \"dotnet run\")",
+      "Bash(dotnet build --no-restore)",
+      "Bash(dotnet ef migrations add DeleteClosedPositions)",
+      "Bash(export ENCRYPTION_KEY=\"12345678901234567890123456789012\")"
     ],
     "deny": [],
     "ask": []

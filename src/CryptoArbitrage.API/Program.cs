@@ -11,6 +11,9 @@ using CryptoArbitrage.API.Config;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Configure HTTP client to use HTTP/1.1 to avoid HTTP/2 connection heartbeat issues
+AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2Support", false);
+
 // Add configuration - Read from appsettings.json and appsettings.Development.json
 var arbitrageConfig = builder.Configuration.GetSection("ArbitrageConfig").Get<ArbitrageConfig>() ?? new ArbitrageConfig();
 builder.Services.AddSingleton(arbitrageConfig);
@@ -18,6 +21,9 @@ builder.Services.AddSingleton(arbitrageConfig);
 // Add environment configuration
 var environmentConfig = builder.Configuration.GetSection("Environment").Get<EnvironmentConfig>() ?? new EnvironmentConfig();
 builder.Services.AddSingleton(environmentConfig);
+
+// Add notification configuration
+builder.Services.Configure<NotificationSettings>(builder.Configuration.GetSection("NotificationSettings"));
 
 var startupLogger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Startup");
 startupLogger.LogInformation("Starting application in {Mode} mode (IsLive: {IsLive})",
@@ -144,6 +150,9 @@ builder.Services.AddSingleton<IEncryptionService, AesEncryptionService>();
 // Add memory cache for in-memory data storage
 builder.Services.AddMemoryCache();
 
+// Add resilience service for network error handling
+builder.Services.AddSingleton<ConnectionResilienceService>();
+
 // Add refactored modular services
 builder.Services.AddSingleton<IDataAggregationService, DataAggregationService>();
 builder.Services.AddSingleton<IOpportunityDetectionService, OpportunityDetectionService>();
@@ -153,7 +162,11 @@ builder.Services.AddSingleton<ISignalRStreamingService, SignalRStreamingService>
 builder.Services.AddScoped<BinanceConnector>();
 builder.Services.AddScoped<BybitConnector>();
 builder.Services.AddScoped<ArbitrageExecutionService>();
-builder.Services.AddHostedService<ArbitrageEngineService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+
+// Register ArbitrageEngineService as both a singleton (for DI) and a hosted service
+builder.Services.AddSingleton<ArbitrageEngineService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ArbitrageEngineService>());
 
 // Add Swagger
 builder.Services.AddEndpointsApiExplorer();
@@ -161,12 +174,39 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+// Global exception handler to prevent crashes from unhandled exceptions (e.g., HTTP/2 connection issues)
+AppDomain.CurrentDomain.UnhandledException += (sender, eventArgs) =>
+{
+    var exception = eventArgs.ExceptionObject as Exception;
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+
+    logger.LogCritical(exception,
+        "Unhandled exception occurred. IsTerminating: {IsTerminating}",
+        eventArgs.IsTerminating);
+
+    // Log but don't terminate - let the app continue if possible
+    if (!eventArgs.IsTerminating)
+    {
+        logger.LogWarning("Application continuing after unhandled exception");
+    }
+};
+
+// Handle TaskScheduler unobserved task exceptions (including HTTP/2 connection issues)
+TaskScheduler.UnobservedTaskException += (sender, eventArgs) =>
+{
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    logger.LogError(eventArgs.Exception, "Unobserved task exception");
+
+    // Mark as observed to prevent process termination
+    eventArgs.SetObserved();
+};
+
 // Apply database migrations on startup
 using (var scope = app.Services.CreateScope())
 {
     try
     {
-        
+
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         var db = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
 

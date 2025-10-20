@@ -31,4 +31,14 @@ public interface ISignalRStreamingService
     /// Broadcast P&L update to a specific user
     /// </summary>
     Task BroadcastPnLToUserAsync(string userId, decimal totalPnL, decimal todayPnL, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Send a notification to a specific user
+    /// </summary>
+    Task SendNotificationAsync(string userId, NotificationDto notification, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Check if a user broadcast happened recently (for debouncing refresh loops)
+    /// </summary>
+    bool ShouldSkipUserRefresh(string userId, double debounceSeconds = 2.0);
 }
