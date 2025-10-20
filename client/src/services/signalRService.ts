@@ -15,12 +15,6 @@ const getHubUrl = (): string => {
   return apiBaseUrl.replace('/api', '/hubs/arbitrage');
 };
 
-// Get mode-specific JWT token key
-const getTokenKey = (): string => {
-  const mode = sessionStorage.getItem('trading_mode') as TradingMode | null;
-  return mode === 'Real' ? 'jwt_token_real' : 'jwt_token_demo';
-};
-
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
   private callbacks = {
@@ -39,8 +33,8 @@ class SignalRService {
       return;
     }
 
-    const tokenKey = getTokenKey();
-    const token = localStorage.getItem(tokenKey);
+    // Use single jwt_token key for all modes
+    const token = localStorage.getItem('jwt_token');
     if (!token) {
       console.error('No authentication token available');
       throw new Error('Not authenticated');

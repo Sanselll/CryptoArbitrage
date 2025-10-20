@@ -47,8 +47,9 @@ docker compose -f docker-compose.production.yml --env-file .env.production up -d
 
 sleep 10
 
-# Run migrations
-docker compose -f docker-compose.production.yml exec -T api dotnet ef database update || true
+# Run migrations for both backends
+docker compose -f docker-compose.production.yml exec -T backend-real dotnet ef database update || true
+docker compose -f docker-compose.production.yml exec -T backend-demo dotnet ef database update || true
 
 # Show status
 docker compose -f docker-compose.production.yml ps

@@ -1,5 +1,7 @@
 import { create } from 'zustand';
-import { setApiBaseUrl } from '../services/apiClient';
+import { setApiBaseUrl, getApiBaseUrl } from '../services/apiClient';
+import { clearAllAppData, setAuthToken, setTradingMode, getAuthToken, getTradingMode } from '../services/authUtils';
+import { useArbitrageStore } from './arbitrageStore';
 
 export type TradingMode = 'Demo' | 'Real';
 
@@ -22,40 +24,19 @@ interface AuthState {
   clearError: () => void;
 }
 
-const getApiBaseUrl = (mode: TradingMode): string => {
-  return mode === 'Real'
-    ? import.meta.env.VITE_API_BASE_URL_REAL || 'http://localhost:5053/api'
-    : import.meta.env.VITE_API_BASE_URL_DEMO || 'http://localhost:5052/api';
-};
-
-// Get mode-specific JWT token key
-const getTokenKey = (): string => {
-  const mode = sessionStorage.getItem('trading_mode') as TradingMode | null;
-  return mode === 'Real' ? 'jwt_token_real' : 'jwt_token_demo';
-};
-
-// Initialize auth state with mode-specific token
-const initializeAuthState = () => {
-  const tokenKey = getTokenKey();
-  const token = localStorage.getItem(tokenKey);
-  return {
-    user: null,
-    token,
-    isAuthenticated: !!token,
-    isLoading: false,
-    error: null,
-  };
-};
-
 export const useAuthStore = create<AuthState>((set) => ({
-  ...initializeAuthState(),
+  user: null,
+  token: getAuthToken(),
+  isAuthenticated: !!getAuthToken(),
+  isLoading: false,
+  error: null,
 
   login: async (googleToken: string, mode: TradingMode) => {
     set({ isLoading: true, error: null });
     try {
       // Set the API base URL for the selected mode
       setApiBaseUrl(mode);
-      const apiBaseUrl = getApiBaseUrl(mode);
+      const apiBaseUrl = getApiBaseUrl();
 
       console.log('Login attempt with mode:', mode);
       console.log('Connecting to:', apiBaseUrl);
@@ -73,12 +54,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       const { token, user } = await response.json();
 
-      // Store token with mode-specific key
-      const tokenKey = mode === 'Real' ? 'jwt_token_real' : 'jwt_token_demo';
-      localStorage.setItem(tokenKey, token);
+      // Store new token and trading mode (overwrites any old data)
+      setAuthToken(token);
+      setTradingMode(mode);
 
-      console.log(`Stored token in ${tokenKey}`);
+      console.log('Stored token in jwt_token');
+      console.log('Stored trading mode:', mode);
 
+      // Update auth state
       set({ token, user, isAuthenticated: true, isLoading: false, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed';
@@ -88,16 +71,20 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
-    // Clear both mode-specific tokens
-    localStorage.removeItem('jwt_token_demo');
-    localStorage.removeItem('jwt_token_real');
-    sessionStorage.removeItem('trading_mode');
+    console.log('Logging out - clearing all application data...');
+
+    // Reset arbitrage store state (disconnect SignalR, clear state)
+    useArbitrageStore.getState().reset();
+
+    // Clear ALL application data
+    clearAllAppData();
+
+    // Reset auth state
     set({ user: null, token: null, isAuthenticated: false, error: null });
   },
 
   checkAuth: () => {
-    const tokenKey = getTokenKey();
-    const token = localStorage.getItem(tokenKey);
+    const token = getAuthToken();
     set({ isAuthenticated: !!token, token });
   },
 

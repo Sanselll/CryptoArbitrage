@@ -1,9 +1,10 @@
 import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
+import { clearAllAppData } from './authUtils';
 
 type TradingMode = 'Demo' | 'Real';
 
 // Get base URL based on trading mode from sessionStorage
-const getApiBaseUrl = (): string => {
+export const getApiBaseUrl = (): string => {
   const mode = sessionStorage.getItem('trading_mode') as TradingMode | null;
 
   if (mode === 'Real') {
@@ -12,12 +13,6 @@ const getApiBaseUrl = (): string => {
 
   // Default to Demo
   return import.meta.env.VITE_API_BASE_URL_DEMO || 'http://localhost:5052/api';
-};
-
-// Get mode-specific JWT token key
-const getTokenKey = (): string => {
-  const mode = sessionStorage.getItem('trading_mode') as TradingMode | null;
-  return mode === 'Real' ? 'jwt_token_real' : 'jwt_token_demo';
 };
 
 const apiClient: AxiosInstance = axios.create({
@@ -37,10 +32,9 @@ export const setApiBaseUrl = (mode: TradingMode) => {
   console.log(`API client updated to ${mode} mode:`, newBaseUrl);
 };
 
-// CRITICAL: Attach JWT token from localStorage to every request using mode-specific key
+// CRITICAL: Attach JWT token from localStorage to every request using single jwt_token key
 apiClient.interceptors.request.use((config) => {
-  const tokenKey = getTokenKey();
-  const token = localStorage.getItem(tokenKey);
+  const token = localStorage.getItem('jwt_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -52,9 +46,8 @@ apiClient.interceptors.response.use(
   (response: AxiosResponse) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      // Clear both mode-specific tokens
-      localStorage.removeItem('jwt_token_demo');
-      localStorage.removeItem('jwt_token_real');
+      // Clear all application data for consistency
+      clearAllAppData();
       window.location.href = '/login';
     }
     return Promise.reject(error);

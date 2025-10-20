@@ -120,10 +120,30 @@ public class ArbitrageExecutionService
         if (request.Strategy == ArbitrageStrategy.SpotPerpetual)
         {
             // CRITICAL: Check if user has connected API keys for this exchange
+            _logger.LogInformation("=== API Key Database Query Debug ===");
+            _logger.LogInformation("Looking for API key with UserId: {UserId}, Exchange: {Exchange}",
+                _currentUser.UserId, request.Exchange);
+
+            // First check total count for this user
+            var totalKeysForUser = await _dbContext.UserExchangeApiKeys
+                .Where(k => k.UserId == _currentUser.UserId)
+                .ToListAsync();
+            _logger.LogInformation("Total API keys for user {UserId}: {Count}",
+                _currentUser.UserId, totalKeysForUser.Count);
+
+            foreach (var key in totalKeysForUser)
+            {
+                _logger.LogInformation("  - Exchange: {Exchange}, IsEnabled: {IsEnabled}",
+                    key.ExchangeName, key.IsEnabled);
+            }
+
             var userApiKey = await _dbContext.UserExchangeApiKeys
                 .FirstOrDefaultAsync(k => k.UserId == _currentUser.UserId
                     && k.ExchangeName == request.Exchange
                     && k.IsEnabled);
+
+            _logger.LogInformation("Query result: {Result}", userApiKey != null ? "FOUND" : "NOT FOUND");
+            _logger.LogInformation("====================================");
 
             if (userApiKey == null)
             {

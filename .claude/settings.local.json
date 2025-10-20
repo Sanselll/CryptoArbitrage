@@ -51,7 +51,13 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(curl -s \"https://raw.githubusercontent.com/JKorf/Binance.Net/dbf9fa9a66fa88c4491c5d4aa3f6b0d004a9d3ae/Binance.Net/Objects/Models/Spot/BinanceAPIKeyPermissions.cs\")",
       "Bash(lsof -i :5052)",
-      "Bash(lsof -i :5053)"
+      "Bash(lsof -i :5053)",
+      "Bash(psql -U sansel -d crypto_arbitrage_demo -c \"SELECT \"\"Id\"\", \"\"UserId\"\", \"\"ExchangeName\"\", \"\"IsEnabled\"\", \"\"CreatedAt\"\", \"\"LastTestedAt\"\" FROM \"\"UserExchangeApiKeys\"\";\")",
+      "Bash(pkill -9 -f \"dotnet run\")",
+      "WebFetch(domain:bybit-exchange.github.io)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/JKorf/Bybit.Net/e77bef4cb368ba5e74fedba6a9fb5df7b4a511bf/ByBit.Net/Objects/Models/V5/BybitApiKeyInfo.cs\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/JKorf/Bybit.Net/main/ByBit.Net/Interfaces/Clients/V5/IBybitRestClientApiAccount.cs\")",
+      "Bash(curl -s \"https://bybit-exchange.github.io/docs/v5/user/apikey-info\")"
     ],
     "deny": [],
     "ask": []

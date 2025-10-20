@@ -87,7 +87,6 @@ export const LoginPage = () => {
             <GoogleLogin
               onSuccess={handleGoogleSuccess}
               onError={() => console.error('Login failed')}
-              useOneTap
             />
           </div>
 
