@@ -31,7 +31,11 @@
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''ActiveExecutions'' ORDER BY ordinal_position;\")",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" ORDER BY \"\"RecordedAt\"\" DESC LIMIT 5;\")",
       "Bash(dotnet build)",
-      "WebFetch(domain:binance-docs.github.io)"
+      "WebFetch(domain:binance-docs.github.io)",
+      "Bash(dotnet ef migrations add RemoveFundingRatesTable)",
+      "Bash(export ConnectionStrings__DefaultConnection=\"Host=localhost;Port=5432;Database=crypto_arbitrage;Username=sansel;Password=\")",
+      "Bash(export Jwt__Issuer=\"CryptoArbitrage\")",
+      "Bash(export Jwt__Audience=\"CryptoArbitrageClient\")"
     ],
     "deny": [],
     "ask": []

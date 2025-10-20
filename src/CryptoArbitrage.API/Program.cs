@@ -19,10 +19,6 @@ builder.Services.AddSingleton(arbitrageConfig);
 var environmentConfig = builder.Configuration.GetSection("Environment").Get<EnvironmentConfig>() ?? new EnvironmentConfig();
 builder.Services.AddSingleton(environmentConfig);
 
-// Add liquidity thresholds configuration
-var liquidityThresholds = builder.Configuration.GetSection("LiquidityThresholds").Get<LiquidityThresholds>() ?? new LiquidityThresholds();
-builder.Services.AddSingleton(liquidityThresholds);
-
 var startupLogger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Startup");
 startupLogger.LogInformation("Starting application in {Mode} mode (IsLive: {IsLive})",
     environmentConfig.Mode, environmentConfig.IsLive);
@@ -144,6 +140,14 @@ builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<IEncryptionService, AesEncryptionService>();
+
+// Add memory cache for in-memory data storage
+builder.Services.AddMemoryCache();
+
+// Add refactored modular services
+builder.Services.AddSingleton<IDataAggregationService, DataAggregationService>();
+builder.Services.AddSingleton<IOpportunityDetectionService, OpportunityDetectionService>();
+builder.Services.AddSingleton<ISignalRStreamingService, SignalRStreamingService>();
 
 // Add exchange connectors and services
 builder.Services.AddScoped<BinanceConnector>();
