@@ -35,7 +35,8 @@
       "Bash(dotnet ef migrations add RemoveFundingRatesTable)",
       "Bash(export ConnectionStrings__DefaultConnection=\"Host=localhost;Port=5432;Database=crypto_arbitrage;Username=sansel;Password=\")",
       "Bash(export Jwt__Issuer=\"CryptoArbitrage\")",
-      "Bash(export Jwt__Audience=\"CryptoArbitrageClient\")"
+      "Bash(export Jwt__Audience=\"CryptoArbitrageClient\")",
+      "Bash(npm run build)"
     ],
     "deny": [],
     "ask": []
