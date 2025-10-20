@@ -20,6 +20,7 @@ interface ArbitrageState {
   setConnected: (connected: boolean) => void;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
+  reset: () => void;
 }
 
 export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
@@ -80,5 +81,26 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
     signalRService.disconnect();
 
     set({ isConnected: false, unsubscribe: [] });
+  },
+
+  reset: () => {
+    // Disconnect first if connected
+    const state = get();
+    if (state.isConnected) {
+      state.unsubscribe.forEach(cleanup => cleanup());
+      signalRService.disconnect();
+    }
+
+    // Reset all state to initial values
+    set({
+      fundingRates: [],
+      positions: [],
+      opportunities: [],
+      balances: [],
+      totalPnL: 0,
+      todayPnL: 0,
+      isConnected: false,
+      unsubscribe: [],
+    });
   },
 }));

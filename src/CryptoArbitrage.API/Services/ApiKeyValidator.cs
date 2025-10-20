@@ -105,6 +105,41 @@ public class ApiKeyValidator : IApiKeyValidator
                 options.RequestTimeout = TimeSpan.FromSeconds(10);
             });
 
+            // DEMO MODE: Skip strict validation as testnet doesn't support permission checks
+            if (!isLive)
+            {
+                _logger.LogInformation("Demo mode detected - performing simple connection test instead of strict validation");
+
+                // Simple connection test - try to get account info
+                var accountResult = await client.SpotApi.Account.GetAccountInfoAsync();
+
+                if (!accountResult.Success)
+                {
+                    _logger.LogWarning("Demo connection test failed: {Error}", accountResult.Error?.Message);
+
+                    // Check if it's an IP restriction error
+                    var isIpError = accountResult.Error != null && (
+                        accountResult.Error.Message.Contains("IP", StringComparison.OrdinalIgnoreCase) ||
+                        accountResult.Error.Code == -2015);
+
+                    if (isIpError)
+                    {
+                        return ApiKeyValidationResult.Failure(
+                            new List<string> { "API key is IP-restricted" },
+                            isIpRestricted: true,
+                            allowedIps: null,
+                            serverIp: serverIp);
+                    }
+
+                    return ApiKeyValidationResult.Failure(
+                        new List<string> { $"Connection test failed: {accountResult.Error?.Message ?? "Unknown error"}" });
+                }
+
+                _logger.LogInformation("✓ Demo connection test successful - API key is valid");
+                return ApiKeyValidationResult.Success();
+            }
+
+            // LIVE MODE: Perform strict validation with permission checks
             // Get API Key Permissions using the official endpoint
             _logger.LogInformation("Calling Binance SpotApi.Account.GetAPIKeyPermissionsAsync()...");
             var permissionsResult = await client.SpotApi.Account.GetAPIKeyPermissionsAsync();
@@ -134,6 +169,14 @@ public class ApiKeyValidator : IApiKeyValidator
 
                 return ApiKeyValidationResult.Failure(
                     new List<string> { $"API validation failed: {permissionsResult.Error?.Message ?? "Unknown error"}" });
+            }
+
+            // Check if permissions data is null
+            if (permissionsResult.Data == null)
+            {
+                _logger.LogError("API returned success but permissions data is null");
+                return ApiKeyValidationResult.Failure(
+                    new List<string> { "API returned empty permissions data" });
             }
 
             // Log each permission
@@ -243,89 +286,158 @@ public class ApiKeyValidator : IApiKeyValidator
                 options.RequestTimeout = TimeSpan.FromSeconds(10);
             });
 
-            var missingPermissions = new List<string>();
+            // Get API Key Information using the official endpoint
+            _logger.LogInformation("Calling Bybit V5Api.Account.GetApiKeyInfoAsync()...");
+            var apiKeyInfoResult = await client.V5Api.Account.GetApiKeyInfoAsync();
+            _logger.LogInformation("API Call completed. Success: {Success}", apiKeyInfoResult.Success);
 
-            // SECURITY WARNING: For Bybit, we cannot directly check if IP restriction is enabled
-            // We can only detect IP restriction errors when they occur
-            if (isLive)
+            if (!apiKeyInfoResult.Success)
             {
-                _logger.LogWarning("--- IP Restriction WARNING ---");
-                _logger.LogWarning("IMPORTANT: For live trading, ensure IP restriction is ENABLED in your Bybit API key settings");
-                _logger.LogWarning("Bybit API does not provide a way to check IP restriction status programmatically");
+                _logger.LogWarning("Bybit API key information check failed");
+                _logger.LogWarning("Error Code: {Code}", apiKeyInfoResult.Error?.Code);
+                _logger.LogWarning("Error Message: {Message}", apiKeyInfoResult.Error?.Message);
+
+                // Check if it's an IP restriction error
+                var isIpError = apiKeyInfoResult.Error != null && (
+                    apiKeyInfoResult.Error.Message.Contains("IP", StringComparison.OrdinalIgnoreCase) ||
+                    apiKeyInfoResult.Error.Code == 10003); // Bybit IP restriction error code
+
+                if (isIpError)
+                {
+                    _logger.LogWarning("IP Restriction Detected!");
+                    return ApiKeyValidationResult.Failure(
+                        new List<string> { "API key is IP-restricted and server IP is not whitelisted" },
+                        isIpRestricted: true,
+                        allowedIps: null,
+                        serverIp: serverIp);
+                }
+
+                return ApiKeyValidationResult.Failure(
+                    new List<string> { $"API validation failed: {apiKeyInfoResult.Error?.Message ?? "Unknown error"}" });
+            }
+
+            // Check if API key info data is null
+            if (apiKeyInfoResult.Data == null)
+            {
+                _logger.LogError("API returned success but key info data is null");
+                return ApiKeyValidationResult.Failure(
+                    new List<string> { "API returned empty key information data" });
+            }
+
+            var keyInfo = apiKeyInfoResult.Data;
+
+            // DEMO MODE: Simple validation
+            if (!isLive)
+            {
+                _logger.LogInformation("Demo mode detected - performing basic validation");
+                _logger.LogInformation("✓ Demo connection test successful - API key is valid");
+                return ApiKeyValidationResult.Success();
+            }
+
+            // LIVE MODE: Perform strict validation
+            _logger.LogInformation("--- API Key Information ---");
+            _logger.LogInformation("Read Only: {ReadOnly}", keyInfo.Readonly);
+            _logger.LogInformation("API Key Type: {Type}", keyInfo.ApiKeyType == 1 ? "Personal" : "Third-party");
+
+            // 1. Check if API key is read-only
+            if (keyInfo.Readonly)
+            {
+                _logger.LogError("API key is READ-ONLY - Write permissions required for trading");
+                return ApiKeyValidationResult.Failure(
+                    new List<string> { "API key is read-only. Trading requires read-write permissions. Please create a new API key with write permissions enabled." });
+            }
+
+            // 2. Check IP Restrictions
+            _logger.LogInformation("--- IP Restrictions ---");
+            var hasIpRestriction = keyInfo.Ips != null && keyInfo.Ips.Length > 0;
+            _logger.LogInformation("IP Restriction Enabled: {Enabled}", hasIpRestriction);
+
+            if (hasIpRestriction)
+            {
+                _logger.LogInformation("Whitelisted IPs ({Count}):", keyInfo.Ips.Length);
+                foreach (var ip in keyInfo.Ips)
+                {
+                    _logger.LogInformation("  - {IP}", ip);
+                }
+
+                // Check if server IP is in the whitelist
                 if (!string.IsNullOrEmpty(serverIp))
                 {
-                    _logger.LogWarning("Server IP: {ServerIp} - Add this to your Bybit API key whitelist", serverIp);
+                    _logger.LogInformation("Server IP: {ServerIp}", serverIp);
+                    var isServerIpAllowed = keyInfo.Ips.Contains(serverIp);
+
+                    if (!isServerIpAllowed)
+                    {
+                        _logger.LogError("Server IP {ServerIp} is NOT in the whitelist", serverIp);
+                        return ApiKeyValidationResult.Failure(
+                            new List<string> { $"Server IP {serverIp} is not whitelisted. Please add it to your Bybit API key IP whitelist." },
+                            isIpRestricted: true,
+                            allowedIps: keyInfo.Ips.ToList(),
+                            serverIp: serverIp);
+                    }
+
+                    _logger.LogInformation("✓ Server IP is whitelisted");
                 }
             }
-
-            // Test 1: Read Permission - Get Wallet Balance
-            _logger.LogInformation("[Permission Test 1/2] Testing READ permission (Wallet Balance)...");
-            _logger.LogInformation("  API Call: V5Api.Account.GetBalancesAsync(AccountType.Unified)");
-            var balanceResult = await client.V5Api.Account.GetBalancesAsync(Bybit.Net.Enums.AccountType.Unified);
-            _logger.LogInformation("  Result: {Success}", balanceResult.Success ? "✓ PASS" : "✗ FAIL");
-            if (!balanceResult.Success)
+            else
             {
-                _logger.LogWarning("  Error Code: {Code}", balanceResult.Error?.Code);
-                _logger.LogWarning("  Error Message: {Message}", balanceResult.Error?.Message);
-
-                // Check if it's an IP restriction error
-                var isIpError = balanceResult.Error != null &&
-                    balanceResult.Error.Message.Contains("IP", StringComparison.OrdinalIgnoreCase);
-
-                if (isIpError)
-                {
-                    _logger.LogWarning("  IP Restriction Detected!");
-                    return ApiKeyValidationResult.Failure(
-                        new List<string> { "API key is IP-restricted" },
-                        isIpRestricted: true,
-                        allowedIps: null,
-                        serverIp: serverIp);
-                }
-
-                missingPermissions.Add("READ - Cannot read wallet balance");
+                _logger.LogError("SECURITY ERROR: IP restriction is REQUIRED for live trading but is currently DISABLED");
+                return ApiKeyValidationResult.Failure(
+                    new List<string> { "IP Restriction REQUIRED - For security, IP restriction must be enabled for live trading. Please enable IP whitelist in your Bybit API key settings." });
             }
 
-            // Test 2: Position Permission - Get Positions
-            _logger.LogInformation("[Permission Test 2/2] Testing POSITION permission...");
-            _logger.LogInformation("  API Call: V5Api.Trading.GetPositionsAsync(Category.Linear)");
-            var positionsResult = await client.V5Api.Trading.GetPositionsAsync(Bybit.Net.Enums.Category.Linear);
-            _logger.LogInformation("  Result: {Success}", positionsResult.Success ? "✓ PASS" : "✗ FAIL");
-            if (!positionsResult.Success)
+            // 3. Validate Permissions
+            _logger.LogInformation("--- API Key Permissions ---");
+            var permissions = keyInfo.Permissions;
+            var missingPermissions = new List<string>();
+
+            // ContractTrade permissions (for futures/perpetuals)
+            _logger.LogInformation("[ContractTrade] Permissions: [{Permissions}]", string.Join(", ", permissions.ContractTrade));
+            if (!permissions.ContractTrade.Contains("Order"))
             {
-                _logger.LogWarning("  Error Code: {Code}", positionsResult.Error?.Code);
-                _logger.LogWarning("  Error Message: {Message}", positionsResult.Error?.Message);
-
-                // Check if it's an IP restriction error
-                var isIpError = positionsResult.Error != null &&
-                    positionsResult.Error.Message.Contains("IP", StringComparison.OrdinalIgnoreCase);
-
-                if (isIpError)
-                {
-                    _logger.LogWarning("  IP Restriction Detected!");
-                    return ApiKeyValidationResult.Failure(
-                        new List<string> { "API key is IP-restricted" },
-                        isIpRestricted: true,
-                        allowedIps: null,
-                        serverIp: serverIp);
-                }
-
-                missingPermissions.Add("POSITION - Cannot read positions");
+                missingPermissions.Add("ContractTrade.Order - Required to place and manage futures orders");
             }
+            if (!permissions.ContractTrade.Contains("Position"))
+            {
+                missingPermissions.Add("ContractTrade.Position - Required to manage futures positions");
+            }
+
+            // Spot permissions
+            _logger.LogInformation("[Spot] Permissions: [{Permissions}]", string.Join(", ", permissions.Spot));
+            if (!permissions.Spot.Contains("SpotTrade"))
+            {
+                missingPermissions.Add("Spot.SpotTrade - Required for spot trading operations");
+            }
+
+            // Wallet permissions
+            _logger.LogInformation("[Wallet] Permissions: [{Permissions}]", string.Join(", ", permissions.Wallet));
+            if (!permissions.Wallet.Contains("AccountTransfer"))
+            {
+                missingPermissions.Add("Wallet.AccountTransfer - Required to transfer funds between accounts");
+            }
+
+            // Derivatives permissions (for Unified Trading Account)
+            _logger.LogInformation("[Derivatives] Permissions: [{Permissions}]", string.Join(", ", permissions.Derivatives));
+            if (keyInfo.Uta && !permissions.Derivatives.Contains("DerivativesTrade"))
+            {
+                missingPermissions.Add("Derivatives.DerivativesTrade - Required for unified account derivatives trading");
+            }
+
+            // Log other permissions for reference
+            _logger.LogInformation("[Options] Permissions: [{Permissions}]", string.Join(", ", permissions.Options));
+            _logger.LogInformation("[Exchange] Permissions: [{Permissions}]", string.Join(", ", permissions.Exchange));
+            _logger.LogInformation("[CopyTrading] Permissions: [{Permissions}]", string.Join(", ", permissions.CopyTrading));
+            _logger.LogInformation("[BlockTrade] Permissions: [{Permissions}]", string.Join(", ", permissions.BlockTrade));
 
             // Summary
-            _logger.LogInformation("--- Permission Test Summary ---");
-            _logger.LogInformation("Total Permissions Tested: 2 (READ + POSITION)");
-            _logger.LogInformation("Failed Permissions: {Count}", missingPermissions.Count);
+            _logger.LogInformation("--- Permission Validation Summary ---");
+            _logger.LogInformation("Missing Permissions: {Count}", missingPermissions.Count);
             if (missingPermissions.Any())
             {
                 foreach (var perm in missingPermissions)
                 {
                     _logger.LogWarning("  ✗ {Permission}", perm);
                 }
-            }
-
-            if (missingPermissions.Any())
-            {
                 return ApiKeyValidationResult.Failure(missingPermissions);
             }
 

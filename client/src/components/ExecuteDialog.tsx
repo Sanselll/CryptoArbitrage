@@ -33,8 +33,8 @@ export interface ExecutionParams {
 }
 
 export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecuting = false }: ExecuteDialogProps) => {
-  const [positionSize, setPositionSize] = useState<number>(100);
-  const [positionSizeInput, setPositionSizeInput] = useState<string>('100');
+  const [positionSize, setPositionSize] = useState<number>(10);
+  const [positionSizeInput, setPositionSizeInput] = useState<string>('10');
   const [leverage, setLeverage] = useState<number>(1);
   const [balances, setBalances] = useState<ExecutionBalances | null>(null);
   const [loadingBalances, setLoadingBalances] = useState(false);
@@ -102,7 +102,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
   // Validate input is not empty and is a valid number
   const isValidInput = positionSizeInput !== '' && !isNaN(parseFloat(positionSizeInput)) && parseFloat(positionSizeInput) > 0;
 
-  const canExecute = !loadingBalances && !balanceError && totalSufficient && isValidInput && positionSize >= 100 && positionSize <= 10000;
+  const canExecute = !loadingBalances && !balanceError && totalSufficient && isValidInput && positionSize >= 10 && positionSize <= 10000;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm">
@@ -232,16 +232,16 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
                   if (!isNaN(parsed) && parsed > 0) {
                     setPositionSize(parsed);
                   } else if (value === '') {
-                    setPositionSize(100); // Default when empty
+                    setPositionSize(10); // Default when empty
                   }
                 }
               }}
               onBlur={() => {
                 // Ensure valid number on blur
                 const parsed = parseFloat(positionSizeInput);
-                if (isNaN(parsed) || parsed < 100) {
-                  setPositionSize(100);
-                  setPositionSizeInput('100');
+                if (isNaN(parsed) || parsed < 10) {
+                  setPositionSize(10);
+                  setPositionSizeInput('10');
                 } else if (parsed > 10000) {
                   setPositionSize(10000);
                   setPositionSizeInput('10000');
@@ -251,12 +251,12 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
                 }
               }}
               className="w-full px-2 py-1.5 bg-binance-bg border border-binance-border rounded text-binance-text font-mono text-sm focus:outline-none focus:ring-1 focus:ring-binance-yellow disabled:opacity-50"
-              placeholder="100"
+              placeholder="10"
               required
               disabled={isExecuting}
             />
             <p className="text-[10px] text-binance-text-secondary mt-0.5">
-              Min: $100 • Max: ${balances?.maxPositionSize.toFixed(0) || '10,000'}
+              Min: $10 • Max: ${balances?.maxPositionSize.toFixed(0) || '10,000'}
             </p>
           </div>
 

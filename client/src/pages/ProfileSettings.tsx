@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, TestTube, AlertCircle, CheckCircle, Shield, X, Copy, Check } from 'lucide-react';
 import apiClient from '../services/apiClient';
@@ -22,6 +22,7 @@ export const ProfileSettings = () => {
   const user = useAuthStore((state) => state.user);
   const navigate = useNavigate();
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [supportedExchanges, setSupportedExchanges] = useState<string[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [isTesting, setIsTesting] = useState<number | null>(null);
   const [newKey, setNewKey] = useState({
@@ -40,10 +41,28 @@ export const ProfileSettings = () => {
   const [copiedIp, setCopiedIp] = useState(false);
   const [serverIp, setServerIp] = useState<string | null>(null);
 
+  // Calculate which exchanges are still available (not yet configured)
+  const availableExchanges = useMemo(() => {
+    const configuredExchanges = apiKeys.map(key => key.exchangeName);
+    return supportedExchanges.filter(exchange => !configuredExchanges.includes(exchange));
+  }, [apiKeys, supportedExchanges]);
+
   useEffect(() => {
     loadApiKeys();
     fetchServerIp();
+    fetchSupportedExchanges();
   }, []);
+
+  const fetchSupportedExchanges = async () => {
+    try {
+      const response = await apiClient.get('/environment/exchanges');
+      setSupportedExchanges(response.data.exchanges || []);
+    } catch (error) {
+      console.error('Error loading supported exchanges:', error);
+      // Fallback to hardcoded list if API fails
+      setSupportedExchanges(['Binance', 'Bybit']);
+    }
+  };
 
   const fetchServerIp = async () => {
     try {
@@ -84,12 +103,21 @@ export const ProfileSettings = () => {
         variant: 'success'
       });
 
-      setNewKey({ exchangeName: 'Binance', apiKey: '', apiSecret: '' });
-      setIsAdding(false);
-      setMessage(null);
-
       // Reload keys to show the new key
       await loadApiKeys();
+
+      // Reset form and close if no more exchanges available, otherwise reset to first available
+      const updatedAvailable = supportedExchanges.filter(
+        exchange => !([...apiKeys.map(k => k.exchangeName), newKey.exchangeName].includes(exchange))
+      );
+
+      if (updatedAvailable.length > 0) {
+        setNewKey({ exchangeName: updatedAvailable[0], apiKey: '', apiSecret: '' });
+      } else {
+        setIsAdding(false);
+      }
+
+      setMessage(null);
     } catch (error: any) {
       setMessage(null);
 
@@ -256,8 +284,16 @@ export const ProfileSettings = () => {
                 <Button
                   variant="primary"
                   size="sm"
-                  onClick={() => setIsAdding(true)}
+                  onClick={() => {
+                    // Set the default exchange to the first available one
+                    if (availableExchanges.length > 0) {
+                      setNewKey({ exchangeName: availableExchanges[0], apiKey: '', apiSecret: '' });
+                      setIsAdding(true);
+                    }
+                  }}
+                  disabled={availableExchanges.length === 0}
                   className="gap-1"
+                  title={availableExchanges.length === 0 ? 'All exchanges configured' : 'Add a new API key'}
                 >
                   <Plus className="w-3 h-3" />
                   Add Key
@@ -320,8 +356,9 @@ export const ProfileSettings = () => {
                       onChange={(e) => setNewKey({ ...newKey, exchangeName: e.target.value })}
                       className="w-full bg-binance-bg border border-binance-border text-binance-text rounded text-xs px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-binance-yellow"
                     >
-                      <option>Binance</option>
-                      <option>Bybit</option>
+                      {availableExchanges.map((exchange) => (
+                        <option key={exchange}>{exchange}</option>
+                      ))}
                     </select>
                   </div>
                   <div>

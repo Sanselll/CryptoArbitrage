@@ -21,23 +21,58 @@ services:
     # Don't expose port 5432 to host in production
     # Only accessible within Docker network
 
-  # Backend API (Production)
-  backend:
+  # Backend API - Real Mode (Production)
+  backend-real:
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourusername}/crypto-arbitrage/api:${IMAGE_TAG:-latest}
-    container_name: crypto-arbitrage-api-prod
+    container_name: crypto-arbitrage-api-real
     restart: always
     ports:
       - "8080:8080"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      - ASPNETCORE_ENVIRONMENT=ProductionReal
+      - ASPNETCORE_URLS=http://+:8080
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - Jwt__Issuer=${JWT_ISSUER}
-      - Jwt__Audience=${JWT_AUDIENCE}
-      - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
-      - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
-      - Encryption__Key=${ENCRYPTION_KEY}
-      - PROD_DOMAIN=${PROD_DOMAIN}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - arbitrage-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 1G
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+
+  # Backend API - Demo Mode (Production)
+  backend-demo:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourusername}/crypto-arbitrage/api:${IMAGE_TAG:-latest}
+    container_name: crypto-arbitrage-api-demo
+    restart: always
+    ports:
+      - "8081:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=ProductionDemo
+      - ASPNETCORE_URLS=http://+:8080
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,7 +102,8 @@ services:
       - "80:80"
       - "443:443"
     depends_on:
-      - backend
+      - backend-real
+      - backend-demo
     networks:
       - arbitrage-network
     healthcheck:
