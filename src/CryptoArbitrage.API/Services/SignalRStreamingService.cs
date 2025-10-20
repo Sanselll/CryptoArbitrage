@@ -12,6 +12,10 @@ public class SignalRStreamingService : ISignalRStreamingService
     private readonly IHubContext<ArbitrageHub> _hubContext;
     private readonly ILogger<SignalRStreamingService> _logger;
 
+    // Track last broadcast time per user to prevent race conditions with immediate broadcasts
+    private readonly Dictionary<string, DateTime> _lastUserBroadcast = new();
+    private readonly object _broadcastTimestampLock = new();
+
     public SignalRStreamingService(
         IHubContext<ArbitrageHub> hubContext,
         ILogger<SignalRStreamingService> logger)
@@ -61,10 +65,33 @@ public class SignalRStreamingService : ISignalRStreamingService
         {
             await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceivePositions", positions, cancellationToken);
             _logger.LogDebug("Broadcasted {Count} positions to user {UserId}", positions.Count, userId);
+
+            // Record broadcast timestamp to enable debouncing in refresh loops
+            lock (_broadcastTimestampLock)
+            {
+                _lastUserBroadcast[userId] = DateTime.UtcNow;
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error broadcasting positions to user {UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// Check if a user broadcast happened recently (within last N seconds)
+    /// Used for debouncing refresh loops to prevent race conditions
+    /// </summary>
+    public bool ShouldSkipUserRefresh(string userId, double debounceSeconds = 2.0)
+    {
+        lock (_broadcastTimestampLock)
+        {
+            if (_lastUserBroadcast.TryGetValue(userId, out var lastBroadcast))
+            {
+                var timeSince = DateTime.UtcNow - lastBroadcast;
+                return timeSince.TotalSeconds < debounceSeconds;
+            }
+            return false;
         }
     }
 
@@ -97,6 +124,22 @@ public class SignalRStreamingService : ISignalRStreamingService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error broadcasting P&L to user {UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// Send a notification to a specific user
+    /// </summary>
+    public async Task SendNotificationAsync(string userId, NotificationDto notification, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveNotification", notification, cancellationToken);
+            _logger.LogDebug("Sent notification to user {UserId}: {Type} - {Title}", userId, notification.Type, notification.Title);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending notification to user {UserId}", userId);
         }
     }
 }

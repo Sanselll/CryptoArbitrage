@@ -1,4 +1,4 @@
-import { Target, ArrowUpCircle, ArrowDownCircle, Play, Clock, StopCircle, TrendingUp, TrendingDown } from 'lucide-react';
+import { Target, ArrowUpCircle, ArrowDownCircle, Play, Clock, TrendingUp, TrendingDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
@@ -114,30 +114,38 @@ export const OpportunitiesList = () => {
   const [isStopping, setIsStopping] = useState(false);
   const { alertState, showSuccess, showError, showInfo, closeAlert, confirmState, showConfirm, closeConfirm } = useDialog();
 
+  // Helper function to find matching positions for an opportunity
+  const findMatchingPositions = (opp: any) => {
+    const isSpotPerp = opp.strategy === 1; // SpotPerpetual
+    const matched = positions.filter((pos) => {
+      // IMPORTANT: Only match OPEN positions (same logic as PositionsGrid)
+      if (pos.status !== PositionStatus.Open) {
+        return false;
+      }
+
+      if (isSpotPerp) {
+        // For spot-perp: match by symbol and exchange
+        return pos.symbol === opp.symbol && pos.exchange === opp.exchange;
+      } else {
+        // For cross-exchange: match by symbol and either longExchange or shortExchange
+        return (
+          pos.symbol === opp.symbol &&
+          (pos.exchange === opp.longExchange || pos.exchange === opp.shortExchange)
+        );
+      }
+    });
+
+    return matched;
+  };
+
   useEffect(() => {
     const interval = setInterval(() => {
       const nextFunding = getNextFundingTime();
       setTimeUntilFunding(formatTimeUntil(nextFunding));
-
-      // Update execution times based on opportunity's activeOpportunityExecutedAt
-      const newExecutionTimes: { [key: string]: string } = {};
-
-      // Get current opportunities from the store
-      const currentOpportunities = useArbitrageStore.getState().opportunities;
-      currentOpportunities
-        .filter((opp) => (opp as any).activeOpportunityExecutedAt)
-        .forEach((opp) => {
-          const isSpotPerp = (opp as any).strategy === 1;
-          const key = isSpotPerp
-            ? `${opp.symbol}-${(opp as any).exchange}`
-            : `${opp.symbol}-${(opp as any).longExchange}`;
-          newExecutionTimes[key] = formatExecutionTime((opp as any).activeOpportunityExecutedAt);
-        });
-      setExecutionTimes(newExecutionTimes);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, []); // Empty dependency array - interval runs once on mount
+  }, []);
 
   const activeOpportunities = opportunities
     .filter((opp) => {
@@ -213,8 +221,12 @@ export const OpportunitiesList = () => {
   };
 
   const handleStop = async (opp: any) => {
+    // Find matching positions for this opportunity
+    const matchingPositions = findMatchingPositions(opp);
+    const executionId = matchingPositions[0]?.executionId;
+
     // Check if this opportunity has an execution running
-    if (!opp.executionId) {
+    if (!executionId) {
       showInfo('No execution found for this opportunity', 'No Execution');
       return;
     }
@@ -224,7 +236,7 @@ export const OpportunitiesList = () => {
       async () => {
         setIsStopping(true);
         try {
-          const response = await apiService.stopExecution(opp.executionId);
+          const response = await apiService.stopExecution(executionId);
 
           if (response.success) {
             // Manually refresh positions immediately after successful stop
@@ -391,18 +403,6 @@ export const OpportunitiesList = () => {
 
                 const isExecuting = matchingPositions.length > 0;
 
-                // Calculate 8-hour profit and spread for merged cells
-                const apr = isSpotPerp
-                  ? opp.estimatedProfitPercentage
-                  : opp.annualizedSpread * 100;
-                const profit8h = apr / 365 / 3;
-
-                const spotPrice = opp.spotPrice || 0;
-                const perpPrice = opp.perpetualPrice || 0;
-                const spread = (spotPrice > 0 && perpPrice > 0)
-                  ? ((perpPrice - spotPrice) / spotPrice) * 100
-                  : 0;
-
                 // Get funding rates for each exchange
                 const longFundingData = fundingRates.find(fr =>
                   fr.symbol === opp.symbol &&
@@ -412,6 +412,45 @@ export const OpportunitiesList = () => {
                   fr.symbol === opp.symbol &&
                   fr.exchange === opp.shortExchange
                 ) : null;
+
+                // Calculate 8-hour profit and spread for merged cells
+                const apr = isSpotPerp
+                  ? opp.estimatedProfitPercentage
+                  : opp.annualizedSpread * 100;
+
+                // Calculate 8H profit based on funding intervals
+                let profit8h: number;
+                if (isSpotPerp) {
+                  // For spot-perp, use the long exchange funding interval
+                  const fundingIntervalHours = longFundingData?.fundingIntervalHours || 8;
+                  const periodsIn8Hours = 8 / fundingIntervalHours;
+                  profit8h = (apr / 365) * periodsIn8Hours;
+                } else if (isCrossFut) {
+                  // For cross-futures, calculate weighted average based on both intervals
+                  const longInterval = opp.longFundingIntervalHours || longFundingData?.fundingIntervalHours || 8;
+                  const shortInterval = opp.shortFundingIntervalHours || shortFundingData?.fundingIntervalHours || 8;
+
+                  // Calculate daily earnings from each position
+                  const longDailyRate = (opp.longFundingRate * 100) * (24 / longInterval);
+                  const shortDailyRate = (opp.shortFundingRate * 100) * (24 / shortInterval);
+
+                  // Net daily rate = short rate - long rate (we earn on short, pay on long)
+                  const netDailyRate = shortDailyRate - longDailyRate;
+
+                  // 8H profit = (daily rate / 3)
+                  profit8h = netDailyRate / 3;
+                } else {
+                  // For cross-exchange spot-futures, only short position has funding
+                  const shortInterval = opp.shortFundingIntervalHours || shortFundingData?.fundingIntervalHours || 8;
+                  const periodsIn8Hours = 8 / shortInterval;
+                  profit8h = (apr / 365) * periodsIn8Hours;
+                }
+
+                const spotPrice = opp.spotPrice || 0;
+                const perpPrice = opp.perpetualPrice || 0;
+                const spread = (spotPrice > 0 && perpPrice > 0)
+                  ? ((perpPrice - spotPrice) / spotPrice) * 100
+                  : 0;
 
                 const rows = [];
 
@@ -522,20 +561,22 @@ export const OpportunitiesList = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right py-1" rowSpan={2}>
-                      {opp.executionId ? (
-                        <Button
-                          variant="danger"
+                      {findMatchingPositions(opp).length > 0 ? (
+                        <Badge
+                          variant="success"
                           size="sm"
-                          onClick={() => handleStop(opp)}
-                          className="gap-0.5 h-6 px-2 text-[10px]"
+                          className="text-[10px]"
                         >
-                          <StopCircle className="w-2.5 h-2.5" />
-                          Stop
-                        </Button>
+                          Executed
+                        </Badge>
                       ) : isExecuting ? (
-                        <span className="text-[11px] text-binance-text-secondary">
-                          Executing...
-                        </span>
+                        <Badge
+                          variant="warning"
+                          size="sm"
+                          className="text-[10px]"
+                        >
+                          Executing
+                        </Badge>
                       ) : (
                         <Button
                           variant="primary"

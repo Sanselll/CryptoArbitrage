@@ -24,6 +24,7 @@ public class ArbitrageEngineService : BackgroundService
     private readonly IOpportunityDetectionService _opportunityDetectionService;
     private readonly ISignalRStreamingService _signalRStreamingService;
     private readonly IMemoryCache _cache;
+    private readonly ConnectionResilienceService _resilienceService;
     private readonly Dictionary<string, IExchangeConnector> _exchangeConnectors = new();
     private readonly SemaphoreSlim _liquiditySemaphore;
     private List<string> _activeSymbols = new();
@@ -41,7 +42,8 @@ public class ArbitrageEngineService : BackgroundService
         IDataAggregationService dataAggregationService,
         IOpportunityDetectionService opportunityDetectionService,
         ISignalRStreamingService signalRStreamingService,
-        IMemoryCache cache)
+        IMemoryCache cache,
+        ConnectionResilienceService resilienceService)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
@@ -50,6 +52,7 @@ public class ArbitrageEngineService : BackgroundService
         _opportunityDetectionService = opportunityDetectionService;
         _signalRStreamingService = signalRStreamingService;
         _cache = cache;
+        _resilienceService = resilienceService;
         _liquiditySemaphore = new SemaphoreSlim(config.MaxConcurrentLiquidityRequests);
     }
 
@@ -61,18 +64,28 @@ public class ArbitrageEngineService : BackgroundService
             _config.SignalRBroadcastIntervalSeconds,
             _config.UserDataRefreshIntervalSeconds);
 
-        // Initialize global exchange connectors (for shared funding rate fetching)
-        await InitializeExchangesAsync();
-
-        // Start three independent loops in parallel
-        var tasks = new[]
+        try
         {
-            OpportunityCollectionLoopAsync(stoppingToken),    // Slow: Collect data & detect opportunities
-            SignalRBroadcastLoopAsync(stoppingToken),         // Fast: Broadcast cached data to UI
-            UserDataRefreshLoopAsync(stoppingToken)           // Medium: Refresh user-specific data
-        };
+            // Initialize global exchange connectors (for shared funding rate fetching)
+            await InitializeExchangesAsync();
 
-        await Task.WhenAll(tasks);
+            // Start three independent loops in parallel
+            var tasks = new[]
+            {
+                OpportunityCollectionLoopAsync(stoppingToken),    // Slow: Collect data & detect opportunities
+                SignalRBroadcastLoopAsync(stoppingToken),         // Fast: Broadcast cached data to UI
+                UserDataRefreshLoopAsync(stoppingToken)           // Medium: Refresh user-specific data
+            };
+
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(ex, "Fatal error in Arbitrage Engine Service. Service will attempt to restart.");
+
+            // Don't let the service die - allow BackgroundService to restart it
+            throw;
+        }
     }
 
     /// <summary>
@@ -225,17 +238,26 @@ public class ArbitrageEngineService : BackgroundService
                 {
                     // For multi-user system: Initialize without API keys to use public APIs
                     // User-specific API keys are stored in database and used for trading operations
-                    var connected = await connector.ConnectAsync(null, null);
+                    var connected = await _resilienceService.ExecuteWithRetryBoolAsync(
+                        $"Connect to {exchange.Name}",
+                        $"global-{exchange.Name}",
+                        async () => await connector.ConnectAsync(null, null)
+                    );
+
                     if (connected)
                     {
                         _exchangeConnectors[exchange.Name] = connector;
                         _logger.LogInformation("Connected to {Exchange} public API", exchange.Name);
                     }
+                    else
+                    {
+                        _logger.LogWarning("Failed to connect to {Exchange} after retries. Will retry later.", exchange.Name);
+                    }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to connect to {Exchange}", exchange.Name);
+                _logger.LogError(ex, "Failed to initialize connector for {Exchange}", exchange.Name);
             }
         }
 
@@ -521,6 +543,23 @@ public class ArbitrageEngineService : BackgroundService
                     _logger.LogError(ex, "Error processing data for user {UserId}", user.Id);
                 }
             }
+
+            // Check for notification triggers for each active user
+            var notificationService = scope.ServiceProvider.GetService<INotificationService>();
+            if (notificationService != null)
+            {
+                foreach (var user in activeUsers)
+                {
+                    try
+                    {
+                        await notificationService.CheckNegativeFundingForUserAsync(user.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error checking notifications for user {UserId}", user.Id);
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -532,6 +571,15 @@ public class ArbitrageEngineService : BackgroundService
     {
         var userId = user.Id;
         var email = user.Email;
+
+        // DEBOUNCE: Check if an immediate broadcast happened recently (within last 2 seconds)
+        // This prevents race conditions where Stop/Execute methods broadcast fresh data
+        // but this loop broadcasts stale data shortly after, causing UI flickering
+        if (_signalRStreamingService.ShouldSkipUserRefresh(userId, debounceSeconds: 2.0))
+        {
+            _logger.LogDebug("Skipping user data refresh for {UserId} - recent broadcast detected", userId);
+            return;
+        }
 
         try
         {
@@ -568,11 +616,21 @@ public class ArbitrageEngineService : BackgroundService
 
                     if (connector != null)
                     {
-                        var connected = await connector.ConnectAsync(decryptedKey, decryptedSecret);
+                        var connected = await _resilienceService.ExecuteWithRetryBoolAsync(
+                            $"Connect user {userId} to {apiKey.ExchangeName}",
+                            $"user-{userId}-{apiKey.ExchangeName}",
+                            async () => await connector.ConnectAsync(decryptedKey, decryptedSecret)
+                        );
+
                         if (connected)
                         {
                             userConnectors[apiKey.ExchangeName] = connector;
                             _logger.LogDebug("User {UserId} connected to {Exchange}", userId, apiKey.ExchangeName);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("User {UserId} failed to connect to {Exchange} after retries",
+                                userId, apiKey.ExchangeName);
                         }
                     }
                 }
@@ -589,9 +647,9 @@ public class ArbitrageEngineService : BackgroundService
                 return;
             }
 
-            // Fetch and broadcast user positions
+            // Fetch and broadcast user positions (only Open positions)
             var userPositions = await db.Positions
-                .Where(p => p.UserId == userId)
+                .Where(p => p.UserId == userId && p.Status == PositionStatus.Open)
                 .ToListAsync(stoppingToken);
 
             var positionDtos = new List<PositionDto>();
@@ -712,4 +770,5 @@ public class ArbitrageEngineService : BackgroundService
             ClosedAt = position.ClosedAt
         };
     }
+
 }
