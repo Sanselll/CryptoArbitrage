@@ -68,6 +68,12 @@ export enum StrategySubType {
   CrossExchangeSpotFutures = 2
 }
 
+export enum LiquidityStatus {
+  Good = 0,
+  Medium = 1,
+  Low = 2
+}
+
 export interface ArbitrageOpportunity {
   id: number;
   symbol: string;
@@ -93,6 +99,13 @@ export interface ArbitrageOpportunity {
   annualizedSpread: number;
   estimatedProfitPercentage: number;
   volume24h?: number;
+
+  // Liquidity metrics
+  bidAskSpreadPercent?: number;
+  orderbookDepthUsd?: number;
+  liquidityStatus?: LiquidityStatus;
+  liquidityWarning?: string;
+
   status: OpportunityStatus;
   detectedAt: string;
   executedAt?: string;

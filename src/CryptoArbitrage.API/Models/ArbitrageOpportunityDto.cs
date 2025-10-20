@@ -41,6 +41,13 @@ public class ArbitrageOpportunityDto
     public decimal AnnualizedSpread { get; set; }
     public decimal EstimatedProfitPercentage { get; set; }
     public decimal Volume24h { get; set; }  // 24-hour trading volume in USDT
+
+    // Liquidity metrics
+    public decimal? BidAskSpreadPercent { get; set; }
+    public decimal? OrderbookDepthUsd { get; set; }
+    public LiquidityStatus? LiquidityStatus { get; set; }
+    public string? LiquidityWarning { get; set; }
+
     public OpportunityStatus Status { get; set; }
     public DateTime DetectedAt { get; set; }
     public DateTime? ExecutedAt { get; set; }

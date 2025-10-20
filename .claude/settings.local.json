@@ -29,7 +29,9 @@
       "Bash(export ASPNETCORE_ENVIRONMENT=DevelopmentLive)",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''FundingRates'' ORDER BY ordinal_position;\")",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''ActiveExecutions'' ORDER BY ordinal_position;\")",
-      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" ORDER BY \"\"RecordedAt\"\" DESC LIMIT 5;\")"
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"FundingIntervalHours\"\", \"\"Average3DayRate\"\", \"\"AnnualizedRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" ORDER BY \"\"RecordedAt\"\" DESC LIMIT 5;\")",
+      "Bash(dotnet build)",
+      "WebFetch(domain:binance-docs.github.io)"
     ],
     "deny": [],
     "ask": []

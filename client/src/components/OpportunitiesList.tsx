@@ -19,7 +19,7 @@ import {
 import { useState, useEffect } from 'react';
 import { ExecuteDialog, ExecutionParams } from './ExecuteDialog';
 import { apiService } from '../services/apiService';
-import { PositionStatus, StrategySubType } from '../types/index';
+import { PositionStatus, StrategySubType, LiquidityStatus } from '../types/index';
 import { useDialog } from '../hooks/useDialog';
 
 // Helper function to get strategy type label
@@ -36,6 +36,20 @@ const getStrategyLabel = (subType?: number): { text: string; color: string } => 
       return { text: 'Cross-Spot', color: 'bg-green-500/20 text-green-400' };
     default:
       return { text: 'Unknown', color: 'bg-gray-500/20 text-gray-400' };
+  }
+};
+
+// Helper function to get liquidity badge details
+const getLiquidityBadge = (status?: LiquidityStatus): { text: string; variant: 'success' | 'warning' | 'danger' } => {
+  switch (status) {
+    case LiquidityStatus.Good:
+      return { text: 'Good', variant: 'success' };
+    case LiquidityStatus.Medium:
+      return { text: 'Medium', variant: 'warning' };
+    case LiquidityStatus.Low:
+      return { text: 'Low', variant: 'danger' };
+    default:
+      return { text: 'Unknown', variant: 'warning' };
   }
 };
 
@@ -167,7 +181,26 @@ export const OpportunitiesList = () => {
         return;
       }
 
-      // All required exchanges are connected - open dialog
+      // Check if opportunity has low liquidity
+      if (opp.liquidityStatus === LiquidityStatus.Low) {
+        showConfirm(
+          `Symbol: ${opp.symbol}\n\n⚠️ WARNING: Low Liquidity Detected\n\n${opp.liquidityWarning || 'This asset has low liquidity which may result in execution failures or unfavorable prices.'}\n\nMarket orders may fail. Consider using limit orders instead.\n\nDo you still want to proceed?`,
+          () => {
+            // User confirmed - open dialog
+            setSelectedOpportunity(opp);
+            setIsDialogOpen(true);
+          },
+          {
+            title: 'Low Liquidity Warning',
+            confirmText: 'Proceed Anyway',
+            cancelText: 'Cancel',
+            variant: 'danger',
+          }
+        );
+        return;
+      }
+
+      // All required exchanges are connected and liquidity is acceptable - open dialog
       setSelectedOpportunity(opp);
       setIsDialogOpen(true);
     } catch (error: any) {
@@ -333,6 +366,7 @@ export const OpportunitiesList = () => {
                 <TableHead className="text-right">Fee Interval</TableHead>
                 <TableHead className="text-right">Next Funding</TableHead>
                 <TableHead className="text-right">24h Volume</TableHead>
+                <TableHead className="text-right">Liquidity</TableHead>
                 <TableHead className="text-right">Spread</TableHead>
                 <TableHead className="text-right">8h Profit</TableHead>
                 <TableHead className="text-right">APR</TableHead>
@@ -455,6 +489,20 @@ export const OpportunitiesList = () => {
                       <span className="font-mono text-[11px] text-binance-text-secondary">
                         {longFundingData?.volume24h ? `$${(longFundingData.volume24h / 1000000).toFixed(2)}M` : '--'}
                       </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1" rowSpan={2}>
+                      {opp.liquidityStatus !== undefined ? (
+                        <Badge
+                          variant={getLiquidityBadge(opp.liquidityStatus).variant}
+                          size="sm"
+                          className="text-[10px]"
+                          title={opp.liquidityWarning || undefined}
+                        >
+                          {getLiquidityBadge(opp.liquidityStatus).text}
+                        </Badge>
+                      ) : (
+                        <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right py-1" rowSpan={2}>
                       <span className="font-mono text-[11px] font-bold text-binance-text-primary">

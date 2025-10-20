@@ -35,6 +35,9 @@ public class ArbitrageConfig
     public bool EnableCrossExchangeFuturesFutures { get; set; } = true;     // Long perp on one exchange + short perp on another
     public bool EnableCrossExchangeSpotFutures { get; set; } = true;        // Buy spot on one exchange + short perp on another
 
+    // Liquidity fetching configuration
+    public int MaxConcurrentLiquidityRequests { get; set; } = 10;           // Max parallel requests to avoid rate limits
+
     // Exchange configurations (moved from database)
     public List<ExchangeConfig> Exchanges { get; set; } = new();
 
