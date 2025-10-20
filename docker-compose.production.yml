@@ -31,12 +31,12 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=ProductionReal
       - ASPNETCORE_URLS=http://+:8080
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=crypto_arbitrage_real;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - Jwt__SecretKey=${JWT_SECRET_KEY}
+      - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
+      - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
+      - Encryption__Key=${ENCRYPTION_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,12 +67,12 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=ProductionDemo
       - ASPNETCORE_URLS=http://+:8080
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=crypto_arbitrage_demo;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - Jwt__SecretKey=${JWT_SECRET_KEY}
+      - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
+      - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
+      - Encryption__Key=${ENCRYPTION_KEY}
     depends_on:
       postgres:
         condition: service_healthy
