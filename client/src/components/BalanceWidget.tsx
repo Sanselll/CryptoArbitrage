@@ -1,11 +1,19 @@
-import { TrendingUp, Wallet, Lock } from 'lucide-react';
+import { TrendingUp, Wallet, Lock, Settings } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { Card, CardContent } from './ui/Card';
 import { Badge } from './ui/Badge';
 import { ExchangeBadge } from './ui/ExchangeBadge';
+import { Button } from './ui/Button';
 
-export const BalanceWidget = () => {
+interface BalanceWidgetProps {
+  supportedExchanges: string[];
+  connectedExchanges: string[];
+}
+
+export const BalanceWidget = ({ supportedExchanges, connectedExchanges }: BalanceWidgetProps) => {
   const { balances } = useArbitrageStore();
+  const navigate = useNavigate();
 
   const getMarginRiskLevel = (utilization: number) => {
     if (utilization > 75) return { label: 'High Risk', variant: 'danger' as const };
@@ -15,7 +23,51 @@ export const BalanceWidget = () => {
 
   return (
     <div className="flex gap-2">
-      {balances.map((balance) => {
+      {supportedExchanges.map((exchange) => {
+        // Check if this exchange has API keys connected
+        const hasKeys = connectedExchanges.includes(exchange);
+
+        // Find balance data for this exchange if keys are connected
+        const balance = balances.find((b) => b.exchange === exchange);
+
+        // If no keys, show placeholder card
+        if (!hasKeys) {
+          return (
+            <Card key={exchange} className="card-hover w-[240px]">
+              <CardContent className="p-2 flex flex-col items-center justify-center min-h-[150px]">
+                <ExchangeBadge exchange={exchange} className="mb-3" />
+                <div className="text-center mb-3">
+                  <Settings className="w-8 h-8 text-binance-text-secondary mx-auto mb-2" />
+                  <p className="text-xs text-binance-text-secondary mb-1">
+                    No API keys configured
+                  </p>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => navigate('/profile')}
+                  className="gap-1 text-xs"
+                >
+                  <Settings className="w-3 h-3" />
+                  Configure Keys
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        }
+
+        // If keys connected but no balance data yet, show loading state
+        if (!balance) {
+          return (
+            <Card key={exchange} className="card-hover w-[240px]">
+              <CardContent className="p-2 flex items-center justify-center min-h-[150px]">
+                <div className="text-xs text-binance-text-secondary">Loading...</div>
+              </CardContent>
+            </Card>
+          );
+        }
+
+        // Show balance data (existing logic)
         // Total capital = all assets (spot + futures)
         const totalCapital = balance.totalBalance || 0;
         const totalUnrealizedPnL = balance.unrealizedPnL;
@@ -46,11 +98,11 @@ export const BalanceWidget = () => {
         const pnlPercent = totalCapital > 0 ? (totalUnrealizedPnL / totalCapital) * 100 : 0;
 
         return (
-          <Card key={balance.exchange} className="card-hover w-[240px]">
+          <Card key={exchange} className="card-hover w-[240px]">
             <CardContent className="p-2">
               {/* Exchange Header with P&L */}
               <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-binance-border/30">
-                <ExchangeBadge exchange={balance.exchange} />
+                <ExchangeBadge exchange={exchange} />
                 <div className="flex items-center gap-1.5">
                   <TrendingUp
                     className={`w-2.5 h-2.5 ${

@@ -2,8 +2,24 @@ import * as signalR from '@microsoft/signalr';
 import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Notification } from '../types/index';
 import { notificationService } from './notificationService.tsx';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5052/api';
-const HUB_URL = API_BASE_URL.replace('/api', '/hubs/arbitrage');
+type TradingMode = 'Demo' | 'Real';
+
+// Get Hub URL based on trading mode from sessionStorage
+const getHubUrl = (): string => {
+  const mode = sessionStorage.getItem('trading_mode') as TradingMode | null;
+
+  const apiBaseUrl = mode === 'Real'
+    ? import.meta.env.VITE_API_BASE_URL_REAL || 'http://localhost:5053/api'
+    : import.meta.env.VITE_API_BASE_URL_DEMO || 'http://localhost:5052/api';
+
+  return apiBaseUrl.replace('/api', '/hubs/arbitrage');
+};
+
+// Get mode-specific JWT token key
+const getTokenKey = (): string => {
+  const mode = sessionStorage.getItem('trading_mode') as TradingMode | null;
+  return mode === 'Real' ? 'jwt_token_real' : 'jwt_token_demo';
+};
 
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
@@ -17,17 +33,21 @@ class SignalRService {
     onNotification: [] as ((data: Notification) => void)[],
   };
 
-  async connect(url: string = HUB_URL) {
+  async connect() {
     if (this.connection?.state === signalR.HubConnectionState.Connected) {
       console.log('Already connected');
       return;
     }
 
-    const token = localStorage.getItem('jwt_token');
+    const tokenKey = getTokenKey();
+    const token = localStorage.getItem(tokenKey);
     if (!token) {
       console.error('No authentication token available');
       throw new Error('Not authenticated');
     }
+
+    const url = getHubUrl();
+    console.log('Connecting to SignalR hub:', url);
 
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(url, {
@@ -42,10 +62,10 @@ class SignalRService {
 
     try {
       await this.connection.start();
-      console.log('SignalR Connected');
+      console.log('SignalR Connected to:', url);
     } catch (err) {
       console.error('SignalR Connection Error: ', err);
-      setTimeout(() => this.connect(url), 5000);
+      setTimeout(() => this.connect(), 5000);
     }
 
     this.connection.onreconnecting(() => {
@@ -58,7 +78,7 @@ class SignalRService {
 
     this.connection.onclose(() => {
       console.log('SignalR Disconnected');
-      setTimeout(() => this.connect(url), 5000);
+      setTimeout(() => this.connect(), 5000);
     });
   }
 

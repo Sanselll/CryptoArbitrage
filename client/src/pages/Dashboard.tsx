@@ -1,54 +1,58 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { Header } from '../components/Header';
 import { BalanceWidget } from '../components/BalanceWidget';
 import { OpportunitiesList } from '../components/OpportunitiesList';
 import { PositionsGrid } from '../components/PositionsGrid';
-import { Shield, Settings, ArrowRight } from 'lucide-react';
 import apiClient from '../services/apiClient';
-import { Button } from '../components/ui/Button';
 import axios from 'axios';
 
 export function Dashboard() {
   const connect = useArbitrageStore((state) => state.connect);
   const disconnect = useArbitrageStore((state) => state.disconnect);
-  const navigate = useNavigate();
-  const [hasApiKeys, setHasApiKeys] = useState<boolean | null>(null);
+  const [connectedExchanges, setConnectedExchanges] = useState<string[]>([]);
+  const [supportedExchanges, setSupportedExchanges] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isBackendOffline, setIsBackendOffline] = useState(false);
 
   useEffect(() => {
-    // Check if user has API keys configured
-    const checkApiKeys = async () => {
+    // Fetch both supported exchanges and user's connected exchanges
+    const fetchExchangeData = async () => {
       try {
-        const response = await apiClient.get('/user/apikeys');
-        setHasApiKeys(response.data.length > 0);
+        // Fetch supported exchanges from configuration
+        const supportedResponse = await apiClient.get('/environment/exchanges');
+        const supported = supportedResponse.data.exchanges || [];
+        setSupportedExchanges(supported);
+
+        // Fetch user's connected exchanges
+        const userKeysResponse = await apiClient.get('/user/apikeys');
+        const connected = userKeysResponse.data
+          .filter((key: any) => key.isEnabled)
+          .map((key: any) => key.exchangeName);
+        setConnectedExchanges(connected);
         setIsBackendOffline(false);
       } catch (error) {
-        console.error('Error checking API keys:', error);
+        console.error('Error fetching exchange data:', error);
 
         // Check if it's a network error (backend is down)
         if (axios.isAxiosError(error) && (!error.response || error.code === 'ERR_NETWORK')) {
-          // Backend is offline - assume user might have API keys, show dashboard
           setIsBackendOffline(true);
-          setHasApiKeys(true); // Optimistically show dashboard when offline
         } else {
-          // Other error (like 401, 404, etc.) - likely no API keys
-          setHasApiKeys(false);
-          setIsBackendOffline(false);
+          // Other error - user likely has no API keys, but we still have supported exchanges
+          setConnectedExchanges([]);
         }
       } finally {
         setIsLoading(false);
       }
     };
 
-    checkApiKeys();
+    fetchExchangeData();
   }, []);
 
   useEffect(() => {
-    // Only connect to SignalR if user has API keys and backend is not offline
-    if (hasApiKeys && !isBackendOffline) {
+    // Always connect to SignalR (for opportunities data)
+    // Connect even without API keys so user can see available opportunities
+    if (!isBackendOffline) {
       connect();
     }
 
@@ -56,7 +60,7 @@ export function Dashboard() {
     return () => {
       disconnect();
     };
-  }, [hasApiKeys, isBackendOffline, connect, disconnect]);
+  }, [isBackendOffline, connect, disconnect]);
 
   return (
     <div className="h-screen flex flex-col bg-binance-bg">
@@ -68,55 +72,15 @@ export function Dashboard() {
           <div className="h-full flex items-center justify-center">
             <div className="text-binance-text-secondary text-sm">Loading...</div>
           </div>
-        ) : !hasApiKeys ? (
-          // Empty state - No API keys configured
-          <div className="h-full flex items-center justify-center">
-            <div className="max-w-md w-full text-center">
-              <div className="bg-binance-bg-secondary border border-binance-border rounded-lg p-8">
-                <div className="flex justify-center mb-6">
-                  <div className="w-20 h-20 rounded-full bg-binance-yellow/10 flex items-center justify-center">
-                    <Shield className="w-10 h-10 text-binance-yellow" />
-                  </div>
-                </div>
-
-                <h2 className="text-xl font-bold text-binance-text mb-3">
-                  Welcome to Crypto Arbitrage
-                </h2>
-
-                <p className="text-sm text-binance-text-secondary mb-6 leading-relaxed">
-                  To start finding arbitrage opportunities and trading, you need to configure your exchange API keys first.
-                </p>
-
-                <div className="bg-binance-bg-tertiary border border-binance-border rounded p-4 mb-6 text-left">
-                  <h3 className="text-xs font-semibold text-binance-text mb-2 flex items-center gap-2">
-                    <Settings className="w-3 h-3" />
-                    What you'll need:
-                  </h3>
-                  <ul className="text-xs text-binance-text-secondary space-y-1.5 list-disc list-inside">
-                    <li>API keys from Binance and/or Bybit</li>
-                    <li>Keys should have trading permissions enabled</li>
-                    <li>Your keys are encrypted and stored securely</li>
-                  </ul>
-                </div>
-
-                <Button
-                  variant="primary"
-                  size="lg"
-                  onClick={() => navigate('/profile')}
-                  className="w-full gap-2 text-sm font-semibold"
-                >
-                  Configure API Keys
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
         ) : (
-          // Normal dashboard with data
+          // Always show dashboard - BalanceWidget will handle display of exchanges with/without keys
           <div className="h-full flex flex-col gap-3">
             {/* Balance Overview - Top Section */}
             <div className="flex-shrink-0">
-              <BalanceWidget />
+              <BalanceWidget
+                supportedExchanges={supportedExchanges}
+                connectedExchanges={connectedExchanges}
+              />
             </div>
 
             {/* Opportunities List - Full Width */}

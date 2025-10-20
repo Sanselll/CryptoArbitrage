@@ -39,4 +39,27 @@ public class EnvironmentController : ControllerBase
             timestamp = DateTime.UtcNow
         });
     }
+
+    /// <summary>
+    /// Gets the list of supported exchanges configured in the system.
+    /// Public endpoint - no authentication required.
+    /// </summary>
+    [HttpGet("exchanges")]
+    public IActionResult GetSupportedExchanges()
+    {
+        var exchanges = _configuration.GetSection("ArbitrageConfig:Exchanges")
+            .GetChildren()
+            .Where(e => e.GetValue<bool>("IsEnabled"))
+            .Select(e => e.GetValue<string>("Name"))
+            .Where(name => !string.IsNullOrEmpty(name))
+            .ToList();
+
+        _logger.LogDebug("Supported exchanges requested: {Count} exchanges", exchanges.Count);
+
+        return Ok(new
+        {
+            exchanges = exchanges,
+            timestamp = DateTime.UtcNow
+        });
+    }
 }

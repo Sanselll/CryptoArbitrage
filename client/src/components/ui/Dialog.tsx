@@ -72,6 +72,7 @@ interface AlertDialogProps {
   variant?: 'default' | 'success' | 'danger' | 'warning' | 'info';
   actionText?: string;
   onAction?: () => void;
+  children?: ReactNode;
 }
 
 export const AlertDialog = ({
@@ -82,6 +83,7 @@ export const AlertDialog = ({
   variant = 'info',
   actionText,
   onAction,
+  children,
 }: AlertDialogProps) => {
   const handleAction = () => {
     if (onAction) {
@@ -94,6 +96,7 @@ export const AlertDialog = ({
     <Dialog isOpen={isOpen} onClose={onClose} title={title} variant={variant} showCloseButton={false}>
       <div className="space-y-4">
         <p className="text-sm text-binance-text whitespace-pre-line">{message}</p>
+        {children}
         <div className="flex gap-2 justify-end">
           {actionText && onAction ? (
             <>

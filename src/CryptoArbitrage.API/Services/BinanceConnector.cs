@@ -444,16 +444,29 @@ public class BinanceConnector : IExchangeConnector
         if (_restClient == null)
             throw new InvalidOperationException("Not connected to Binance");
 
+        _logger.LogInformation("=== GetAccountBalanceAsync Started ===");
+
+        decimal futuresTotal = 0;
+        decimal futuresAvailable = 0;
+        decimal marginUsed = 0;
+        decimal unrealizedPnL = 0;
+        bool futuresSuccess = false;
+
+        // Try to fetch futures balances
         try
         {
-            // Fetch futures balances
+            _logger.LogInformation("[1/3] Fetching futures balances via UsdFuturesApi.Account.GetBalancesAsync()...");
             var futuresBalances = await _restClient.UsdFuturesApi.Account.GetBalancesAsync();
-            decimal futuresTotal = 0;
-            decimal futuresAvailable = 0;
-            decimal marginUsed = 0;
-            decimal unrealizedPnL = 0;
 
-            if (futuresBalances.Success && futuresBalances.Data != null && futuresBalances.Data.Any())
+            _logger.LogInformation("Futures API call completed. Success: {Success}", futuresBalances.Success);
+
+            if (!futuresBalances.Success)
+            {
+                _logger.LogWarning("Futures balance fetch FAILED");
+                _logger.LogWarning("Error Code: {Code}", futuresBalances.Error?.Code);
+                _logger.LogWarning("Error Message: {Message}", futuresBalances.Error?.Message);
+            }
+            else if (futuresBalances.Data != null && futuresBalances.Data.Any())
             {
                 var usdtBalance = futuresBalances.Data.FirstOrDefault(b => b.Asset == "USDT");
                 if (usdtBalance != null)
@@ -462,22 +475,53 @@ public class BinanceConnector : IExchangeConnector
                     futuresAvailable = usdtBalance.AvailableBalance;
                     marginUsed = usdtBalance.WalletBalance - usdtBalance.AvailableBalance;
                     unrealizedPnL = usdtBalance.CrossUnrealizedPnl ?? 0;
+                    futuresSuccess = true;
+
+                    _logger.LogInformation("✓ Futures balance fetched successfully");
+                    _logger.LogInformation("  Futures Total: ${Total}", futuresTotal);
+                    _logger.LogInformation("  Futures Available: ${Available}", futuresAvailable);
+                    _logger.LogInformation("  Margin Used: ${Margin}", marginUsed);
+                    _logger.LogInformation("  Unrealized P&L: ${PnL}", unrealizedPnL);
+                }
+                else
+                {
+                    _logger.LogWarning("Futures API succeeded but no USDT balance found");
                 }
             }
+            else
+            {
+                _logger.LogWarning("Futures API succeeded but returned no data");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "✗ Exception fetching futures balances - will continue with spot only");
+        }
 
-            // Fetch spot balances
-            var spotBalances = await GetSpotBalancesAsync();
-            decimal spotTotalUsd = 0;
-            decimal spotAvailableUsd = 0;
-            decimal spotUsdtOnly = 0; // Only USDT for operational balance
+        decimal spotTotalUsd = 0;
+        decimal spotAvailableUsd = 0;
+        decimal spotUsdtOnly = 0;
+        Dictionary<string, decimal> spotBalances = new Dictionary<string, decimal>();
+        bool spotSuccess = false;
+
+        // Try to fetch spot balances
+        try
+        {
+            _logger.LogInformation("[2/3] Fetching spot balances via GetSpotBalancesAsync()...");
+            spotBalances = await GetSpotBalancesAsync();
+
+            _logger.LogInformation("✓ Spot balances fetched successfully. Assets count: {Count}", spotBalances.Count);
 
             // Convert spot assets to USD equivalent
             if (spotBalances.Any())
             {
-                // Get prices for all spot assets
+                _logger.LogInformation("[3/3] Fetching prices via SpotApi.ExchangeData.GetPricesAsync()...");
                 var prices = await _restClient.SpotApi.ExchangeData.GetPricesAsync();
+
                 if (prices.Success && prices.Data != null)
                 {
+                    _logger.LogInformation("✓ Prices fetched successfully");
+
                     foreach (var asset in spotBalances)
                     {
                         if (asset.Key == "USDT")
@@ -485,7 +529,7 @@ public class BinanceConnector : IExchangeConnector
                             // USDT is already in USD
                             spotTotalUsd += asset.Value;
                             spotAvailableUsd += asset.Value;
-                            spotUsdtOnly = asset.Value; // Track USDT separately for operational balance
+                            spotUsdtOnly = asset.Value;
                         }
                         else
                         {
@@ -500,38 +544,68 @@ public class BinanceConnector : IExchangeConnector
                             }
                         }
                     }
+
+                    _logger.LogInformation("  Spot Total USD: ${Total}", spotTotalUsd);
+                    _logger.LogInformation("  Spot Available USD: ${Available}", spotAvailableUsd);
+                    spotSuccess = true;
+                }
+                else
+                {
+                    _logger.LogWarning("✗ Price fetch failed");
+                    _logger.LogWarning("Error Code: {Code}", prices.Error?.Code);
+                    _logger.LogWarning("Error Message: {Message}", prices.Error?.Message);
                 }
             }
-
-            // Calculate operational balance: USDT + coins in active positions + futures
-            // In cash-and-carry arbitrage, coins (BTC, ETH, etc.) ARE the positions
-            decimal operationalBalance = spotTotalUsd + futuresTotal;
-
-            return new AccountBalanceDto
-            {
-                Exchange = ExchangeName,
-                // Combined totals
-                TotalBalance = spotTotalUsd + futuresTotal,
-                AvailableBalance = spotAvailableUsd + futuresAvailable,
-                OperationalBalanceUsd = operationalBalance,
-                // Spot specific
-                SpotBalanceUsd = spotTotalUsd,
-                SpotAvailableUsd = spotAvailableUsd,
-                SpotAssets = spotBalances,
-                // Futures specific
-                FuturesBalanceUsd = futuresTotal,
-                FuturesAvailableUsd = futuresAvailable,
-                MarginUsed = marginUsed,
-                UnrealizedPnL = unrealizedPnL,
-                UpdatedAt = DateTime.UtcNow
-            };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching account balance from Binance");
+            _logger.LogError(ex, "✗ Exception fetching spot balances - will continue with futures only");
         }
 
-        return new AccountBalanceDto { Exchange = ExchangeName };
+        // Log final summary
+        _logger.LogInformation("=== Balance Fetch Summary ===");
+        _logger.LogInformation("Futures Success: {FuturesSuccess}", futuresSuccess);
+        _logger.LogInformation("Spot Success: {SpotSuccess}", spotSuccess);
+
+        if (!futuresSuccess && !spotSuccess)
+        {
+            _logger.LogError("CRITICAL: Both futures and spot balance fetches FAILED - returning DTO with zeros");
+        }
+
+        // If futures failed, log that we're using 0 values
+        if (!futuresSuccess)
+        {
+            _logger.LogInformation("Using default futures values (all 0) since futures fetch failed");
+        }
+
+        // Calculate operational balance
+        decimal operationalBalance = spotTotalUsd + futuresTotal;
+
+        var result = new AccountBalanceDto
+        {
+            Exchange = ExchangeName,
+            // Combined totals
+            TotalBalance = spotTotalUsd + futuresTotal,
+            AvailableBalance = spotAvailableUsd + futuresAvailable,
+            OperationalBalanceUsd = operationalBalance,
+            // Spot specific
+            SpotBalanceUsd = spotTotalUsd,
+            SpotAvailableUsd = spotAvailableUsd,
+            SpotAssets = spotBalances,
+            // Futures specific
+            FuturesBalanceUsd = futuresTotal,
+            FuturesAvailableUsd = futuresAvailable,
+            MarginUsed = marginUsed,
+            UnrealizedPnL = unrealizedPnL,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _logger.LogInformation("✓ Returning balance data:");
+        _logger.LogInformation("  Total Balance: ${Total}", result.TotalBalance);
+        _logger.LogInformation("  Available Balance: ${Available}", result.AvailableBalance);
+        _logger.LogInformation("=================================");
+
+        return result;
     }
 
     public async Task<AccountBalanceDto> GetAccountBalanceAsync(Dictionary<string, decimal> activeSpotPositions)

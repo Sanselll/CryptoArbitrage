@@ -146,6 +146,8 @@ builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<IEncryptionService, AesEncryptionService>();
+builder.Services.AddHttpClient(); // For API key validator
+builder.Services.AddScoped<IApiKeyValidator, ApiKeyValidator>();
 
 // Add memory cache for in-memory data storage
 builder.Services.AddMemoryCache();

@@ -45,7 +45,13 @@
       "Bash(dotnet ef migrations add DeleteClosedPositions)",
       "Bash(export ENCRYPTION_KEY=\"12345678901234567890123456789012\")",
       "Bash(git mv src/CryptoArbitrage.API/appsettings.DevelopmentLive.json src/CryptoArbitrage.API/appsettings.DevelopmentReal.json)",
-      "Bash(git mv src/CryptoArbitrage.API/appsettings.ProductionLive.json src/CryptoArbitrage.API/appsettings.ProductionReal.json)"
+      "Bash(git mv src/CryptoArbitrage.API/appsettings.ProductionLive.json src/CryptoArbitrage.API/appsettings.ProductionReal.json)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/JKorf/Binance.Net/dbf9fa9a66fa88c4491c5d4aa3f6b0d004a9d3ae/Binance.Net/Objects/Models/Spot/BinanceAPIKeyPermissions.cs\")",
+      "Bash(lsof -i :5052)",
+      "Bash(lsof -i :5053)"
     ],
     "deny": [],
     "ask": []

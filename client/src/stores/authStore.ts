@@ -28,12 +28,27 @@ const getApiBaseUrl = (mode: TradingMode): string => {
     : import.meta.env.VITE_API_BASE_URL_DEMO || 'http://localhost:5052/api';
 };
 
+// Get mode-specific JWT token key
+const getTokenKey = (): string => {
+  const mode = sessionStorage.getItem('trading_mode') as TradingMode | null;
+  return mode === 'Real' ? 'jwt_token_real' : 'jwt_token_demo';
+};
+
+// Initialize auth state with mode-specific token
+const initializeAuthState = () => {
+  const tokenKey = getTokenKey();
+  const token = localStorage.getItem(tokenKey);
+  return {
+    user: null,
+    token,
+    isAuthenticated: !!token,
+    isLoading: false,
+    error: null,
+  };
+};
+
 export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  token: localStorage.getItem('jwt_token'),
-  isAuthenticated: !!localStorage.getItem('jwt_token'),
-  isLoading: false,
-  error: null,
+  ...initializeAuthState(),
 
   login: async (googleToken: string, mode: TradingMode) => {
     set({ isLoading: true, error: null });
@@ -57,7 +72,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
 
       const { token, user } = await response.json();
-      localStorage.setItem('jwt_token', token);
+
+      // Store token with mode-specific key
+      const tokenKey = mode === 'Real' ? 'jwt_token_real' : 'jwt_token_demo';
+      localStorage.setItem(tokenKey, token);
+
+      console.log(`Stored token in ${tokenKey}`);
+
       set({ token, user, isAuthenticated: true, isLoading: false, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed';
@@ -67,13 +88,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
-    localStorage.removeItem('jwt_token');
+    // Clear both mode-specific tokens
+    localStorage.removeItem('jwt_token_demo');
+    localStorage.removeItem('jwt_token_real');
     sessionStorage.removeItem('trading_mode');
     set({ user: null, token: null, isAuthenticated: false, error: null });
   },
 
   checkAuth: () => {
-    const token = localStorage.getItem('jwt_token');
+    const tokenKey = getTokenKey();
+    const token = localStorage.getItem(tokenKey);
     set({ isAuthenticated: !!token, token });
   },
 
