@@ -39,7 +39,8 @@ public class Position
     public decimal NetFundingFee => TotalFundingFeeReceived - TotalFundingFeePaid;
 
     // Order/Position references
-    public string? OrderId { get; set; }  // Spot order ID or Perpetual position ID
+    public string? OrderId { get; set; }  // Spot order ID or Perpetual order ID
+    public string? ExchangePositionId { get; set; }  // Exchange's position ID for perpetual positions (used to close positions)
 
     // Timestamps
     public DateTime OpenedAt { get; set; } = DateTime.UtcNow;

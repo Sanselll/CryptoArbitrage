@@ -58,7 +58,9 @@
       "Bash(curl -s \"https://raw.githubusercontent.com/JKorf/Bybit.Net/e77bef4cb368ba5e74fedba6a9fb5df7b4a511bf/ByBit.Net/Objects/Models/V5/BybitApiKeyInfo.cs\")",
       "Bash(curl -s \"https://raw.githubusercontent.com/JKorf/Bybit.Net/main/ByBit.Net/Interfaces/Clients/V5/IBybitRestClientApiAccount.cs\")",
       "Bash(curl -s \"https://bybit-exchange.github.io/docs/v5/user/apikey-info\")",
-      "Bash(cat .github/workflows/deploy.yml)"
+      "Bash(cat .github/workflows/deploy.yml)",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"\\d \"\"Positions\"\"\")",
+      "Bash(dotnet ef migrations add AddExchangePositionIdToPosition)"
     ],
     "deny": [],
     "ask": []
