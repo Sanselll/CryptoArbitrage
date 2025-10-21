@@ -206,8 +206,8 @@ export const PositionsGrid = () => {
         message="Closing position..."
       />
 
-      <Card className="h-full flex flex-col min-h-[400px]">
-        <CardHeader className="p-2">
+      <Card className="h-full flex flex-col">
+        <CardHeader className="p-2 flex-shrink-0">
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-1.5 text-sm">
               <Layers className="w-3 h-3 text-binance-yellow" />
@@ -229,7 +229,7 @@ export const PositionsGrid = () => {
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1 overflow-y-auto p-0">
+      <CardContent className="flex-1 overflow-y-auto p-0 min-h-0">
         {openPositions.length === 0 ? (
           <EmptyState
             icon={<Layers className="w-12 h-12" />}
@@ -521,7 +521,7 @@ export const PositionsGrid = () => {
                       </TableCell>
                       <TableCell className="text-right py-1">
                         <Badge variant="warning" size="sm" className="text-[10px]">
-                          <span className="font-mono">{shortPerpPosition.leverage}x</span>
+                          <span className="font-mono">{shortPerpPosition.leverage || 1}x</span>
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right py-1">
@@ -619,7 +619,7 @@ export const PositionsGrid = () => {
                       </TableCell>
                       <TableCell className="text-right py-1">
                         <Badge variant="warning" size="sm" className="text-[10px]">
-                          <span className="font-mono">{perpPosition.leverage}x</span>
+                          <span className="font-mono">{perpPosition.leverage || 1}x</span>
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right py-1">
@@ -758,7 +758,7 @@ export const PositionsGrid = () => {
                       </TableCell>
                       <TableCell className="text-right py-1">
                         <Badge variant="warning" size="sm" className="text-[10px]">
-                          <span className="font-mono">{spotPosition.leverage}x</span>
+                          <span className="font-mono">{spotPosition.leverage || 1}x</span>
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right py-1">

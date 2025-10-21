@@ -762,12 +762,15 @@ public class ArbitrageEngineService : BackgroundService
             Status = position.Status,
             EntryPrice = position.EntryPrice,
             Quantity = position.Quantity,
+            Leverage = position.Leverage,
+            InitialMargin = position.InitialMargin,
             UnrealizedPnL = unrealizedPnL,
             RealizedPnL = realizedPnL,
             TotalFundingFeePaid = fundingPaid,
             TotalFundingFeeReceived = fundingReceived,
             OpenedAt = position.OpenedAt,
-            ClosedAt = position.ClosedAt
+            ClosedAt = position.ClosedAt,
+            ExitPrice = position.ExitPrice
         };
     }
 
