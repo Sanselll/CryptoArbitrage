@@ -584,6 +584,7 @@ public class ArbitrageExecutionService
                 RealizedPnL = 0,
                 UnrealizedPnL = 0,
                 OrderId = perpOrderId,
+                ExchangePositionId = request.Symbol, // For perpetual positions, the symbol IS the position identifier on the exchange
                 OpenedAt = DateTime.UtcNow
             };
 
@@ -618,12 +619,12 @@ public class ArbitrageExecutionService
                 "Spot-perpetual arbitrage executed: {Symbol} on {Exchange}, Spot @ ${SpotPrice}, Perp @ ${PerpPrice}, Execution ID: {Id}",
                 request.Symbol, request.Exchange, spotPrice, perpPrice, execution.Id);
 
-            // CRITICAL: Immediately broadcast fresh positions to user to update UI instantly
+            // CRITICAL: Immediately broadcast fresh OPEN positions to user to update UI instantly
             var userId = _currentUser.UserId;
             if (!string.IsNullOrEmpty(userId))
             {
                 var freshPositions = await _dbContext.Positions
-                    .Where(p => p.UserId == userId)
+                    .Where(p => p.UserId == userId && p.Status == PositionStatus.Open)
                     .ToListAsync();
 
                 var positionDtos = freshPositions.Select(p => new PositionDto
@@ -984,6 +985,7 @@ public class ArbitrageExecutionService
                 RealizedPnL = 0,
                 UnrealizedPnL = 0,
                 OrderId = longOrderId,
+                ExchangePositionId = isSpotFutures ? null : request.Symbol, // Only perpetual positions have exchange position IDs
                 OpenedAt = DateTime.UtcNow
             };
 
@@ -1003,6 +1005,7 @@ public class ArbitrageExecutionService
                 RealizedPnL = 0,
                 UnrealizedPnL = 0,
                 OrderId = shortOrderId,
+                ExchangePositionId = request.Symbol, // For perpetual positions, the symbol IS the position identifier
                 OpenedAt = DateTime.UtcNow
             };
 
@@ -1020,12 +1023,12 @@ public class ArbitrageExecutionService
                 "Cross-exchange arbitrage executed: {Symbol} LONG on {LongExchange} @ ${LongPrice}, SHORT on {ShortExchange} @ ${ShortPrice}, Execution ID: {Id}",
                 request.Symbol, request.LongExchange, longPrice, request.ShortExchange, shortPrice, execution.Id);
 
-            // CRITICAL: Immediately broadcast fresh positions to user to update UI instantly
+            // CRITICAL: Immediately broadcast fresh OPEN positions to user to update UI instantly
             var userId = _currentUser.UserId;
             if (!string.IsNullOrEmpty(userId))
             {
                 var freshPositions = await _dbContext.Positions
-                    .Where(p => p.UserId == userId)
+                    .Where(p => p.UserId == userId && p.Status == PositionStatus.Open)
                     .ToListAsync();
 
                 var positionDtos = freshPositions.Select(p => new PositionDto
@@ -1296,29 +1299,29 @@ public class ArbitrageExecutionService
                 ExecutionState.Running,
                 ExecutionState.Stopped);
 
-            // DELETE related Position records (no need to keep closed positions in database)
+            // Update Position records to mark them as closed (keep them for history)
             var positions = await _dbContext.Positions
                 .Where(p => p.ExecutionId == execution.Id && p.Status == PositionStatus.Open)
                 .ToListAsync();
 
-            _dbContext.Positions.RemoveRange(positions);
+            foreach (var position in positions)
+            {
+                position.Status = PositionStatus.Closed;
+                position.ClosedAt = DateTime.UtcNow;
+                // ExitPrice will be set if available from the exchange
+            }
+
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Execution {Id} stopped successfully, deleted {Count} positions, deleting execution record",
+            _logger.LogInformation("Execution {Id} stopped successfully, marked {Count} positions as closed",
                 execution.Id, positions.Count);
 
-            // DELETE the Execution record (don't keep stopped records)
-            _dbContext.Executions.Remove(execution);
-            await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation("Deleted Execution {Id} from database", execution.Id);
-
-            // CRITICAL: Immediately broadcast fresh positions to user to update UI instantly
+            // CRITICAL: Immediately broadcast fresh OPEN positions to user to update UI instantly
             var userId = _currentUser.UserId;
             if (!string.IsNullOrEmpty(userId))
             {
                 var freshPositions = await _dbContext.Positions
-                    .Where(p => p.UserId == userId)
+                    .Where(p => p.UserId == userId && p.Status == PositionStatus.Open)
                     .ToListAsync();
 
                 var positionDtos = freshPositions.Select(p => new PositionDto
@@ -1448,18 +1451,18 @@ public class ArbitrageExecutionService
             ExecutionState.Running,
             ExecutionState.Stopped);
 
-        // DELETE all position records (no need to keep closed positions in database)
-        _dbContext.Positions.RemoveRange(positions);
+        // Update Position records to mark them as closed (keep them for history)
+        foreach (var position in positions)
+        {
+            position.Status = PositionStatus.Closed;
+            position.ClosedAt = DateTime.UtcNow;
+            // ExitPrice will be set if available from the exchange
+        }
+
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("Cross-exchange execution {Id} stopped successfully, deleted {Count} positions on {Exchanges}",
+        _logger.LogInformation("Cross-exchange execution {Id} stopped successfully, marked {Count} positions as closed on {Exchanges}",
             execution.Id, positions.Count, string.Join(", ", closedExchanges));
-
-        // DELETE the Execution record (don't keep stopped records)
-        _dbContext.Executions.Remove(execution);
-        await _dbContext.SaveChangesAsync();
-
-        _logger.LogInformation("Deleted Execution {Id} from database", execution.Id);
 
         // CRITICAL: Immediately broadcast fresh positions to user to update UI instantly
         var userId = _currentUser.UserId;
