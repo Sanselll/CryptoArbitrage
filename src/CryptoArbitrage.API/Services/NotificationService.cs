@@ -2,7 +2,9 @@ using CryptoArbitrage.API.Data;
 using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using System.Collections.Concurrent;
 
 namespace CryptoArbitrage.API.Services;
 
@@ -12,21 +14,27 @@ public class NotificationService : INotificationService
     private readonly ISignalRStreamingService _signalRService;
     private readonly ILogger<NotificationService> _logger;
     private readonly NotificationSettings _settings;
+    private readonly IMemoryCache _cache;
+    private const string CACHE_KEY_PREFIX_FUNDING = "funding_";
+    private const string CACHE_KEY_PREFIX_NOTIFICATION_COOLDOWN = "notification_cooldown_";
 
-    // Track which executions have already triggered negative funding notifications to avoid spam
-    private readonly Dictionary<int, DateTime> _negativeFundingNotificationsSent = new();
     private readonly TimeSpan _notificationCooldown = TimeSpan.FromMinutes(15); // Don't spam same notification
+
+    // Static dictionary to ensure singleton locks per execution ID across all service instances
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> _executionLocks = new();
 
     public NotificationService(
         ArbitrageDbContext context,
         ISignalRStreamingService signalRService,
         ILogger<NotificationService> logger,
-        IOptions<NotificationSettings> settings)
+        IOptions<NotificationSettings> settings,
+        IMemoryCache cache)
     {
         _context = context;
         _signalRService = signalRService;
         _logger = logger;
         _settings = settings.Value;
+        _cache = cache;
     }
 
     public async Task CheckNegativeFundingForUserAsync(string userId)
@@ -48,55 +56,145 @@ public class NotificationService : INotificationService
                 if (!positions.Any())
                     continue;
 
-                // Calculate net funding fee (TotalReceived - TotalPaid)
-                var netFunding = positions.Sum(p => p.NetFundingFee);
+                // Calculate historical net funding fee (TotalReceived - TotalPaid)
+                var historicalNetFunding = positions.Sum(p => p.NetFundingFee);
 
-                // If negative funding and not recently notified, send alert
-                if (netFunding < 0)
+                // Calculate estimated funding for next settlement
+                decimal estimatedFunding = 0;
+
+                // Determine strategy type based on positions
+                var perpPositions = positions.Where(p => p.Type == PositionType.Perpetual).ToList();
+                var spotPositions = positions.Where(p => p.Type == PositionType.Spot).ToList();
+
+                if (perpPositions.Count == 2)
                 {
-                    // Check cooldown
-                    if (_negativeFundingNotificationsSent.TryGetValue(execution.Id, out var lastNotification))
+                    // Cross-Fut: Two perpetual positions (long and short)
+                    var longPerp = perpPositions.FirstOrDefault(p => p.Side == PositionSide.Long);
+                    var shortPerp = perpPositions.FirstOrDefault(p => p.Side == PositionSide.Short);
+
+                    if (longPerp != null && shortPerp != null)
                     {
-                        if (DateTime.UtcNow - lastNotification < _notificationCooldown)
-                            continue; // Skip, too soon since last notification
+                        // Get funding rates from cache
+                        var longCacheKey = $"{CACHE_KEY_PREFIX_FUNDING}{longPerp.Exchange}:{execution.Symbol}";
+                        var shortCacheKey = $"{CACHE_KEY_PREFIX_FUNDING}{shortPerp.Exchange}:{execution.Symbol}";
+
+                        decimal longRate = 0;
+                        decimal shortRate = 0;
+
+                        if (_cache.TryGetValue<FundingRateCacheEntry>(longCacheKey, out var longEntry))
+                        {
+                            longRate = longEntry.CurrentRate.Rate;
+                        }
+
+                        if (_cache.TryGetValue<FundingRateCacheEntry>(shortCacheKey, out var shortEntry))
+                        {
+                            shortRate = shortEntry.CurrentRate.Rate;
+                        }
+
+                        var longValue = longPerp.Quantity * longPerp.EntryPrice;
+                        var shortValue = shortPerp.Quantity * shortPerp.EntryPrice;
+
+                        // Long: negative rate = receive (positive), positive rate = pay (negative)
+                        // Short: negative rate = pay (negative), positive rate = receive (positive)
+                        estimatedFunding = -longRate * longValue + shortRate * shortValue;
+                    }
+                }
+                else if (perpPositions.Count == 1)
+                {
+                    // Spot-Perp or Cross-Spot: One perpetual position
+                    var perpPosition = perpPositions.First();
+
+                    // Get funding rate from cache
+                    var cacheKey = $"{CACHE_KEY_PREFIX_FUNDING}{execution.Exchange}:{execution.Symbol}";
+                    decimal rate = 0;
+
+                    if (_cache.TryGetValue<FundingRateCacheEntry>(cacheKey, out var entry))
+                    {
+                        rate = entry.CurrentRate.Rate;
                     }
 
-                    // Create notification
-                    var notification = new NotificationDto
+                    var perpValue = perpPosition.Quantity * perpPosition.EntryPrice;
+                    var perpSide = perpPosition.Side;
+
+                    // Long: negative rate = receive (positive), positive rate = pay (negative)
+                    // Short: negative rate = pay (negative), positive rate = receive (positive)
+                    estimatedFunding = rate * perpValue * (perpSide == PositionSide.Long ? -1 : 1);
+                }
+
+                // Total funding P&L = historical + estimated
+                var totalFundingPnL = historicalNetFunding + estimatedFunding;
+
+                // If negative funding P&L and not recently notified, send alert
+                if (totalFundingPnL < 0)
+                {
+                    // Get or create a singleton lock for this execution ID
+                    var lockObj = _executionLocks.GetOrAdd(execution.Id, _ => new SemaphoreSlim(1, 1));
+
+                    await lockObj.WaitAsync();
+                    try
                     {
-                        Type = NotificationType.NegativeFunding,
-                        Severity = NotificationSeverity.Warning,
-                        Title = "Execution Losing Money on Funding",
-                        Message = $"{execution.Symbol} on {execution.Exchange}: Net funding ${netFunding:F2} (negative). Positions are paying more in funding fees than receiving.",
-                        Data = new
+                        // Check cooldown using cache (double-checked locking pattern)
+                        var cooldownCacheKey = $"{CACHE_KEY_PREFIX_NOTIFICATION_COOLDOWN}{execution.Id}";
+                        if (_cache.TryGetValue<DateTime>(cooldownCacheKey, out var lastNotification))
                         {
-                            executionId = execution.Id,
-                            symbol = execution.Symbol,
-                            exchange = execution.Exchange,
-                            netFunding = netFunding,
-                            positionsCount = positions.Count
-                        },
-                        AutoClose = false, // Persistent notification for critical issue
-                        AutoCloseDelay = null
-                    };
+                            if (DateTime.UtcNow - lastNotification < _notificationCooldown)
+                            {
+                                continue; // Skip, too soon since last notification
+                            }
+                        }
 
-                    await _signalRService.SendNotificationAsync(userId, notification);
-                    _negativeFundingNotificationsSent[execution.Id] = DateTime.UtcNow;
+                        // Set cooldown BEFORE sending notification (atomic check-and-set)
+                        var now = DateTime.UtcNow;
+                        _cache.Set(cooldownCacheKey, now, _notificationCooldown);
 
-                    _logger.LogInformation(
-                        "Sent negative funding notification for execution {ExecutionId} ({Symbol} on {Exchange}): {NetFunding}",
-                        execution.Id, execution.Symbol, execution.Exchange, netFunding);
+                        // Create notification
+                        var notification = new NotificationDto
+                        {
+                            Type = NotificationType.NegativeFunding,
+                            Severity = NotificationSeverity.Warning,
+                            Title = "Execution Losing Money on Funding",
+                            Message = $"{execution.Symbol} on {execution.Exchange}: Fund P&L ${totalFundingPnL:F2} (negative). Historical: ${historicalNetFunding:F2}, Estimated: ${estimatedFunding:F2}.",
+                            Data = new
+                            {
+                                executionId = execution.Id,
+                                symbol = execution.Symbol,
+                                exchange = execution.Exchange,
+                                totalFundingPnL = totalFundingPnL,
+                                historicalNetFunding = historicalNetFunding,
+                                estimatedFunding = estimatedFunding,
+                                positionsCount = positions.Count
+                            },
+                            AutoClose = false, // Persistent notification for critical issue
+                            AutoCloseDelay = null
+                        };
+
+                        await _signalRService.SendNotificationAsync(userId, notification);
+
+                        _logger.LogInformation(
+                            "Sent negative funding notification: {Symbol} on {Exchange}, Total Fund P&L: {TotalFundingPnL}, Historical: {HistoricalNetFunding}, Estimated: {EstimatedFunding}",
+                            execution.Symbol, execution.Exchange, totalFundingPnL, historicalNetFunding, estimatedFunding);
+                    }
+                    finally
+                    {
+                        lockObj.Release();
+                    }
                 }
                 else
                 {
-                    // If funding is now positive, remove from tracking
-                    _negativeFundingNotificationsSent.Remove(execution.Id);
+                    // If funding is now positive, remove cooldown from cache
+                    var cooldownCacheKey = $"{CACHE_KEY_PREFIX_NOTIFICATION_COOLDOWN}{execution.Id}";
+                    _cache.Remove(cooldownCacheKey);
                 }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error checking negative funding for user {UserId}", userId);
+        }
+        finally
+        {
+            _logger.LogDebug("<<< EXIT CheckNegativeFundingForUserAsync for user {UserId} at {Timestamp}",
+                userId, DateTime.UtcNow.ToString("HH:mm:ss.fff"));
         }
     }
 

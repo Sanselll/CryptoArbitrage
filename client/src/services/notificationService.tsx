@@ -30,6 +30,14 @@ class NotificationService {
    * Show a notification using react-toastify
    */
   showNotification(notification: Notification) {
+    console.log('[NotificationService] showNotification called:', {
+      id: notification.id,
+      type: notification.type,
+      severity: notification.severity,
+      title: notification.title,
+      timestamp: new Date().toISOString()
+    });
+
     const options: ToastOptions = {
       autoClose: notification.autoClose ? (notification.autoCloseDelay || 5000) : false,
       closeButton: true,

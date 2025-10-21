@@ -247,12 +247,14 @@ export const PositionsGrid = () => {
                 <TableHead>Side</TableHead>
                 <TableHead className="text-right">Entry</TableHead>
                 <TableHead className="text-right">Size</TableHead>
-                <TableHead className="text-right">Size (USDT)</TableHead>
+                <TableHead className="text-right">Value</TableHead>
                 <TableHead className="text-right">Lev</TableHead>
-                <TableHead className="text-right">Unrealized P&L</TableHead>
-                <TableHead className="text-right">Estimated Funding</TableHead>
-                <TableHead className="text-right">Est. Total P&L</TableHead>
-                <TableHead className="text-right">Duration</TableHead>
+                <TableHead className="text-right">Position P&L</TableHead>
+                <TableHead className="text-right">Est. Fund</TableHead>
+                <TableHead className="text-right">P&L</TableHead>
+                <TableHead className="text-right">Fund P&L</TableHead>
+                <TableHead className="text-right">Total P&L</TableHead>
+                <TableHead className="text-right">Time</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -284,8 +286,8 @@ export const PositionsGrid = () => {
                   const shortRate = shortFundingRate ? shortFundingRate.rate : 0;
                   const longValue = longPerpPosition.quantity * longPerpPosition.entryPrice;
                   const shortValue = shortPerpPosition.quantity * shortPerpPosition.entryPrice;
-                  // Long position: we pay if rate is positive, receive if negative
-                  // Short position: we receive if rate is positive, pay if negative
+                  // Long position: negative rate = receive (positive), positive rate = pay (negative)
+                  // Short position: negative rate = pay (negative), positive rate = receive (positive)
                   estimatedFunding = -longRate * longValue + shortRate * shortValue;
                 } else {
                   // For Spot-Perp or Cross-Spot
@@ -294,7 +296,10 @@ export const PositionsGrid = () => {
                   );
                   const fundingRate = currentFundingRate ? currentFundingRate.rate : 0;
                   const perpPositionValue = perpPosition ? perpPosition.quantity * perpPosition.entryPrice : 0;
-                  estimatedFunding = -fundingRate * perpPositionValue; // Negative rate means we receive (positive earnings)
+                  const perpSide = perpPosition ? perpPosition.side : PositionSide.Long;
+                  // Long: negative rate = receive (positive), positive rate = pay (negative)
+                  // Short: negative rate = pay (negative), positive rate = receive (positive)
+                  estimatedFunding = fundingRate * perpPositionValue * (perpSide === PositionSide.Long ? -1 : 1);
                 }
 
                 // Calculate combined P&L for the pair
@@ -325,6 +330,7 @@ export const PositionsGrid = () => {
                   );
                   const longRate = longFundingRate ? longFundingRate.rate : 0;
                   const longValue = longPerpPosition.quantity * longPerpPosition.entryPrice;
+                  // Long: negative rate = receive (positive), positive rate = pay (negative)
                   const longEstimatedFunding = -longRate * longValue;
 
                   const uniqueKey = `cross-fut-${pair.executionId}-${pairIndex}`;
@@ -414,6 +420,30 @@ export const PositionsGrid = () => {
                       <TableCell className="text-right py-1" rowSpan={2}>
                         <span
                           className={`font-mono text-[11px] font-bold ${
+                            combinedUnrealizedPnL >= 0
+                              ? 'text-binance-green'
+                              : 'text-binance-red'
+                          }`}
+                        >
+                          {combinedUnrealizedPnL >= 0 ? '+' : ''}$
+                          {combinedUnrealizedPnL.toFixed(2)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right py-1" rowSpan={2}>
+                        <span
+                          className={`font-mono text-[11px] font-bold ${
+                            (combinedFunding + estimatedFunding) >= 0
+                              ? 'text-binance-green'
+                              : 'text-binance-red'
+                          }`}
+                        >
+                          {(combinedFunding + estimatedFunding) >= 0 ? '+' : ''}$
+                          {(combinedFunding + estimatedFunding).toFixed(2)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right py-1" rowSpan={2}>
+                        <span
+                          className={`font-mono text-[11px] font-bold ${
                             totalPairPnL >= 0
                               ? 'text-binance-green'
                               : 'text-binance-red'
@@ -453,6 +483,7 @@ export const PositionsGrid = () => {
                   );
                   const shortRate = shortFundingRate ? shortFundingRate.rate : 0;
                   const shortValue = shortPerpPosition.quantity * shortPerpPosition.entryPrice;
+                  // Short: negative rate = pay (negative), positive rate = receive (positive)
                   const shortEstimatedFunding = shortRate * shortValue;
 
                   rows.push(
@@ -623,6 +654,30 @@ export const PositionsGrid = () => {
                         >
                           {estimatedFunding >= 0 ? '+' : ''}$
                           {estimatedFunding.toFixed(2)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right py-1" rowSpan={2}>
+                        <span
+                          className={`font-mono text-[11px] font-bold ${
+                            combinedUnrealizedPnL >= 0
+                              ? 'text-binance-green'
+                              : 'text-binance-red'
+                          }`}
+                        >
+                          {combinedUnrealizedPnL >= 0 ? '+' : ''}$
+                          {combinedUnrealizedPnL.toFixed(2)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right py-1" rowSpan={2}>
+                        <span
+                          className={`font-mono text-[11px] font-bold ${
+                            (combinedFunding + estimatedFunding) >= 0
+                              ? 'text-binance-green'
+                              : 'text-binance-red'
+                          }`}
+                        >
+                          {(combinedFunding + estimatedFunding) >= 0 ? '+' : ''}$
+                          {(combinedFunding + estimatedFunding).toFixed(2)}
                         </span>
                       </TableCell>
                       <TableCell className="text-right py-1" rowSpan={2}>
