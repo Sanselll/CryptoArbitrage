@@ -104,6 +104,13 @@ class SignalRService {
     });
 
     this.connection.on('ReceiveNotification', (data: Notification) => {
+      console.log('[SignalR] ReceiveNotification event:', {
+        id: data.id,
+        type: data.type,
+        severity: data.severity,
+        title: data.title,
+        timestamp: new Date().toISOString()
+      });
       notificationService.showNotification(data);
       this.callbacks.onNotification.forEach(cb => cb(data));
     });

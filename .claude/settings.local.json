@@ -60,7 +60,8 @@
       "Bash(curl -s \"https://bybit-exchange.github.io/docs/v5/user/apikey-info\")",
       "Bash(cat .github/workflows/deploy.yml)",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"\\d \"\"Positions\"\"\")",
-      "Bash(dotnet ef migrations add AddExchangePositionIdToPosition)"
+      "Bash(dotnet ef migrations add AddExchangePositionIdToPosition)",
+      "Bash(cat /tmp/crypto-api-demo.log)"
     ],
     "deny": [],
     "ask": []
