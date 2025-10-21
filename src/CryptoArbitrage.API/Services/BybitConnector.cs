@@ -1124,6 +1124,85 @@ public class BybitConnector : IExchangeConnector
         return adjustedQuantity;
     }
 
+    public async Task<List<FundingRateDto>> GetFundingRateHistoryAsync(string symbol, DateTime startTime, DateTime endTime)
+    {
+        if (_restClient == null)
+        {
+            _logger.LogWarning("Cannot get funding rate history for {Exchange} - not connected", ExchangeName);
+            return new List<FundingRateDto>();
+        }
+
+        try
+        {
+            var results = new List<FundingRateDto>();
+            var startTimeMs = new DateTimeOffset(startTime).ToUnixTimeMilliseconds();
+            var endTimeMs = new DateTimeOffset(endTime).ToUnixTimeMilliseconds();
+
+            // Bybit returns max 200 records per request, may need pagination
+            const int limit = 200;
+            var currentStartTime = startTimeMs;
+
+            while (currentStartTime < endTimeMs)
+            {
+                var historicalRates = await _restClient.V5Api.ExchangeData.GetFundingRateHistoryAsync(
+                    Category.Linear,
+                    symbol,
+                    startTime: DateTimeOffset.FromUnixTimeMilliseconds(currentStartTime).DateTime,
+                    endTime: DateTimeOffset.FromUnixTimeMilliseconds(endTimeMs).DateTime,
+                    limit: limit);
+
+                if (!historicalRates.Success || historicalRates.Data?.List == null || !historicalRates.Data.List.Any())
+                {
+                    if (!historicalRates.Success)
+                    {
+                        _logger.LogWarning("Failed to fetch funding rate history for {Symbol} on {Exchange}: {Error}",
+                            symbol, ExchangeName, historicalRates.Error?.Message ?? "Unknown error");
+                    }
+                    break;
+                }
+
+                foreach (var rate in historicalRates.Data.List)
+                {
+                    // Get funding interval hours (Bybit uses 8-hour intervals for most pairs)
+                    var fundingIntervalHours = 8; // Default for linear contracts
+
+                    // Calculate annualized rate
+                    var periodsPerYear = (365.0m * 24.0m) / fundingIntervalHours;
+                    var annualizedRate = rate.FundingRate * periodsPerYear;
+
+                    results.Add(new FundingRateDto
+                    {
+                        Exchange = ExchangeName,
+                        Symbol = rate.Symbol,
+                        Rate = rate.FundingRate,
+                        AnnualizedRate = annualizedRate,
+                        FundingIntervalHours = fundingIntervalHours,
+                        FundingTime = rate.Timestamp,
+                        NextFundingTime = rate.Timestamp.AddHours(fundingIntervalHours),
+                        RecordedAt = DateTime.UtcNow
+                    });
+                }
+
+                // Check if we got less than limit, meaning we've reached the end
+                if (historicalRates.Data.List.Count() < limit)
+                    break;
+
+                // Update start time for next page (use last record's timestamp + 1ms)
+                currentStartTime = new DateTimeOffset(historicalRates.Data.List.Last().Timestamp).ToUnixTimeMilliseconds() + 1;
+            }
+
+            _logger.LogInformation("Fetched {Count} historical funding rates for {Symbol} on {Exchange}",
+                results.Count, symbol, ExchangeName);
+
+            return results.OrderBy(r => r.FundingTime).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching funding rate history for {Symbol} on {Exchange}", symbol, ExchangeName);
+            return new List<FundingRateDto>();
+        }
+    }
+
     /// <summary>
     /// Convert Bybit precision string to decimal count
     /// Examples: "0.000001" → 6, "0.01" → 2, "0.1" → 1, "1" → 0

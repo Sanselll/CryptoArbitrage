@@ -419,11 +419,6 @@ public class BinanceConnector : IExchangeConnector
             {
                 depthUsd += ask.Quantity * ask.Price;
             }
-
-            _logger.LogInformation(
-                "Liquidity metrics for {Symbol} from Binance: Spread={Spread:F3}%, Depth=${Depth:N0}",
-                symbol, bidAskSpread, depthUsd);
-
             return new LiquidityMetricsDto
             {
                 BidAskSpreadPercent = bidAskSpread,
@@ -455,7 +450,6 @@ public class BinanceConnector : IExchangeConnector
         // Try to fetch futures balances
         try
         {
-            _logger.LogInformation("[1/3] Fetching futures balances via UsdFuturesApi.Account.GetBalancesAsync()...");
             var futuresBalances = await _restClient.UsdFuturesApi.Account.GetBalancesAsync();
 
             _logger.LogInformation("Futures API call completed. Success: {Success}", futuresBalances.Success);
@@ -476,12 +470,7 @@ public class BinanceConnector : IExchangeConnector
                     marginUsed = usdtBalance.WalletBalance - usdtBalance.AvailableBalance;
                     unrealizedPnL = usdtBalance.CrossUnrealizedPnl ?? 0;
                     futuresSuccess = true;
-
-                    _logger.LogInformation("✓ Futures balance fetched successfully");
-                    _logger.LogInformation("  Futures Total: ${Total}", futuresTotal);
-                    _logger.LogInformation("  Futures Available: ${Available}", futuresAvailable);
-                    _logger.LogInformation("  Margin Used: ${Margin}", marginUsed);
-                    _logger.LogInformation("  Unrealized P&L: ${PnL}", unrealizedPnL);
+                    
                 }
                 else
                 {
@@ -507,7 +496,6 @@ public class BinanceConnector : IExchangeConnector
         // Try to fetch spot balances
         try
         {
-            _logger.LogInformation("[2/3] Fetching spot balances via GetSpotBalancesAsync()...");
             spotBalances = await GetSpotBalancesAsync();
 
             _logger.LogInformation("✓ Spot balances fetched successfully. Assets count: {Count}", spotBalances.Count);
@@ -515,12 +503,10 @@ public class BinanceConnector : IExchangeConnector
             // Convert spot assets to USD equivalent
             if (spotBalances.Any())
             {
-                _logger.LogInformation("[3/3] Fetching prices via SpotApi.ExchangeData.GetPricesAsync()...");
                 var prices = await _restClient.SpotApi.ExchangeData.GetPricesAsync();
 
                 if (prices.Success && prices.Data != null)
                 {
-                    _logger.LogInformation("✓ Prices fetched successfully");
 
                     foreach (var asset in spotBalances)
                     {
@@ -544,9 +530,6 @@ public class BinanceConnector : IExchangeConnector
                             }
                         }
                     }
-
-                    _logger.LogInformation("  Spot Total USD: ${Total}", spotTotalUsd);
-                    _logger.LogInformation("  Spot Available USD: ${Available}", spotAvailableUsd);
                     spotSuccess = true;
                 }
                 else
@@ -599,11 +582,7 @@ public class BinanceConnector : IExchangeConnector
             UnrealizedPnL = unrealizedPnL,
             UpdatedAt = DateTime.UtcNow
         };
-
-        _logger.LogInformation("✓ Returning balance data:");
-        _logger.LogInformation("  Total Balance: ${Total}", result.TotalBalance);
-        _logger.LogInformation("  Available Balance: ${Available}", result.AvailableBalance);
-        _logger.LogInformation("=================================");
+        
 
         return result;
     }
@@ -1112,6 +1091,80 @@ public class BinanceConnector : IExchangeConnector
     }
 
     // Validate and adjust quantity to meet exchange requirements
+    public async Task<List<FundingRateDto>> GetFundingRateHistoryAsync(string symbol, DateTime startTime, DateTime endTime)
+    {
+        if (_restClient == null)
+        {
+            _logger.LogWarning("Cannot get funding rate history for {Exchange} - not connected", ExchangeName);
+            return new List<FundingRateDto>();
+        }
+
+        try
+        {
+            var results = new List<FundingRateDto>();
+            var currentStartTime = startTime;
+            const int limit = 1000; // Binance allows up to 1000 records per request
+
+            while (currentStartTime < endTime)
+            {
+                var historicalRates = await _restClient.UsdFuturesApi.ExchangeData.GetFundingRatesAsync(
+                    symbol,
+                    startTime: currentStartTime,
+                    endTime: endTime,
+                    limit: limit);
+
+                if (!historicalRates.Success || historicalRates.Data == null || !historicalRates.Data.Any())
+                {
+                    if (!historicalRates.Success)
+                    {
+                        _logger.LogWarning("Failed to fetch funding rate history for {Symbol} on {Exchange}: {Error}",
+                            symbol, ExchangeName, historicalRates.Error?.Message ?? "Unknown error");
+                    }
+                    break;
+                }
+
+                foreach (var rate in historicalRates.Data)
+                {
+                    // Binance uses 8-hour intervals for most pairs
+                    var fundingIntervalHours = 8;
+
+                    // Calculate annualized rate
+                    var periodsPerYear = (365.0m * 24.0m) / fundingIntervalHours;
+                    var annualizedRate = rate.FundingRate * periodsPerYear;
+
+                    results.Add(new FundingRateDto
+                    {
+                        Exchange = ExchangeName,
+                        Symbol = rate.Symbol,
+                        Rate = rate.FundingRate,
+                        AnnualizedRate = annualizedRate,
+                        FundingIntervalHours = fundingIntervalHours,
+                        FundingTime = rate.FundingTime,
+                        NextFundingTime = rate.FundingTime.AddHours(fundingIntervalHours),
+                        RecordedAt = DateTime.UtcNow
+                    });
+                }
+
+                // Check if we got less than limit, meaning we've reached the end
+                if (historicalRates.Data.Count() < limit)
+                    break;
+
+                // Update start time for next page (use last record's time + 1 second to avoid duplicates)
+                currentStartTime = historicalRates.Data.Last().FundingTime.AddSeconds(1);
+            }
+
+            _logger.LogInformation("Fetched {Count} historical funding rates for {Symbol} on {Exchange}",
+                results.Count, symbol, ExchangeName);
+
+            return results.OrderBy(r => r.FundingTime).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching funding rate history for {Symbol} on {Exchange}", symbol, ExchangeName);
+            return new List<FundingRateDto>();
+        }
+    }
+
     public decimal ValidateAndAdjustQuantity(decimal quantity, InstrumentInfo instrumentInfo)
     {
         if (instrumentInfo == null)

@@ -61,7 +61,15 @@
       "Bash(cat .github/workflows/deploy.yml)",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"\\d \"\"Positions\"\"\")",
       "Bash(dotnet ef migrations add AddExchangePositionIdToPosition)",
-      "Bash(cat /tmp/crypto-api-demo.log)"
+      "Bash(cat /tmp/crypto-api-demo.log)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/JKorf/Bybit.Net/main/ByBit.Net/Objects/Models/V5/BybitFundingHistory.cs\")",
+      "Bash(lsof -i :5052 -i :5053)",
+      "Bash(curl -s http://localhost:5052/api/dashboard)",
+      "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=GRASSUSDT&limit=10\")",
+      "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=SUSDT&limit=10\")",
+      "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=PNUTUSDT&limit=10\")",
+      "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=ALICEUSDT&limit=10\")",
+      "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=BUSDT&limit=10\")"
     ],
     "deny": [],
     "ask": []

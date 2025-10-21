@@ -29,4 +29,5 @@ public interface IExchangeConnector
     Task<decimal> GetSpotBalanceAsync(string asset);
 
     Task SubscribeToFundingRatesAsync(Action<FundingRateDto> onUpdate);
+    Task<List<FundingRateDto>> GetFundingRateHistoryAsync(string symbol, DateTime startTime, DateTime endTime);
 }
