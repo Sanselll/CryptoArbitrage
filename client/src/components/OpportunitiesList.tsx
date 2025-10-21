@@ -359,7 +359,7 @@ export const OpportunitiesList = () => {
           </div>
         </CardHeader>
 
-      <CardContent className="flex-1 overflow-y-auto p-0">
+      <CardContent className="flex-1 overflow-x-auto overflow-y-auto p-0">
         {activeOpportunities.length === 0 ? (
           <EmptyState
             icon={<Target className="w-12 h-12" />}
@@ -368,9 +368,9 @@ export const OpportunitiesList = () => {
           />
         ) : (
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 z-30">
               <TableRow hover={false}>
-                <TableHead>Symbol</TableHead>
+                <TableHead className="sticky left-0 z-40 bg-binance-bg-secondary border-r border-binance-border">Symbol</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Exchange</TableHead>
                 <TableHead>Side</TableHead>
@@ -382,7 +382,7 @@ export const OpportunitiesList = () => {
                 <TableHead className="text-right">Spread</TableHead>
                 <TableHead className="text-right">8h Profit</TableHead>
                 <TableHead className="text-right">APR</TableHead>
-                <TableHead className="text-right">Action</TableHead>
+                <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -465,7 +465,7 @@ export const OpportunitiesList = () => {
                     onMouseEnter={() => setHoveredRow(uniqueKey)}
                     onMouseLeave={() => setHoveredRow(null)}
                   >
-                    <TableCell className="font-bold text-xs py-1" rowSpan={2}>{opp.symbol}</TableCell>
+                    <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{opp.symbol}</TableCell>
                     <TableCell rowSpan={2} className="py-1">
                       <Badge
                         size="sm"
@@ -560,7 +560,7 @@ export const OpportunitiesList = () => {
                         </span>
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right py-1" rowSpan={2}>
+                    <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                       {findMatchingPositions(opp).length > 0 ? (
                         <Badge
                           variant="success"

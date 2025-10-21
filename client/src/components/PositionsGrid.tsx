@@ -229,7 +229,7 @@ export const PositionsGrid = () => {
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1 overflow-y-auto p-0 min-h-0">
+      <CardContent className="flex-1 overflow-x-auto overflow-y-auto p-0 min-h-0">
         {openPositions.length === 0 ? (
           <EmptyState
             icon={<Layers className="w-12 h-12" />}
@@ -238,9 +238,9 @@ export const PositionsGrid = () => {
           />
         ) : (
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 z-30">
               <TableRow hover={false}>
-                <TableHead>Symbol</TableHead>
+                <TableHead className="sticky left-0 z-40 bg-binance-bg-secondary border-r border-binance-border">Symbol</TableHead>
                 <TableHead>Strategy</TableHead>
                 <TableHead>Exchange</TableHead>
                 <TableHead>Type</TableHead>
@@ -255,7 +255,7 @@ export const PositionsGrid = () => {
                 <TableHead className="text-right">Fund P&L</TableHead>
                 <TableHead className="text-right">Total P&L</TableHead>
                 <TableHead className="text-right">Time</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -339,12 +339,12 @@ export const PositionsGrid = () => {
                   rows.push(
                     <TableRow
                       key={`long-perp-${longPerpPosition.id}-${pairIndex}`}
-                      className={`border-b-0 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                      className={`border-b-0 ${isHovered ? 'bg-[#2b3139]' : ''}`}
                       hover={false}
                       onMouseEnter={() => setHoveredRow(uniqueKey)}
                       onMouseLeave={() => setHoveredRow(null)}
                     >
-                      <TableCell className="font-bold text-xs py-1" rowSpan={2}>{pair.symbol}</TableCell>
+                      <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{pair.symbol}</TableCell>
                       <TableCell rowSpan={2} className="py-1">
                         <Badge
                           size="sm"
@@ -458,7 +458,7 @@ export const PositionsGrid = () => {
                           {pair.executionId ? executionTimes[pair.executionId] || '--' : '--'}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                         <Button
                           variant="danger"
                           size="sm"
@@ -489,7 +489,7 @@ export const PositionsGrid = () => {
                   rows.push(
                     <TableRow
                       key={`short-perp-${shortPerpPosition.id}-${pairIndex}`}
-                      className={`border-t border-binance-border/30 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                      className={`border-t border-binance-border/30 ${isHovered ? 'bg-[#2b3139]' : ''}`}
                       hover={false}
                       onMouseEnter={() => setHoveredRow(uniqueKey)}
                       onMouseLeave={() => setHoveredRow(null)}
@@ -574,12 +574,12 @@ export const PositionsGrid = () => {
                   rows.push(
                     <TableRow
                       key={`perp-${perpPosition.id}-${pairIndex}`}
-                      className={`border-b-0 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                      className={`border-b-0 ${isHovered ? 'bg-[#2b3139]' : ''}`}
                       hover={false}
                       onMouseEnter={() => setHoveredRow(uniqueKey)}
                       onMouseLeave={() => setHoveredRow(null)}
                     >
-                      <TableCell className="font-bold text-xs py-1" rowSpan={2}>{pair.symbol}</TableCell>
+                      <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{pair.symbol}</TableCell>
                       <TableCell rowSpan={2} className="py-1">
                         <Badge
                           size="sm"
@@ -697,7 +697,7 @@ export const PositionsGrid = () => {
                           {pair.executionId ? executionTimes[pair.executionId] || '--' : '--'}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                         <Button
                           variant="danger"
                           size="sm"
@@ -725,7 +725,7 @@ export const PositionsGrid = () => {
                   rows.push(
                     <TableRow
                       key={`spot-${spotPosition.id}-${pairIndex}`}
-                      className={`border-t border-binance-border/30 ${isHovered ? 'bg-[rgba(43,49,57,0.4)]' : ''}`}
+                      className={`border-t border-binance-border/30 ${isHovered ? 'bg-[#2b3139]' : ''}`}
                       hover={false}
                       onMouseEnter={() => setHoveredRow(uniqueKey)}
                       onMouseLeave={() => setHoveredRow(null)}
