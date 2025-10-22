@@ -29,21 +29,21 @@ const getOrderTypeLabel = (type: OrderType): string => {
 const getOrderStatusBadge = (status: OrderStatus) => {
   switch (status) {
     case OrderStatus.New:
-      return <Badge variant="blue" size="sm" className="text-[10px]">New</Badge>;
+      return <Badge variant="info" size="sm" className="text-[10px]">New</Badge>;
     case OrderStatus.PartiallyFilled:
-      return <Badge variant="yellow" size="sm" className="text-[10px]">Partially Filled</Badge>;
+      return <Badge variant="warning" size="sm" className="text-[10px]">Partially Filled</Badge>;
     case OrderStatus.Filled:
-      return <Badge variant="green" size="sm" className="text-[10px]">Filled</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Filled</Badge>;
     case OrderStatus.Canceled:
-      return <Badge variant="gray" size="sm" className="text-[10px]">Canceled</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">Canceled</Badge>;
     case OrderStatus.PendingCancel:
-      return <Badge variant="yellow" size="sm" className="text-[10px]">Pending Cancel</Badge>;
+      return <Badge variant="warning" size="sm" className="text-[10px]">Pending Cancel</Badge>;
     case OrderStatus.Rejected:
-      return <Badge variant="red" size="sm" className="text-[10px]">Rejected</Badge>;
+      return <Badge variant="danger" size="sm" className="text-[10px]">Rejected</Badge>;
     case OrderStatus.Expired:
-      return <Badge variant="gray" size="sm" className="text-[10px]">Expired</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">Expired</Badge>;
     default:
-      return <Badge variant="gray" size="sm" className="text-[10px]">Unknown</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">Unknown</Badge>;
   }
 };
 

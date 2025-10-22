@@ -21,17 +21,26 @@ public class ArbitrageHub : Hub
     private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
     private readonly IDataRepository<UserDataSnapshot> _userDataRepository;
     private readonly IDataRepository<ArbitrageOpportunityDto> _opportunityRepository;
+    private readonly IDataRepository<List<OrderDto>> _orderRepository;
+    private readonly IDataRepository<List<TradeDto>> _tradeRepository;
+    private readonly IDataRepository<List<TransactionDto>> _transactionRepository;
 
     public ArbitrageHub(
         ILogger<ArbitrageHub> logger,
         IDataRepository<FundingRateDto> fundingRateRepository,
         IDataRepository<UserDataSnapshot> userDataRepository,
-        IDataRepository<ArbitrageOpportunityDto> opportunityRepository)
+        IDataRepository<ArbitrageOpportunityDto> opportunityRepository,
+        IDataRepository<List<OrderDto>> orderRepository,
+        IDataRepository<List<TradeDto>> tradeRepository,
+        IDataRepository<List<TransactionDto>> transactionRepository)
     {
         _logger = logger;
         _fundingRateRepository = fundingRateRepository;
         _userDataRepository = userDataRepository;
         _opportunityRepository = opportunityRepository;
+        _orderRepository = orderRepository;
+        _tradeRepository = tradeRepository;
+        _transactionRepository = transactionRepository;
     }
 
     /// <summary>
@@ -54,19 +63,9 @@ public class ArbitrageHub : Hub
 
         // Add connection to user-specific group
         await Groups.AddToGroupAsync(Context.ConnectionId, $"user_{userId}");
-        
-        // Broadcast initial cached data in background to avoid blocking connection
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await BroadcastInitialDataAsync(userId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in background broadcast for user {UserId}", userId);
-            }
-        });
+
+        // Broadcast initial cached data immediately (don't use Task.Run - Hub will be disposed)
+        await BroadcastInitialDataAsync(userId);
 
         await base.OnConnectedAsync();
     }
@@ -78,10 +77,28 @@ public class ArbitrageHub : Hub
     {
         try
         {
+            var startTime = DateTime.UtcNow;
             _logger.LogDebug("Broadcasting initial cached data to user {UserId}", userId);
 
-            // Broadcast cached funding rates (global data)
-            var fundingRatesDict = await _fundingRateRepository.GetByPatternAsync("funding:*");
+            // Fetch all data in parallel for better performance
+            var fundingRatesTask = _fundingRateRepository.GetByPatternAsync("funding:*");
+            var userDataTask = _userDataRepository.GetByPatternAsync($"user:{userId}:*");
+            var opportunitiesTask = _opportunityRepository.GetByPatternAsync("opportunity:*");
+            var openOrdersTask = _orderRepository.GetByPatternAsync($"openorders:{userId}:*");
+            var orderHistoryTask = _orderRepository.GetByPatternAsync($"orderhistory:{userId}:*");
+            var tradeHistoryTask = _tradeRepository.GetByPatternAsync($"tradehistory:{userId}:*");
+            var transactionHistoryTask = _transactionRepository.GetByPatternAsync($"transactionhistory:{userId}:*");
+
+            await Task.WhenAll(
+                fundingRatesTask, userDataTask, opportunitiesTask,
+                openOrdersTask, orderHistoryTask, tradeHistoryTask, transactionHistoryTask
+            );
+
+            var fetchTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            _logger.LogDebug("Fetched all cached data in {Milliseconds}ms for user {UserId}", fetchTime, userId);
+
+            // Broadcast funding rates
+            var fundingRatesDict = await fundingRatesTask;
             if (fundingRatesDict.Any())
             {
                 var fundingRates = fundingRatesDict.Values.ToList();
@@ -89,13 +106,12 @@ public class ArbitrageHub : Hub
                 _logger.LogDebug("Sent {Count} cached funding rates to user {UserId}", fundingRates.Count, userId);
             }
 
-            // Broadcast cached user data (user-specific)
-            var userDataDict = await _userDataRepository.GetByPatternAsync($"user:{userId}:*");
+            // Broadcast user data (balances and positions)
+            var userDataDict = await userDataTask;
             if (userDataDict.Any())
             {
                 var userSnapshots = userDataDict.Values.ToList();
 
-                // Extract and send balances
                 var balances = userSnapshots
                     .Where(s => s.Balance != null)
                     .Select(s => s.Balance!)
@@ -107,7 +123,6 @@ public class ArbitrageHub : Hub
                     _logger.LogDebug("Sent {Count} cached balances to user {UserId}", balances.Count, userId);
                 }
 
-                // Extract and send positions
                 var positions = userSnapshots
                     .SelectMany(s => s.Positions)
                     .ToList();
@@ -119,8 +134,8 @@ public class ArbitrageHub : Hub
                 }
             }
 
-            // Broadcast cached opportunities (global or user-specific)
-            var opportunitiesDict = await _opportunityRepository.GetByPatternAsync("opportunity:*");
+            // Broadcast opportunities
+            var opportunitiesDict = await opportunitiesTask;
             if (opportunitiesDict.Any())
             {
                 var opportunities = opportunitiesDict.Values.ToList();
@@ -128,7 +143,44 @@ public class ArbitrageHub : Hub
                 _logger.LogDebug("Sent {Count} cached opportunities to user {UserId}", opportunities.Count, userId);
             }
 
-            _logger.LogInformation("Initial data broadcast completed for user {UserId}", userId);
+            // Broadcast open orders
+            var openOrdersDict = await openOrdersTask;
+            if (openOrdersDict.Any())
+            {
+                var openOrders = openOrdersDict.Values.SelectMany(list => list).ToList();
+                await Clients.Caller.SendAsync("ReceiveOpenOrders", openOrders);
+                _logger.LogDebug("Sent {Count} cached open orders to user {UserId}", openOrders.Count, userId);
+            }
+
+            // Broadcast order history
+            var orderHistoryDict = await orderHistoryTask;
+            if (orderHistoryDict.Any())
+            {
+                var orderHistory = orderHistoryDict.Values.SelectMany(list => list).ToList();
+                await Clients.Caller.SendAsync("ReceiveOrderHistory", orderHistory);
+                _logger.LogDebug("Sent {Count} cached order history to user {UserId}", orderHistory.Count, userId);
+            }
+
+            // Broadcast trade history
+            var tradeHistoryDict = await tradeHistoryTask;
+            if (tradeHistoryDict.Any())
+            {
+                var tradeHistory = tradeHistoryDict.Values.SelectMany(list => list).ToList();
+                await Clients.Caller.SendAsync("ReceiveTradeHistory", tradeHistory);
+                _logger.LogDebug("Sent {Count} cached trade history to user {UserId}", tradeHistory.Count, userId);
+            }
+
+            // Broadcast transaction history
+            var transactionHistoryDict = await transactionHistoryTask;
+            if (transactionHistoryDict.Any())
+            {
+                var transactionHistory = transactionHistoryDict.Values.SelectMany(list => list).ToList();
+                await Clients.Caller.SendAsync("ReceiveTransactionHistory", transactionHistory);
+                _logger.LogDebug("Sent {Count} cached transaction history to user {UserId}", transactionHistory.Count, userId);
+            }
+
+            var totalTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            _logger.LogInformation("Initial data broadcast completed in {Milliseconds}ms for user {UserId}", totalTime, userId);
         }
         catch (Exception ex)
         {

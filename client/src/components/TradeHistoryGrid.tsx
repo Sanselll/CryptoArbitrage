@@ -136,9 +136,9 @@ export const TradeHistoryGrid = () => {
               </TableCell>
               <TableCell>
                 {trade.role === TradeRole.Maker ? (
-                  <Badge variant="blue" size="sm" className="text-[10px]">Maker</Badge>
+                  <Badge variant="info" size="sm" className="text-[10px]">Maker</Badge>
                 ) : (
-                  <Badge variant="gray" size="sm" className="text-[10px]">Taker</Badge>
+                  <Badge variant="secondary" size="sm" className="text-[10px]">Taker</Badge>
                 )}
               </TableCell>
               <TableCell className="text-right font-mono">
