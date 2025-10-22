@@ -142,4 +142,68 @@ public class SignalRStreamingService : ISignalRStreamingService
             _logger.LogError(ex, "Error sending notification to user {UserId}", userId);
         }
     }
+
+    /// <summary>
+    /// Broadcast open orders to a specific user
+    /// </summary>
+    public async Task BroadcastOpenOrdersToUserAsync(string userId, List<OrderDto> orders, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveOpenOrders", orders, cancellationToken);
+            _logger.LogDebug("Broadcasted {Count} open orders to user {UserId}", orders.Count, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting open orders to user {UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// Broadcast order history to a specific user
+    /// </summary>
+    public async Task BroadcastOrderHistoryToUserAsync(string userId, List<OrderDto> orders, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveOrderHistory", orders, cancellationToken);
+            _logger.LogDebug("Broadcasted {Count} historical orders to user {UserId}", orders.Count, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting order history to user {UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// Broadcast trade history to a specific user
+    /// </summary>
+    public async Task BroadcastTradeHistoryToUserAsync(string userId, List<TradeDto> trades, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveTradeHistory", trades, cancellationToken);
+            _logger.LogDebug("Broadcasted {Count} trades to user {UserId}", trades.Count, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting trade history to user {UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// Broadcast transaction history to a specific user
+    /// </summary>
+    public async Task BroadcastTransactionHistoryToUserAsync(string userId, List<TransactionDto> transactions, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveTransactionHistory", transactions, cancellationToken);
+            _logger.LogDebug("Broadcasted {Count} transactions to user {UserId}", transactions.Count, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting transaction history to user {UserId}", userId);
+        }
+    }
 }

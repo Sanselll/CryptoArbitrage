@@ -19,7 +19,6 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
     private readonly ILogger<UserDataCollector> _logger;
     private readonly IDataRepository<UserDataSnapshot> _repository;
     private readonly UserDataCollectorConfiguration _configuration;
-    private readonly ArbitrageDbContext _dbContext;
     private readonly IServiceProvider _serviceProvider;
 
     public UserDataCollectorConfiguration Configuration => _configuration;
@@ -30,13 +29,11 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
         ILogger<UserDataCollector> logger,
         IDataRepository<UserDataSnapshot> repository,
         UserDataCollectorConfiguration configuration,
-        ArbitrageDbContext dbContext,
         IServiceProvider serviceProvider)
     {
         _logger = logger;
         _repository = repository;
         _configuration = configuration;
-        _dbContext = dbContext;
         _serviceProvider = serviceProvider;
     }
 
@@ -47,10 +44,15 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
 
         try
         {
-            // Get all enabled user API keys from database
-            var userApiKeys = await _dbContext.UserExchangeApiKeys
-                .Where(k => k.IsEnabled)
-                .ToListAsync(cancellationToken);
+            // Get all enabled user API keys from database using a scoped DbContext
+            List<UserExchangeApiKey> userApiKeys;
+            using (var scope = _serviceProvider.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+                userApiKeys = await dbContext.UserExchangeApiKeys
+                    .Where(k => k.IsEnabled)
+                    .ToListAsync(cancellationToken);
+            }
 
             if (!userApiKeys.Any())
             {
@@ -65,8 +67,8 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
             var snapshots = new Dictionary<string, UserDataSnapshot>();
 
             // Get encryption service to decrypt API keys
-            using var scope = _serviceProvider.CreateScope();
-            var encryptionService = scope.ServiceProvider.GetRequiredService<IEncryptionService>();
+            using var encryptionScope = _serviceProvider.CreateScope();
+            var encryptionService = encryptionScope.ServiceProvider.GetRequiredService<IEncryptionService>();
 
             // Collect from each user/exchange combination
             foreach (var apiKey in userApiKeys)
@@ -150,8 +152,7 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                 result.Data = snapshots;
                 result.Success = true;
                 LastSuccessfulCollection = DateTime.UtcNow;
-
-                _logger.LogInformation("Collected user data for {Count} user/exchange combinations", snapshots.Count);
+                
             }
             else
             {
@@ -190,12 +191,17 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                 return;
             }
 
-            // Query database for open positions for this user and exchange
-            var dbPositions = await _dbContext.Positions
-                .Where(p => p.UserId == userId &&
-                            p.Exchange == exchangeName &&
-                            p.Status == PositionStatus.Open)
-                .ToListAsync(cancellationToken);
+            // Query database for open positions for this user and exchange using a scoped DbContext
+            List<Position> dbPositions;
+            using (var scope = _serviceProvider.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+                dbPositions = await dbContext.Positions
+                    .Where(p => p.UserId == userId &&
+                                p.Exchange == exchangeName &&
+                                p.Status == PositionStatus.Open)
+                    .ToListAsync(cancellationToken);
+            }
 
             if (!dbPositions.Any())
             {
