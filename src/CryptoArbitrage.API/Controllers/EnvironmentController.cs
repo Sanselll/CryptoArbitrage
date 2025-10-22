@@ -9,16 +9,15 @@ namespace CryptoArbitrage.API.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class EnvironmentController : ControllerBase
+public class EnvironmentController : BaseController
 {
     private readonly IConfiguration _configuration;
-    private readonly ILogger<EnvironmentController> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
 
     public EnvironmentController(IConfiguration configuration, ILogger<EnvironmentController> logger, IHttpClientFactory httpClientFactory)
+        : base(logger)
     {
         _configuration = configuration;
-        _logger = logger;
         _httpClientFactory = httpClientFactory;
     }
 
@@ -32,7 +31,7 @@ public class EnvironmentController : ControllerBase
         var isLive = _configuration.GetValue<bool>("Environment:IsLive");
         var mode = _configuration.GetValue<string>("Environment:Mode") ?? (isLive ? "Live" : "Demo");
 
-        _logger.LogDebug("Environment status requested: IsLive={IsLive}, Mode={Mode}", isLive, mode);
+        Logger.LogDebug("Environment status requested: IsLive={IsLive}, Mode={Mode}", isLive, mode);
 
         return Ok(new
         {
@@ -56,7 +55,7 @@ public class EnvironmentController : ControllerBase
             .Where(name => !string.IsNullOrEmpty(name))
             .ToList();
 
-        _logger.LogDebug("Supported exchanges requested: {Count} exchanges", exchanges.Count);
+        Logger.LogDebug("Supported exchanges requested: {Count} exchanges", exchanges.Count);
 
         return Ok(new
         {
@@ -72,28 +71,19 @@ public class EnvironmentController : ControllerBase
     [HttpGet("server-ip")]
     public async Task<IActionResult> GetServerIp()
     {
-        try
+        return await ExecuteActionAsync(async () =>
         {
             var client = _httpClientFactory.CreateClient();
             client.Timeout = TimeSpan.FromSeconds(5);
             var ip = await client.GetStringAsync("https://api.ipify.org");
 
-            _logger.LogDebug("Server IP requested: {ServerIp}", ip?.Trim());
+            Logger.LogDebug("Server IP requested: {ServerIp}", ip?.Trim());
 
             return Ok(new
             {
                 ip = ip?.Trim(),
                 timestamp = DateTime.UtcNow
             });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to detect server IP address");
-            return StatusCode(500, new
-            {
-                error = "Failed to detect server IP address",
-                timestamp = DateTime.UtcNow
-            });
-        }
+        }, "fetching server IP");
     }
 }

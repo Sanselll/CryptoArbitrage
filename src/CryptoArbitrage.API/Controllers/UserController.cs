@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using CryptoArbitrage.API.Data;
 using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Services;
+using CryptoArbitrage.API.Services.Authentication;
+using CryptoArbitrage.API.Services.Exchanges;
 
 namespace CryptoArbitrage.API.Controllers;
 
@@ -15,12 +17,11 @@ namespace CryptoArbitrage.API.Controllers;
 [Authorize]
 [ApiController]
 [Route("api/[controller]")]
-public class UserController : ControllerBase
+public class UserController : BaseController
 {
     private readonly ArbitrageDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly IEncryptionService _encryption;
-    private readonly ILogger<UserController> _logger;
     private readonly IApiKeyValidator _apiKeyValidator;
 
     public UserController(
@@ -29,11 +30,11 @@ public class UserController : ControllerBase
         IEncryptionService encryption,
         ILogger<UserController> logger,
         IApiKeyValidator apiKeyValidator)
+        : base(logger)
     {
         _db = db;
         _currentUser = currentUser;
         _encryption = encryption;
-        _logger = logger;
         _apiKeyValidator = apiKeyValidator;
     }
 
@@ -81,7 +82,7 @@ public class UserController : ControllerBase
             })
             .ToListAsync();
 
-        _logger.LogDebug("User {UserId} retrieved {Count} API keys", _currentUser.UserId, keys.Count);
+        Logger.LogDebug("User {UserId} retrieved {Count} API keys", _currentUser.UserId, keys.Count);
         return Ok(keys);
     }
 
@@ -99,7 +100,7 @@ public class UserController : ControllerBase
         var userExists = await _db.Users.FindAsync(_currentUser.UserId);
         if (userExists == null)
         {
-            _logger.LogWarning("User {UserId} has valid JWT but doesn't exist in database. User needs to re-authenticate.", _currentUser.UserId);
+            Logger.LogWarning("User {UserId} has valid JWT but doesn't exist in database. User needs to re-authenticate.", _currentUser.UserId);
             return Unauthorized(new { error = "Session expired. Please log out and log back in." });
         }
 
@@ -123,7 +124,7 @@ public class UserController : ControllerBase
             }
 
             // VALIDATE API KEY BEFORE SAVING TO DATABASE
-            _logger.LogInformation("Validating API credentials for {Exchange} before saving...", request.ExchangeName);
+            Logger.LogInformation("Validating API credentials for {Exchange} before saving...", request.ExchangeName);
 
             IExchangeConnector? connector = null;
             try
@@ -145,20 +146,20 @@ public class UserController : ControllerBase
 
                 if (!connectionSuccess)
                 {
-                    _logger.LogWarning("API key validation failed for user {UserId} on {Exchange}",
+                    Logger.LogWarning("API key validation failed for user {UserId} on {Exchange}",
                         _currentUser.UserId, request.ExchangeName);
                     return BadRequest(new { error = $"Invalid API credentials. Failed to connect to {request.ExchangeName}. Please verify your API key and secret." });
                 }
 
-                _logger.LogInformation("API credentials validated successfully for {Exchange}", request.ExchangeName);
+                Logger.LogInformation("API credentials validated successfully for {Exchange}", request.ExchangeName);
 
                 // Validate API key permissions and restrictions
-                _logger.LogInformation("Checking API key permissions and restrictions for {Exchange}...", request.ExchangeName);
+                Logger.LogInformation("Checking API key permissions and restrictions for {Exchange}...", request.ExchangeName);
                 var validationResult = await _apiKeyValidator.ValidateApiKeyAsync(request.ExchangeName, request.ApiKey, request.ApiSecret);
 
                 if (!validationResult.IsValid)
                 {
-                    _logger.LogWarning("API key permissions check failed for user {UserId} on {Exchange}: {Message}",
+                    Logger.LogWarning("API key permissions check failed for user {UserId} on {Exchange}: {Message}",
                         _currentUser.UserId, request.ExchangeName, validationResult.DetailedMessage);
 
                     return BadRequest(new
@@ -172,7 +173,7 @@ public class UserController : ControllerBase
                     });
                 }
 
-                _logger.LogInformation("API key permissions validated successfully for {Exchange}", request.ExchangeName);
+                Logger.LogInformation("API key permissions validated successfully for {Exchange}", request.ExchangeName);
             }
             finally
             {
@@ -209,7 +210,7 @@ public class UserController : ControllerBase
             _db.UserExchangeApiKeys.Add(apiKey);
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation(
+            Logger.LogInformation(
                 "User {UserId} added and validated API key for {Exchange}",
                 _currentUser.UserId, request.ExchangeName);
 
@@ -217,7 +218,7 @@ public class UserController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error adding API key for user {UserId}", _currentUser.UserId);
+            Logger.LogError(ex, "Error adding API key for user {UserId}", _currentUser.UserId);
             return StatusCode(500, new { error = "Failed to add API key" });
         }
     }
@@ -241,7 +242,7 @@ public class UserController : ControllerBase
         }
         catch (UnauthorizedAccessException)
         {
-            _logger.LogWarning("User {UserId} attempted to update API key {KeyId} owned by {Owner}",
+            Logger.LogWarning("User {UserId} attempted to update API key {KeyId} owned by {Owner}",
                 _currentUser.UserId, id, apiKey.UserId);
             return Forbid();
         }
@@ -260,14 +261,14 @@ public class UserController : ControllerBase
 
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation("User {UserId} updated API key {KeyId} for {Exchange}",
+            Logger.LogInformation("User {UserId} updated API key {KeyId} for {Exchange}",
                 _currentUser.UserId, id, apiKey.ExchangeName);
 
             return Ok(new { message = "API key updated successfully" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating API key {KeyId} for user {UserId}", id, _currentUser.UserId);
+            Logger.LogError(ex, "Error updating API key {KeyId} for user {UserId}", id, _currentUser.UserId);
             return StatusCode(500, new { error = "Failed to update API key" });
         }
     }
@@ -290,7 +291,7 @@ public class UserController : ControllerBase
         }
         catch (UnauthorizedAccessException)
         {
-            _logger.LogWarning("User {UserId} attempted to delete API key {KeyId} owned by {Owner}",
+            Logger.LogWarning("User {UserId} attempted to delete API key {KeyId} owned by {Owner}",
                 _currentUser.UserId, id, apiKey.UserId);
             return Forbid();
         }
@@ -300,14 +301,14 @@ public class UserController : ControllerBase
             _db.UserExchangeApiKeys.Remove(apiKey);
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation("User {UserId} deleted API key {KeyId} for {Exchange}",
+            Logger.LogInformation("User {UserId} deleted API key {KeyId} for {Exchange}",
                 _currentUser.UserId, id, apiKey.ExchangeName);
 
             return Ok(new { message = "API key deleted successfully" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error deleting API key {KeyId} for user {UserId}", id, _currentUser.UserId);
+            Logger.LogError(ex, "Error deleting API key {KeyId} for user {UserId}", id, _currentUser.UserId);
             return StatusCode(500, new { error = "Failed to delete API key" });
         }
     }
@@ -331,7 +332,7 @@ public class UserController : ControllerBase
         }
         catch (UnauthorizedAccessException)
         {
-            _logger.LogWarning("User {UserId} attempted to test API key {KeyId} owned by {Owner}",
+            Logger.LogWarning("User {UserId} attempted to test API key {KeyId} owned by {Owner}",
                 _currentUser.UserId, id, apiKey.UserId);
             return Forbid();
         }
@@ -357,7 +358,7 @@ public class UserController : ControllerBase
             }
 
             // Use the same ApiKeyValidator as the Add API Key endpoint
-            _logger.LogInformation("Testing API key {KeyId} for user {UserId} on {Exchange}",
+            Logger.LogInformation("Testing API key {KeyId} for user {UserId} on {Exchange}",
                 id, _currentUser.UserId, apiKey.ExchangeName);
 
             var validationResult = await _apiKeyValidator.ValidateApiKeyAsync(apiKey.ExchangeName, key, secret);
@@ -380,7 +381,7 @@ public class UserController : ControllerBase
 
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation("User {UserId} tested API key {KeyId} for {Exchange}: {Result}",
+            Logger.LogInformation("User {UserId} tested API key {KeyId} for {Exchange}: {Result}",
                 _currentUser.UserId, id, apiKey.ExchangeName, apiKey.LastTestResult);
 
             // Return detailed result
@@ -409,7 +410,7 @@ public class UserController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error testing API key {KeyId} for user {UserId}", id, _currentUser.UserId);
+            Logger.LogError(ex, "Error testing API key {KeyId} for user {UserId}", id, _currentUser.UserId);
 
             apiKey.LastTestedAt = DateTime.UtcNow;
             apiKey.LastTestResult = $"Error: {ex.Message}";

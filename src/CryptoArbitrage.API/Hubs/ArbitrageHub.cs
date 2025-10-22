@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using System.Security.Claims;
 using CryptoArbitrage.API.Models;
+using CryptoArbitrage.API.Models.DataCollection;
+using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 
 namespace CryptoArbitrage.API.Hubs;
 
@@ -16,15 +18,23 @@ namespace CryptoArbitrage.API.Hubs;
 public class ArbitrageHub : Hub
 {
     private readonly ILogger<ArbitrageHub> _logger;
+    private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
+    private readonly IDataRepository<UserDataSnapshot> _userDataRepository;
 
-    public ArbitrageHub(ILogger<ArbitrageHub> logger)
+    public ArbitrageHub(
+        ILogger<ArbitrageHub> logger,
+        IDataRepository<FundingRateDto> fundingRateRepository,
+        IDataRepository<UserDataSnapshot> userDataRepository)
     {
         _logger = logger;
+        _fundingRateRepository = fundingRateRepository;
+        _userDataRepository = userDataRepository;
     }
 
     /// <summary>
     /// Called when a client connects to the hub.
     /// Adds the connection to a user-specific group for targeted broadcasting.
+    /// Broadcasts initial cached data (funding rates, balances, positions).
     /// </summary>
     public override async Task OnConnectedAsync()
     {
@@ -46,7 +56,66 @@ public class ArbitrageHub : Hub
             "User {UserId} ({Email}) connected to SignalR (ConnectionId: {ConnectionId})",
             userId, email, Context.ConnectionId);
 
+        // Broadcast initial cached data to newly connected client
+        await BroadcastInitialDataAsync(userId);
+
         await base.OnConnectedAsync();
+    }
+
+    /// <summary>
+    /// Broadcasts initial cached data when a user connects
+    /// </summary>
+    private async Task BroadcastInitialDataAsync(string userId)
+    {
+        try
+        {
+            _logger.LogDebug("Broadcasting initial cached data to user {UserId}", userId);
+
+            // Broadcast cached funding rates (global data)
+            var fundingRatesDict = await _fundingRateRepository.GetByPatternAsync("funding:*");
+            if (fundingRatesDict.Any())
+            {
+                var fundingRates = fundingRatesDict.Values.ToList();
+                await Clients.Caller.SendAsync("ReceiveFundingRates", fundingRates);
+                _logger.LogDebug("Sent {Count} cached funding rates to user {UserId}", fundingRates.Count, userId);
+            }
+
+            // Broadcast cached user data (user-specific)
+            var userDataDict = await _userDataRepository.GetByPatternAsync($"user:{userId}:*");
+            if (userDataDict.Any())
+            {
+                var userSnapshots = userDataDict.Values.ToList();
+
+                // Extract and send balances
+                var balances = userSnapshots
+                    .Where(s => s.Balance != null)
+                    .Select(s => s.Balance!)
+                    .ToList();
+
+                if (balances.Any())
+                {
+                    await Clients.Caller.SendAsync("ReceiveBalances", balances);
+                    _logger.LogDebug("Sent {Count} cached balances to user {UserId}", balances.Count, userId);
+                }
+
+                // Extract and send positions
+                var positions = userSnapshots
+                    .SelectMany(s => s.Positions)
+                    .ToList();
+
+                if (positions.Any())
+                {
+                    await Clients.Caller.SendAsync("ReceivePositions", positions);
+                    _logger.LogDebug("Sent {Count} cached positions to user {UserId}", positions.Count, userId);
+                }
+            }
+
+            _logger.LogInformation("Initial data broadcast completed for user {UserId}", userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting initial data to user {UserId}", userId);
+        }
     }
 
     /// <summary>

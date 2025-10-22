@@ -14,20 +14,19 @@ namespace CryptoArbitrage.API.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController : ControllerBase
+public class AuthController : BaseController
 {
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IConfiguration _config;
-    private readonly ILogger<AuthController> _logger;
 
     public AuthController(
         UserManager<ApplicationUser> userManager,
         IConfiguration config,
         ILogger<AuthController> logger)
+        : base(logger)
     {
         _userManager = userManager;
         _config = config;
-        _logger = logger;
     }
 
     /// <summary>
@@ -37,7 +36,7 @@ public class AuthController : ControllerBase
     [HttpPost("google-signin")]
     public async Task<IActionResult> GoogleSignIn([FromBody] GoogleSignInRequest request)
     {
-        try
+        return await ExecuteActionAsync(async () =>
         {
             // 1. Validate Google token
             var payload = await GoogleJsonWebSignature.ValidateAsync(request.IdToken, new GoogleJsonWebSignature.ValidationSettings
@@ -47,7 +46,7 @@ public class AuthController : ControllerBase
 
             if (payload == null)
             {
-                _logger.LogWarning("Invalid or expired Google token received");
+                Logger.LogWarning("Invalid or expired Google token received");
                 return Unauthorized(new { error = "Invalid Google token" });
             }
 
@@ -55,7 +54,7 @@ public class AuthController : ControllerBase
             var allowedUsers = _config.GetSection("Authentication:AllowedUsers").Get<string[]>() ?? Array.Empty<string>();
             if (!allowedUsers.Contains(payload.Email, StringComparer.OrdinalIgnoreCase))
             {
-                _logger.LogWarning("Login attempt from non-whitelisted email: {Email}", payload.Email);
+                Logger.LogWarning("Login attempt from non-whitelisted email: {Email}", payload.Email);
                 return Unauthorized(new { error = "User not authorized. Email not in whitelist." });
             }
 
@@ -76,11 +75,11 @@ public class AuthController : ControllerBase
                 if (!createResult.Succeeded)
                 {
                     var errors = string.Join(", ", createResult.Errors.Select(e => e.Description));
-                    _logger.LogError("Failed to create user {Email}: {Errors}", payload.Email, errors);
+                    Logger.LogError("Failed to create user {Email}: {Errors}", payload.Email, errors);
                     return StatusCode(500, new { error = "Failed to create user account" });
                 }
 
-                _logger.LogInformation("Created new user account: {Email} (GoogleId: {GoogleId})", payload.Email, payload.Subject);
+                Logger.LogInformation("Created new user account: {Email} (GoogleId: {GoogleId})", payload.Email, payload.Subject);
             }
             else
             {
@@ -99,7 +98,7 @@ public class AuthController : ControllerBase
             // 5. Generate JWT token
             var token = GenerateJwtToken(user);
 
-            _logger.LogInformation("User successfully authenticated: {Email} (UserId: {UserId})", user.Email, user.Id);
+            Logger.LogInformation("User successfully authenticated: {Email} (UserId: {UserId})", user.Email, user.Id);
 
             return Ok(new
             {
@@ -111,17 +110,7 @@ public class AuthController : ControllerBase
                     createdAt = user.CreatedAt
                 }
             });
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogError(ex, "Configuration error during Google sign-in");
-            return StatusCode(500, new { error = "Server configuration error" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error during Google sign-in");
-            return StatusCode(500, new { error = "Authentication failed" });
-        }
+        }, "Google sign-in");
     }
 
     /// <summary>

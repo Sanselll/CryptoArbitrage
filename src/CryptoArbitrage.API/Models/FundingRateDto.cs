@@ -15,7 +15,6 @@ public class FundingRateDto
     public decimal? PreviousAnnualizedRate { get; set; }
     public decimal? FundingCap { get; set; }
     public decimal? FundingFloor { get; set; }
-    public decimal Volume24h { get; set; }
     public DateTime FundingTime { get; set; }
     public DateTime NextFundingTime { get; set; }
     public DateTime RecordedAt { get; set; }
