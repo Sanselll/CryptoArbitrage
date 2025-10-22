@@ -41,4 +41,24 @@ public interface ISignalRStreamingService
     /// Check if a user broadcast happened recently (for debouncing refresh loops)
     /// </summary>
     bool ShouldSkipUserRefresh(string userId, double debounceSeconds = 2.0);
+
+    /// <summary>
+    /// Broadcast open orders to a specific user
+    /// </summary>
+    Task BroadcastOpenOrdersToUserAsync(string userId, List<OrderDto> orders, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcast order history to a specific user
+    /// </summary>
+    Task BroadcastOrderHistoryToUserAsync(string userId, List<OrderDto> orders, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcast trade history to a specific user
+    /// </summary>
+    Task BroadcastTradeHistoryToUserAsync(string userId, List<TradeDto> trades, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcast transaction history to a specific user
+    /// </summary>
+    Task BroadcastTransactionHistoryToUserAsync(string userId, List<TransactionDto> transactions, CancellationToken cancellationToken = default);
 }

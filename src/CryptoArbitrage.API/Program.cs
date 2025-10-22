@@ -207,18 +207,53 @@ builder.Services.AddSingleton(sp =>
     return config;
 });
 
+builder.Services.AddSingleton(sp =>
+{
+    var config = new OpenOrdersCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:OpenOrders").Bind(config);
+    return config;
+});
+
+builder.Services.AddSingleton(sp =>
+{
+    var config = new OrderHistoryCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:OrderHistory").Bind(config);
+    return config;
+});
+
+builder.Services.AddSingleton(sp =>
+{
+    var config = new TradeHistoryCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:TradeHistory").Bind(config);
+    return config;
+});
+
+builder.Services.AddSingleton(sp =>
+{
+    var config = new TransactionHistoryCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:TransactionHistory").Bind(config);
+    return config;
+});
+
 // Repositories
 builder.Services.AddSingleton<IDataRepository<FundingRateDto>, FundingRateRepository>();
 builder.Services.AddSingleton<IDataRepository<MarketDataSnapshot>, MarketDataRepository>();
 builder.Services.AddSingleton<IDataRepository<UserDataSnapshot>, UserDataRepository>();
 builder.Services.AddSingleton<IDataRepository<LiquidityMetricsDto>, LiquidityMetricsRepository>();
 builder.Services.AddSingleton<IDataRepository<ArbitrageOpportunityDto>, OpportunityRepository>();
+builder.Services.AddSingleton<IDataRepository<List<OrderDto>>, MemoryDataRepository<List<OrderDto>>>();
+builder.Services.AddSingleton<IDataRepository<List<TradeDto>>, MemoryDataRepository<List<TradeDto>>>();
+builder.Services.AddSingleton<IDataRepository<List<TransactionDto>>, MemoryDataRepository<List<TransactionDto>>>();
 
 // Collectors - register as interfaces so background services can resolve them
 builder.Services.AddSingleton<IDataCollector<FundingRateDto, FundingRateCollectorConfiguration>, FundingRateCollector>();
 builder.Services.AddSingleton<IDataCollector<MarketDataSnapshot, MarketPriceCollectorConfiguration>, MarketPriceCollector>();
 builder.Services.AddSingleton<IDataCollector<UserDataSnapshot, UserDataCollectorConfiguration>, UserDataCollector>();
 builder.Services.AddSingleton<IDataCollector<LiquidityMetricsDto, LiquidityCollectorConfiguration>, LiquidityMetricsCollector>();
+builder.Services.AddSingleton<IDataCollector<List<OrderDto>, OpenOrdersCollectorConfiguration>, OpenOrdersCollector>();
+builder.Services.AddSingleton<IDataCollector<List<OrderDto>, OrderHistoryCollectorConfiguration>, OrderHistoryCollector>();
+builder.Services.AddSingleton<IDataCollector<List<TradeDto>, TradeHistoryCollectorConfiguration>, TradeHistoryCollector>();
+builder.Services.AddSingleton<IDataCollector<List<TransactionDto>, TransactionHistoryCollectorConfiguration>, TransactionHistoryCollector>();
 
 // Event Bus - coordinates data flow between collectors, aggregators, enrichers, and broadcasters
 builder.Services.AddSingleton<IDataCollectionEventBus, DataCollectionEventBus>();
@@ -228,6 +263,10 @@ builder.Services.AddHostedService<FundingRateCollectionBackgroundService>();
 builder.Services.AddHostedService<MarketPriceCollectionBackgroundService>();
 builder.Services.AddHostedService<UserDataCollectionBackgroundService>();
 builder.Services.AddHostedService<LiquidityCollectionBackgroundService>();
+builder.Services.AddHostedService<OpenOrdersCollectionBackgroundService>();
+builder.Services.AddHostedService<OrderHistoryCollectionBackgroundService>();
+builder.Services.AddHostedService<TradeHistoryCollectionBackgroundService>();
+builder.Services.AddHostedService<TransactionHistoryCollectionBackgroundService>();
 
 // Background Services - Aggregation (Layer 3: Aggregators)
 builder.Services.AddHostedService<OpportunityAggregator>();

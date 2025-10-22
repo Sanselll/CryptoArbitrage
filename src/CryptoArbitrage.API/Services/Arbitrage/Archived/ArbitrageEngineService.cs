@@ -115,9 +115,7 @@ public class ArbitrageEngineService : BackgroundService
                     PerpPrices = perpPricesDict,
                     FetchedAt = snapshot.FetchedAt
                 };
-
-                _logger.LogInformation("Read market data: {Exchanges} exchanges, {Symbols} funding rates",
-                    fundingRatesDict.Count, fundingRatesDict.Values.Sum(l => l.Count));
+                
 
                 // PHASE 2: Detect opportunities from market data
                 var opportunities = await _opportunityDetectionService.DetectOpportunitiesAsync(opportunitySnapshot);
