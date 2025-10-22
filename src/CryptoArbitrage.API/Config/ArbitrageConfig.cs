@@ -20,21 +20,6 @@ public class ArbitrageConfig
     // SignalR streaming: How often to broadcast cached data to UI
     public int SignalRBroadcastIntervalSeconds { get; set; } = 1;
 
-    // User data: How often to refresh user-specific positions and balances
-    public int UserDataRefreshIntervalSeconds { get; set; } = 30;
-
-    // Legacy property for backward compatibility - maps to OpportunityCollectionIntervalSeconds
-    [Obsolete("Use OpportunityCollectionIntervalSeconds instead")]
-    public int DataRefreshIntervalSeconds
-    {
-        get => OpportunityCollectionIntervalSeconds;
-        set => OpportunityCollectionIntervalSeconds = value;
-    }
-
-    // === IN-MEMORY CACHE SETTINGS ===
-    public int FundingRateCacheDurationMinutes { get; set; } = 60;  // How long to keep funding rates in cache
-    public int OpportunityCacheDurationMinutes { get; set; } = 5;   // How long opportunities are valid
-
     // === LIQUIDITY CONFIGURATION ===
     // Minimum 24h trading volume in USD for a symbol to be considered liquid
     public decimal MinVolume24hUsd { get; set; } = 500_000m;
@@ -63,7 +48,6 @@ public class ArbitrageConfig
     public int MaxSymbolCount { get; set; } = 50; // Track top 50 symbols by volume
     public decimal MinAbsFundingRate { get; set; } = 0.0001m; // 0.01% = 3.65% APR minimum
     public decimal MinHighPriorityFundingRate { get; set; } = 0.01m; // 1% = 365% APR - always include these
-    public double SymbolRefreshIntervalHours { get; set; } = 24; // Refresh symbol list daily
 
     // === STRATEGY CONFIGURATION ===
     public bool EnableSpotPerpetualSameExchange { get; set; } = true;       // Buy spot + short perp on same exchange

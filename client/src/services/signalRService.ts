@@ -17,6 +17,7 @@ const getHubUrl = (): string => {
 
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
+  private connecting: boolean = false;
   private callbacks = {
     onFundingRates: [] as ((data: FundingRate[]) => void)[],
     onPositions: [] as ((data: Position[]) => void)[],
@@ -28,36 +29,47 @@ class SignalRService {
   };
 
   async connect() {
+    // Prevent concurrent connection attempts
+    if (this.connecting) {
+      console.log('Connection already in progress');
+      return;
+    }
+
     if (this.connection?.state === signalR.HubConnectionState.Connected) {
       console.log('Already connected');
       return;
     }
 
-    // Use single jwt_token key for all modes
-    const token = localStorage.getItem('jwt_token');
-    if (!token) {
-      console.error('No authentication token available');
-      throw new Error('Not authenticated');
-    }
-
-    const url = getHubUrl();
-    console.log('Connecting to SignalR hub:', url);
-
-    this.connection = new signalR.HubConnectionBuilder()
-      .withUrl(url, {
-        // CRITICAL: Send JWT token with connection
-        accessTokenFactory: () => token
-      })
-      .withAutomaticReconnect()
-      .configureLogging(signalR.LogLevel.Information)
-      .build();
-
-    this.setupEventHandlers();
+    this.connecting = true;
 
     try {
+      // Use single jwt_token key for all modes
+      const token = localStorage.getItem('jwt_token');
+      if (!token) {
+        console.error('No authentication token available');
+        this.connecting = false;
+        throw new Error('Not authenticated');
+      }
+
+      const url = getHubUrl();
+      console.log('Connecting to SignalR hub:', url);
+
+      this.connection = new signalR.HubConnectionBuilder()
+        .withUrl(url, {
+          // CRITICAL: Send JWT token with connection
+          accessTokenFactory: () => token
+        })
+        .withAutomaticReconnect()
+        .configureLogging(signalR.LogLevel.Information)
+        .build();
+
+      this.setupEventHandlers();
+
       await this.connection.start();
+      this.connecting = false;
       console.log('SignalR Connected to:', url);
     } catch (err) {
+      this.connecting = false;
       console.error('SignalR Connection Error: ', err);
       setTimeout(() => this.connect(), 5000);
     }

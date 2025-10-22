@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using CryptoArbitrage.API.Data;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Services;
+using CryptoArbitrage.API.Services.Arbitrage.Execution;
+using CryptoArbitrage.API.Services.Authentication;
 
 namespace CryptoArbitrage.API.Controllers;
 
@@ -15,10 +17,9 @@ namespace CryptoArbitrage.API.Controllers;
 [Authorize]
 [ApiController]
 [Route("api/[controller]")]
-public class OpportunityController : ControllerBase
+public class OpportunityController : BaseController
 {
     private readonly ArbitrageDbContext _context;
-    private readonly ILogger<OpportunityController> _logger;
     private readonly ArbitrageExecutionService _executionService;
     private readonly ICurrentUserService _currentUser;
 
@@ -27,9 +28,9 @@ public class OpportunityController : ControllerBase
         ILogger<OpportunityController> logger,
         ArbitrageExecutionService executionService,
         ICurrentUserService currentUser)
+        : base(logger)
     {
         _context = context;
-        _logger = logger;
         _executionService = executionService;
         _currentUser = currentUser;
     }
@@ -151,7 +152,7 @@ public class OpportunityController : ControllerBase
         [FromQuery] string exchange,
         [FromQuery] decimal maxLeverage = 5)
     {
-        try
+        return await ExecuteActionAsync(async () =>
         {
             if (string.IsNullOrEmpty(exchange))
             {
@@ -160,23 +161,19 @@ public class OpportunityController : ControllerBase
 
             var balances = await _executionService.GetExecutionBalancesAsync(exchange, maxLeverage);
             return Ok(balances);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching execution balances for {Exchange}", exchange);
-            return StatusCode(500, new { error = $"Failed to fetch balances: {ex.Message}" });
-        }
+        }, $"fetching execution balances for {exchange}");
     }
 
     [HttpPost("execute")]
     public async Task<ActionResult<ExecuteOpportunityResponse>> ExecuteOpportunity([FromBody] ExecuteOpportunityRequest request)
     {
-        try
+        return await ExecuteActionAsync(async () =>
         {
-            if (string.IsNullOrEmpty(_currentUser.UserId))
-                return Unauthorized(new { error = "User not authenticated" });
+            var authResult = ValidateAuthentication(_currentUser.UserId);
+            if (authResult != null)
+                return authResult;
 
-            _logger.LogInformation(
+            Logger.LogInformation(
                 "Execute request received by user {UserId} for {Symbol} on {Exchange}, Strategy: {Strategy}",
                 _currentUser.UserId, request.Symbol, request.Exchange, request.Strategy);
 
@@ -188,27 +185,18 @@ public class OpportunityController : ControllerBase
                 return BadRequest(response);
             }
 
-            _logger.LogInformation(
+            Logger.LogInformation(
                 "Execution successful for user {UserId}: {Response}",
                 _currentUser.UserId, response);
 
             return Ok(response);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error in execute endpoint for user {UserId}", _currentUser.UserId);
-            return StatusCode(500, new ExecuteOpportunityResponse
-            {
-                Success = false,
-                ErrorMessage = $"Server error: {ex.Message}"
-            });
-        }
+        }, $"executing opportunity {request.Symbol} for user {_currentUser.UserId}");
     }
 
     [HttpPost("close/{activeOpportunityId}")]
     public async Task<ActionResult<CloseOpportunityResponse>> CloseOpportunity(int activeOpportunityId)
     {
-            _logger.LogInformation("Close request received for ActiveOpportunity {Id} (deprecated endpoint - using StopExecutionAsync)", activeOpportunityId);
+            Logger.LogInformation("Close request received for ActiveOpportunity {Id} (deprecated endpoint - using StopExecutionAsync)", activeOpportunityId);
 
             // Deprecated: This endpoint now calls StopExecutionAsync instead of the old CloseOpportunityAsync
             return await StopExecution(activeOpportunityId);
@@ -217,12 +205,13 @@ public class OpportunityController : ControllerBase
     [HttpPost("stop/{executionId}")]
     public async Task<ActionResult<CloseOpportunityResponse>> StopExecution(int executionId)
     {
-        try
+        return await ExecuteActionAsync(async () =>
         {
-            if (string.IsNullOrEmpty(_currentUser.UserId))
-                return Unauthorized(new { error = "User not authenticated" });
+            var authResult = ValidateAuthentication(_currentUser.UserId);
+            if (authResult != null)
+                return authResult;
 
-            _logger.LogInformation("Stop request received by user {UserId} for Execution {Id}",
+            Logger.LogInformation("Stop request received by user {UserId} for Execution {Id}",
                 _currentUser.UserId, executionId);
 
             // CRITICAL: Validate user owns this execution before allowing stop
@@ -237,7 +226,7 @@ public class OpportunityController : ControllerBase
             }
             catch (UnauthorizedAccessException)
             {
-                _logger.LogWarning("User {UserId} attempted to stop execution {ExecutionId} owned by {Owner}",
+                Logger.LogWarning("User {UserId} attempted to stop execution {ExecutionId} owned by {Owner}",
                     _currentUser.UserId, executionId, execution.UserId);
                 return Forbid();
             }
@@ -249,19 +238,10 @@ public class OpportunityController : ControllerBase
                 return BadRequest(response);
             }
 
-            _logger.LogInformation("Execution {Id} stopped successfully for user {UserId}",
+            Logger.LogInformation("Execution {Id} stopped successfully for user {UserId}",
                 executionId, _currentUser.UserId);
 
             return Ok(response);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error in stop execution endpoint for user {UserId}", _currentUser.UserId);
-            return StatusCode(500, new CloseOpportunityResponse
-            {
-                Success = false,
-                ErrorMessage = $"Server error: {ex.Message}"
-            });
-        }
+        }, $"stopping execution {executionId} for user {_currentUser.UserId}");
     }
 }

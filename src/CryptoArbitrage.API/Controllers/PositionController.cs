@@ -5,6 +5,7 @@ using CryptoArbitrage.API.Data;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Services;
+using CryptoArbitrage.API.Services.Authentication;
 
 namespace CryptoArbitrage.API.Controllers;
 
@@ -17,19 +18,18 @@ namespace CryptoArbitrage.API.Controllers;
 [Authorize]
 [ApiController]
 [Route("api/[controller]")]
-public class PositionController : ControllerBase
+public class PositionController : BaseController
 {
     private readonly ArbitrageDbContext _context;
-    private readonly ILogger<PositionController> _logger;
     private readonly ICurrentUserService _currentUser;
 
     public PositionController(
         ArbitrageDbContext context,
         ILogger<PositionController> logger,
         ICurrentUserService currentUser)
+        : base(logger)
     {
         _context = context;
-        _logger = logger;
         _currentUser = currentUser;
     }
 
@@ -40,11 +40,8 @@ public class PositionController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<List<PositionDto>>> GetPositions([FromQuery] string? status = null)
     {
-        try
+        return await ExecuteAuthenticatedAsync(_currentUser.UserId, async () =>
         {
-            if (string.IsNullOrEmpty(_currentUser.UserId))
-                return Unauthorized(new { error = "User not authenticated" });
-
             var query = _context.Positions
                 .Where(p => p.UserId == _currentUser.UserId); // CRITICAL: Filter by authenticated user
 
@@ -80,14 +77,9 @@ public class PositionController : ControllerBase
                 })
                 .ToListAsync();
 
-            _logger.LogDebug("User {UserId} retrieved {Count} positions", _currentUser.UserId, positions.Count);
-            return Ok(positions);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching positions for user {UserId}", _currentUser.UserId);
-            return StatusCode(500, new { errorMessage = $"Server error: {ex.Message}" });
-        }
+            Logger.LogDebug("User {UserId} retrieved {Count} positions", _currentUser.UserId, positions.Count);
+            return positions;
+        }, $"fetching positions for user {_currentUser.UserId}");
     }
 
     /// <summary>
@@ -97,10 +89,11 @@ public class PositionController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<PositionDto>> GetPosition(int id)
     {
-        try
+        return await ExecuteActionAsync(async () =>
         {
-            if (string.IsNullOrEmpty(_currentUser.UserId))
-                return Unauthorized(new { error = "User not authenticated" });
+            var authResult = ValidateAuthentication(_currentUser.UserId);
+            if (authResult != null)
+                return authResult;
 
             var position = await _context.Positions
                 .Where(p => p.Id == id && p.UserId == _currentUser.UserId) // CRITICAL: Filter by user
@@ -108,7 +101,7 @@ public class PositionController : ControllerBase
 
             if (position == null)
             {
-                _logger.LogWarning("User {UserId} attempted to access position {Id} which does not exist or is not owned by them",
+                Logger.LogWarning("User {UserId} attempted to access position {Id} which does not exist or is not owned by them",
                     _currentUser.UserId, id);
                 return NotFound(new { errorMessage = $"Position {id} not found" });
             }
@@ -136,13 +129,8 @@ public class PositionController : ControllerBase
                 ActiveOpportunityId = position.ExecutionId
             };
 
-            _logger.LogDebug("User {UserId} retrieved position {Id}", _currentUser.UserId, id);
+            Logger.LogDebug("User {UserId} retrieved position {Id}", _currentUser.UserId, id);
             return Ok(positionDto);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching position {Id} for user {UserId}", id, _currentUser.UserId);
-            return StatusCode(500, new { errorMessage = $"Server error: {ex.Message}" });
-        }
+        }, $"fetching position {id} for user {_currentUser.UserId}");
     }
 }

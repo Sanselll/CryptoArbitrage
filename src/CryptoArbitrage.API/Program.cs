@@ -8,6 +8,21 @@ using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Hubs;
 using CryptoArbitrage.API.Services;
 using CryptoArbitrage.API.Config;
+using CryptoArbitrage.API.Models;
+using CryptoArbitrage.API.Models.DataCollection;
+using CryptoArbitrage.API.Services.Arbitrage.Detection;
+using CryptoArbitrage.API.Services.Arbitrage.Execution;
+using CryptoArbitrage.API.Services.Authentication;
+using CryptoArbitrage.API.Services.Data;
+using CryptoArbitrage.API.Services.DataCollection;
+using CryptoArbitrage.API.Services.DataCollection.Abstractions;
+using CryptoArbitrage.API.Services.DataCollection.Configuration;
+using CryptoArbitrage.API.Services.DataCollection.Collectors;
+using CryptoArbitrage.API.Services.DataCollection.Repositories;
+using CryptoArbitrage.API.Services.DataCollection.Events;
+using CryptoArbitrage.API.Services.Exchanges;
+using CryptoArbitrage.API.Services.Notifications;
+using CryptoArbitrage.API.Services.Streaming;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -156,9 +171,80 @@ builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<ConnectionResilienceService>();
 
 // Add refactored modular services
-builder.Services.AddSingleton<IDataAggregationService, DataAggregationService>();
 builder.Services.AddSingleton<IOpportunityDetectionService, OpportunityDetectionService>();
 builder.Services.AddSingleton<ISignalRStreamingService, SignalRStreamingService>();
+
+// ============================================================================
+// DATA COLLECTION SYSTEM - New Architecture
+// ============================================================================
+
+// Configuration - bind from appsettings.json
+builder.Services.AddSingleton(sp =>
+{
+    var config = new FundingRateCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:FundingRate").Bind(config);
+    return config;
+});
+
+builder.Services.AddSingleton(sp =>
+{
+    var config = new MarketPriceCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:MarketPrice").Bind(config);
+    return config;
+});
+
+builder.Services.AddSingleton(sp =>
+{
+    var config = new UserDataCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:UserData").Bind(config);
+    return config;
+});
+
+builder.Services.AddSingleton(sp =>
+{
+    var config = new LiquidityCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:Liquidity").Bind(config);
+    return config;
+});
+
+// Repositories
+builder.Services.AddSingleton<IDataRepository<FundingRateDto>, FundingRateRepository>();
+builder.Services.AddSingleton<IDataRepository<MarketDataSnapshot>, MarketDataRepository>();
+builder.Services.AddSingleton<IDataRepository<UserDataSnapshot>, UserDataRepository>();
+builder.Services.AddSingleton<IDataRepository<LiquidityMetricsDto>, LiquidityMetricsRepository>();
+
+// Collectors - register as interfaces so background services can resolve them
+builder.Services.AddSingleton<IDataCollector<FundingRateDto, FundingRateCollectorConfiguration>, FundingRateCollector>();
+builder.Services.AddSingleton<IDataCollector<MarketDataSnapshot, MarketPriceCollectorConfiguration>, MarketPriceCollector>();
+builder.Services.AddSingleton<IDataCollector<UserDataSnapshot, UserDataCollectorConfiguration>, UserDataCollector>();
+builder.Services.AddSingleton<IDataCollector<LiquidityMetricsDto, LiquidityCollectorConfiguration>, LiquidityMetricsCollector>();
+
+// Event Bus - coordinates data flow between collectors, aggregators, enrichers, and broadcasters
+builder.Services.AddSingleton<IDataCollectionEventBus, DataCollectionEventBus>();
+
+// Background Services - Data Collection (Layer 1: Pure Collectors)
+builder.Services.AddHostedService<FundingRateCollectionBackgroundService>();
+builder.Services.AddHostedService<MarketPriceCollectionBackgroundService>();
+builder.Services.AddHostedService<UserDataCollectionBackgroundService>();
+builder.Services.AddHostedService<LiquidityCollectionBackgroundService>();
+
+// Background Services - Aggregation (Layer 3: Aggregators)
+builder.Services.AddHostedService<OpportunityAggregator>();
+
+// Background Services - Enrichment (Layer 4: Enrichers)
+builder.Services.AddHostedService<OpportunityEnricher>();
+
+// Background Services - Broadcasting (Layer 5: Broadcasters)
+builder.Services.AddHostedService<SignalRBroadcaster>();
+
+// Symbol Discovery Service - manages symbol auto-discovery
+builder.Services.AddSingleton<SymbolDiscoveryService>();
+
+// Consumer Services - clean APIs for reading data
+builder.Services.AddSingleton<IMarketDataService, MarketDataService>();
+builder.Services.AddSingleton<IFundingRateService, FundingRateService>();
+
+// ============================================================================
 
 // Add exchange connectors and services
 builder.Services.AddScoped<BinanceConnector>();
@@ -166,9 +252,13 @@ builder.Services.AddScoped<BybitConnector>();
 builder.Services.AddScoped<ArbitrageExecutionService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 
-// Register ArbitrageEngineService as both a singleton (for DI) and a hosted service
-builder.Services.AddSingleton<ArbitrageEngineService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<ArbitrageEngineService>());
+// DISABLED: ArbitrageEngineService - Now using event-driven data collection services
+// The new architecture uses FundingRateCollectionBackgroundService, MarketPriceCollectionBackgroundService,
+// and UserDataCollectionBackgroundService which broadcast data immediately when it changes.
+// This eliminates duplicate broadcasting and opportunity detection.
+// To re-enable, uncomment the lines below:
+// builder.Services.AddSingleton<ArbitrageEngineService>();
+// builder.Services.AddHostedService(sp => sp.GetRequiredService<ArbitrageEngineService>());
 
 // Add Swagger
 builder.Services.AddEndpointsApiExplorer();
