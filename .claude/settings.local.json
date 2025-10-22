@@ -46,7 +46,13 @@
       "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=5\")",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"Average3DayRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Exchange\"\" = ''Binance'' ORDER BY \"\"RecordedAt\"\" DESC LIMIT 5;\")",
       "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"Average3DayRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Exchange\"\" = ''Bybit'' ORDER BY \"\"RecordedAt\"\" DESC LIMIT 5;\")",
-      "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=10\")"
+      "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=10\")",
+      "WebFetch(domain:binance-docs.github.io)",
+      "WebFetch(domain:bybit-exchange.github.io)",
+      "WebFetch(domain:github.com)",
+      "Bash(dotnet build)",
+      "Bash(dotnet build --no-incremental)",
+      "Bash(journalctl --user -t dotnet -n 100 --since \"5 minutes ago\")"
     ],
     "deny": [],
     "ask": []

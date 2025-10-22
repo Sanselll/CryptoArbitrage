@@ -181,9 +181,7 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
             {
                 perpPrices[symbol] = price;
             }
-
-            _logger.LogDebug("Fetched {SpotCount} spot prices and {PerpCount} perp prices from {Exchange}",
-                spotPrices.Count, perpPrices.Count, exchangeName);
+            
         }
         catch (Exception ex)
         {
