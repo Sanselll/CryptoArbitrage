@@ -10,9 +10,10 @@ public enum ArbitrageStrategy
 
 public enum StrategySubType
 {
-    SpotPerpetualSameExchange,       // Buy spot + short perp on same exchange
-    CrossExchangeFuturesFutures,     // Long perp on one exchange + short perp on another
-    CrossExchangeSpotFutures         // Buy spot on one exchange + short perp on another
+    SpotPerpetualSameExchange,         // Buy spot + short perp on same exchange
+    CrossExchangeFuturesFutures,       // Long perp on one exchange + short perp on another (FUNDING arbitrage)
+    CrossExchangeSpotFutures,          // Buy spot on one exchange + short perp on another
+    CrossExchangeFuturesPriceSpread    // Long perp on cheaper exchange + short perp on expensive exchange (PRICE arbitrage)
 }
 
 public class ArbitrageOpportunityDto
@@ -66,6 +67,6 @@ public class ArbitrageOpportunityDto
 
     // Computed unique key for frontend tracking (not stored in DB)
     public string UniqueKey => Strategy == ArbitrageStrategy.SpotPerpetual
-        ? $"{Symbol}-{Exchange}-SpotPerp"
-        : $"{Symbol}-{LongExchange}-{ShortExchange}-CrossEx";
+        ? $"{Symbol}-{Exchange}-{SubType}"
+        : $"{Symbol}-{LongExchange}-{ShortExchange}-{SubType}";
 }

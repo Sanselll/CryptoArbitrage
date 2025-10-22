@@ -40,7 +40,13 @@
       "Bash(git mv Services/Broadcasting/SignalRBroadcaster.cs Services/Streaming/)",
       "Bash(chmod +x reorganize-folders.sh)",
       "Bash(./reorganize-folders.sh)",
-      "Bash(sed -i '' 's/\\r$//' reorganize-folders.sh)"
+      "Bash(sed -i '' 's/\\r$//' reorganize-folders.sh)",
+      "Bash(journalctl --user -t dotnet -n 200 --since \"10 minutes ago\")",
+      "Bash(curl -s \"https://testnet.binancefuture.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=5\")",
+      "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=5\")",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"Average3DayRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Exchange\"\" = ''Binance'' ORDER BY \"\"RecordedAt\"\" DESC LIMIT 5;\")",
+      "Bash(psql -U sansel -d crypto_arbitrage -c \"SELECT \"\"Exchange\"\", \"\"Symbol\"\", \"\"Rate\"\", \"\"Average3DayRate\"\", \"\"RecordedAt\"\" FROM \"\"FundingRates\"\" WHERE \"\"Exchange\"\" = ''Bybit'' ORDER BY \"\"RecordedAt\"\" DESC LIMIT 5;\")",
+      "Bash(curl -s \"https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=10\")"
     ],
     "deny": [],
     "ask": []

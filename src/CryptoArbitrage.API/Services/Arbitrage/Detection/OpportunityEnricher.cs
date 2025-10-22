@@ -346,7 +346,7 @@ public class OpportunityEnricher : IHostedService
         try
         {
             var opportunitiesDict = opportunities.ToDictionary(
-                o => $"opportunity:{o.Symbol}:{o.Exchange}",
+                o => $"opportunity:{o.UniqueKey}",
                 o => o
             );
 

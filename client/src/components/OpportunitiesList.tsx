@@ -1,4 +1,4 @@
-import { Target, ArrowUpCircle, ArrowDownCircle, Play, Clock, TrendingUp, TrendingDown } from 'lucide-react';
+import { Target, ArrowUpCircle, ArrowDownCircle, Play, Clock, TrendingUp, TrendingDown, ArrowUpDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
@@ -22,20 +22,23 @@ import { apiService } from '../services/apiService';
 import { PositionStatus, StrategySubType, LiquidityStatus } from '../types/index';
 import { useDialog } from '../hooks/useDialog';
 
-// Helper function to get strategy type label
-const getStrategyLabel = (subType?: number): { text: string; color: string } => {
+// Helper function to get strategy type label (abbreviated)
+const getStrategyLabel = (subType?: number): { text: string; fullText: string; color: string } => {
   switch (subType) {
     case StrategySubType.SpotPerpetualSameExchange:
     case 0:
-      return { text: 'Spot-Perp', color: 'bg-blue-500/20 text-blue-400' };
+      return { text: 'SP', fullText: 'Spot-Perp', color: 'bg-blue-500/20 text-blue-400' };
     case StrategySubType.CrossExchangeFuturesFutures:
     case 1:
-      return { text: 'Cross-Fut', color: 'bg-purple-500/20 text-purple-400' };
+      return { text: 'CFFF', fullText: 'Cross-Fut Funding', color: 'bg-purple-500/20 text-purple-400' };
     case StrategySubType.CrossExchangeSpotFutures:
     case 2:
-      return { text: 'Cross-Spot', color: 'bg-green-500/20 text-green-400' };
+      return { text: 'CFSF', fullText: 'Cross-Fut Spot', color: 'bg-green-500/20 text-green-400' };
+    case StrategySubType.CrossExchangeFuturesPriceSpread:
+    case 3:
+      return { text: 'CFPS', fullText: 'Cross-Fut Price Spread', color: 'bg-orange-500/20 text-orange-400' };
     default:
-      return { text: 'Unknown', color: 'bg-gray-500/20 text-gray-400' };
+      return { text: '?', fullText: 'Unknown', color: 'bg-gray-500/20 text-gray-400' };
   }
 };
 
@@ -102,6 +105,9 @@ const formatExecutionTime = (openedAt: string) => {
   return `${hours}h ${minutes}m ${seconds}s`;
 };
 
+type SortField = 'spread' | '8hProfit' | '8hProfit3d' | 'apr' | 'apr3d';
+type SortDirection = 'asc' | 'desc';
+
 export const OpportunitiesList = () => {
   const navigate = useNavigate();
   const { opportunities, positions, fundingRates } = useArbitrageStore();
@@ -112,6 +118,9 @@ export const OpportunitiesList = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [sortField, setSortField] = useState<SortField>('apr');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [selectedStrategy, setSelectedStrategy] = useState<number | null>(null); // null means show all
   const { alertState, showSuccess, showError, showInfo, closeAlert, confirmState, showConfirm, closeConfirm } = useDialog();
 
   // Helper function to find matching positions for an opportunity
@@ -147,14 +156,148 @@ export const OpportunitiesList = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const activeOpportunities = opportunities
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  // Pre-calculate values for all opportunities for sorting
+  const opportunitiesWithCalculations = opportunities.map(opp => {
+    const isSpotPerp = opp.strategy === 1;
+    const isCrossFut = opp.subType === StrategySubType.CrossExchangeFuturesFutures;
+
+    const longFundingData = fundingRates.find(fr =>
+      fr.symbol === opp.symbol &&
+      fr.exchange === (isSpotPerp ? opp.exchange : opp.longExchange)
+    );
+    const shortFundingData = isCrossFut ? fundingRates.find(fr =>
+      fr.symbol === opp.symbol &&
+      fr.exchange === opp.shortExchange
+    ) : null;
+
+    // Calculate spread
+    const spotPrice = opp.spotPrice || 0;
+    const perpPrice = opp.perpetualPrice || 0;
+    const spread = (spotPrice > 0 && perpPrice > 0)
+      ? ((perpPrice - spotPrice) / spotPrice) * 100
+      : 0;
+
+    // Calculate APR
+    const apr = isSpotPerp
+      ? opp.estimatedProfitPercentage
+      : opp.annualizedSpread * 100;
+
+    // Calculate 8H profit
+    let profit8h: number;
+    if (isSpotPerp) {
+      const fundingIntervalHours = longFundingData?.fundingIntervalHours || 8;
+      const periodsIn8Hours = 8 / fundingIntervalHours;
+      profit8h = (apr / 365) * periodsIn8Hours;
+    } else if (isCrossFut) {
+      const longInterval = opp.longFundingIntervalHours || longFundingData?.fundingIntervalHours || 8;
+      const shortInterval = opp.shortFundingIntervalHours || shortFundingData?.fundingIntervalHours || 8;
+      const longDailyRate = (opp.longFundingRate * 100) * (24 / longInterval);
+      const shortDailyRate = (opp.shortFundingRate * 100) * (24 / shortInterval);
+      const netDailyRate = shortDailyRate - longDailyRate;
+      profit8h = netDailyRate / 3;
+    } else {
+      const shortInterval = opp.shortFundingIntervalHours || shortFundingData?.fundingIntervalHours || 8;
+      const periodsIn8Hours = 8 / shortInterval;
+      profit8h = (apr / 365) * periodsIn8Hours;
+    }
+
+    // Calculate 3D average metrics
+    let apr3d: number | null = null;
+    let profit8h3d: number | null = null;
+
+    if (longFundingData?.average3DayRate !== undefined && longFundingData?.average3DayRate !== null) {
+      if (isSpotPerp) {
+        const fundingIntervalHours = longFundingData?.fundingIntervalHours || 8;
+        const periodsPerYear = (365 * 24) / fundingIntervalHours;
+        apr3d = (longFundingData.average3DayRate * 100) * periodsPerYear;
+        const periodsIn8Hours = 8 / fundingIntervalHours;
+        profit8h3d = (apr3d / 365) * periodsIn8Hours;
+      } else if (isCrossFut && shortFundingData?.average3DayRate !== undefined && shortFundingData?.average3DayRate !== null) {
+        const longInterval = longFundingData?.fundingIntervalHours || 8;
+        const shortInterval = shortFundingData?.fundingIntervalHours || 8;
+        const longDailyRate = (longFundingData.average3DayRate * 100) * (24 / longInterval);
+        const shortDailyRate = (shortFundingData.average3DayRate * 100) * (24 / shortInterval);
+        const netDailyRate = shortDailyRate - longDailyRate;
+        apr3d = netDailyRate * 365;
+        profit8h3d = netDailyRate / 3;
+      } else if (shortFundingData?.average3DayRate !== undefined && shortFundingData?.average3DayRate !== null) {
+        const shortInterval = shortFundingData?.fundingIntervalHours || 8;
+        const periodsPerYear = (365 * 24) / shortInterval;
+        apr3d = (shortFundingData.average3DayRate * 100) * periodsPerYear;
+        const periodsIn8Hours = 8 / shortInterval;
+        profit8h3d = (apr3d / 365) * periodsIn8Hours;
+      }
+    }
+
+    return {
+      ...opp,
+      _calculated: {
+        spread,
+        apr,
+        profit8h,
+        apr3d,
+        profit8h3d
+      }
+    };
+  });
+
+  // Get unique strategy types that have opportunities
+  const availableStrategies = new Set(
+    opportunitiesWithCalculations
+      .filter(opp => opp.status === 0)
+      .map(opp => opp.subType ?? 0)
+  );
+
+  const activeOpportunities = opportunitiesWithCalculations
     .filter((opp) => {
       // Only show Detected opportunities
       if (opp.status !== 0) return false;
 
+      // Filter by selected strategy (null means show all)
+      if (selectedStrategy !== null && opp.subType !== selectedStrategy) return false;
+
       return true; // Show all detected opportunities, including those being executed
     })
-    .sort((a, b) => b.annualizedSpread - a.annualizedSpread)
+    .sort((a, b) => {
+      let aValue: number, bValue: number;
+
+      switch (sortField) {
+        case 'spread':
+          aValue = a._calculated.spread;
+          bValue = b._calculated.spread;
+          break;
+        case '8hProfit':
+          aValue = a._calculated.profit8h;
+          bValue = b._calculated.profit8h;
+          break;
+        case '8hProfit3d':
+          aValue = a._calculated.profit8h3d ?? -Infinity;
+          bValue = b._calculated.profit8h3d ?? -Infinity;
+          break;
+        case 'apr':
+          aValue = a._calculated.apr;
+          bValue = b._calculated.apr;
+          break;
+        case 'apr3d':
+          aValue = a._calculated.apr3d ?? -Infinity;
+          bValue = b._calculated.apr3d ?? -Infinity;
+          break;
+        default:
+          aValue = a._calculated.apr;
+          bValue = b._calculated.apr;
+      }
+
+      return sortDirection === 'desc' ? bValue - aValue : aValue - bValue;
+    })
     .slice(0, 50); // Show top 50 opportunities
 
   const handleExecute = async (opp: any) => {
@@ -348,14 +491,58 @@ export const OpportunitiesList = () => {
 
       <Card className="h-full flex flex-col">
         <CardHeader className="p-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-1.5 text-sm">
-              <Target className="w-3 h-3 text-binance-yellow" />
-              Arbitrage Opportunities
-            </CardTitle>
-            <Badge variant="info" size="sm" className="text-[10px]">
-              {activeOpportunities.length} Active
-            </Badge>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-1.5 text-sm">
+                <Target className="w-3 h-3 text-binance-yellow" />
+                Arbitrage Opportunities
+              </CardTitle>
+              <Badge variant="info" size="sm" className="text-[10px]">
+                {activeOpportunities.length} Active
+              </Badge>
+            </div>
+            {availableStrategies.size > 0 && (
+              <div className="flex items-center gap-1 flex-wrap">
+                {availableStrategies.size > 1 && (
+                  <button
+                    onClick={() => setSelectedStrategy(null)}
+                    title="Show all strategies"
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
+                      selectedStrategy === null
+                        ? 'bg-binance-yellow/20 text-binance-yellow border-binance-yellow'
+                        : 'bg-gray-700/20 text-gray-600 opacity-50 border-gray-700'
+                    } hover:opacity-100 border`}
+                  >
+                    ALL
+                  </button>
+                )}
+                {[
+                  StrategySubType.SpotPerpetualSameExchange,
+                  StrategySubType.CrossExchangeFuturesFutures,
+                  StrategySubType.CrossExchangeSpotFutures,
+                  StrategySubType.CrossExchangeFuturesPriceSpread
+                ]
+                  .filter(strategyType => availableStrategies.has(strategyType))
+                  .map((strategyType) => {
+                    const label = getStrategyLabel(strategyType);
+                    const isSelected = selectedStrategy === strategyType;
+                    return (
+                      <button
+                        key={strategyType}
+                        onClick={() => setSelectedStrategy(strategyType)}
+                        title={label.fullText}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
+                          isSelected
+                            ? `${label.color} border-transparent`
+                            : 'bg-gray-700/20 text-gray-600 opacity-50 border-gray-700'
+                        } hover:opacity-100 border`}
+                      >
+                        {label.text}
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         </CardHeader>
 
@@ -371,17 +558,70 @@ export const OpportunitiesList = () => {
             <TableHeader className="sticky top-0 z-30">
               <TableRow hover={false}>
                 <TableHead className="sticky left-0 z-40 bg-binance-bg-secondary border-r border-binance-border">Symbol</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Exchange</TableHead>
+                <TableHead className="sticky left-[80px] z-40 bg-binance-bg-secondary border-r border-binance-border">Type</TableHead>
+                <TableHead className="sticky left-[145px] z-40 bg-binance-bg-secondary border-r border-binance-border">Exchange</TableHead>
                 <TableHead>Side</TableHead>
                 <TableHead className="text-right">Fee Rate</TableHead>
+                <TableHead className="text-right">3D Avg</TableHead>
                 <TableHead className="text-right">Fee Interval</TableHead>
                 <TableHead className="text-right">Next Funding</TableHead>
                 <TableHead className="text-right">24h Volume</TableHead>
                 <TableHead className="text-right">Liquidity</TableHead>
-                <TableHead className="text-right">Spread</TableHead>
-                <TableHead className="text-right">8h Profit</TableHead>
-                <TableHead className="text-right">APR</TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('spread')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Spread
+                    {sortField === 'spread' && (
+                      <ArrowUpDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('8hProfit')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    8h Profit
+                    {sortField === '8hProfit' && (
+                      <ArrowUpDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('8hProfit3d')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    8h Profit (3D)
+                    {sortField === '8hProfit3d' && (
+                      <ArrowUpDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('apr')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    APR
+                    {sortField === 'apr' && (
+                      <ArrowUpDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('apr3d')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    APR (3D)
+                    {sortField === 'apr3d' && (
+                      <ArrowUpDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -452,6 +692,43 @@ export const OpportunitiesList = () => {
                   ? ((perpPrice - spotPrice) / spotPrice) * 100
                   : 0;
 
+                // Calculate APR and 8H profit based on 3D average rates
+                let apr3d: number | null = null;
+                let profit8h3d: number | null = null;
+
+                if (longFundingData?.average3DayRate !== undefined && longFundingData?.average3DayRate !== null) {
+                  if (isSpotPerp) {
+                    // For spot-perp, use the long exchange 3D average
+                    const fundingIntervalHours = longFundingData?.fundingIntervalHours || 8;
+                    const periodsPerYear = (365 * 24) / fundingIntervalHours;
+                    apr3d = (longFundingData.average3DayRate * 100) * periodsPerYear;
+                    const periodsIn8Hours = 8 / fundingIntervalHours;
+                    profit8h3d = (apr3d / 365) * periodsIn8Hours;
+                  } else if (isCrossFut && shortFundingData?.average3DayRate !== undefined && shortFundingData?.average3DayRate !== null) {
+                    // For cross-futures, calculate based on both 3D averages
+                    const longInterval = longFundingData?.fundingIntervalHours || 8;
+                    const shortInterval = shortFundingData?.fundingIntervalHours || 8;
+
+                    // Calculate daily earnings from each position using 3D averages
+                    const longDailyRate = (longFundingData.average3DayRate * 100) * (24 / longInterval);
+                    const shortDailyRate = (shortFundingData.average3DayRate * 100) * (24 / shortInterval);
+
+                    // Net daily rate = short rate - long rate
+                    const netDailyRate = shortDailyRate - longDailyRate;
+                    apr3d = netDailyRate * 365;
+
+                    // 8H profit = (daily rate / 3)
+                    profit8h3d = netDailyRate / 3;
+                  } else if (shortFundingData?.average3DayRate !== undefined && shortFundingData?.average3DayRate !== null) {
+                    // For cross-exchange spot-futures, only short position has funding
+                    const shortInterval = shortFundingData?.fundingIntervalHours || 8;
+                    const periodsPerYear = (365 * 24) / shortInterval;
+                    apr3d = (shortFundingData.average3DayRate * 100) * periodsPerYear;
+                    const periodsIn8Hours = 8 / shortInterval;
+                    profit8h3d = (apr3d / 365) * periodsIn8Hours;
+                  }
+                }
+
                 const rows = [];
 
                 const isHovered = hoveredRow === uniqueKey;
@@ -466,15 +743,16 @@ export const OpportunitiesList = () => {
                     onMouseLeave={() => setHoveredRow(null)}
                   >
                     <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{opp.symbol}</TableCell>
-                    <TableCell rowSpan={2} className="py-1">
+                    <TableCell rowSpan={2} className={`sticky left-[80px] z-20 border-r border-binance-border py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`}>
                       <Badge
                         size="sm"
-                        className={`text-[10px] ${strategyLabel.color}`}
+                        className={`text-[10px] font-mono ${strategyLabel.color}`}
+                        title={strategyLabel.fullText}
                       >
                         {strategyLabel.text}
                       </Badge>
                     </TableCell>
-                    <TableCell className="py-1">
+                    <TableCell className={`sticky left-[145px] z-20 border-r border-binance-border py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`}>
                       <ExchangeBadge exchange={isSpotPerp ? opp.exchange : opp.longExchange} />
                     </TableCell>
                     <TableCell className="py-1">
@@ -513,6 +791,13 @@ export const OpportunitiesList = () => {
                     </TableCell>
                     <TableCell className="text-right py-1">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {longFundingData?.average3DayRate
+                          ? `${(longFundingData.average3DayRate * 100).toFixed(4)}%`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1">
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
                         {longFundingData?.fundingIntervalHours || 8}h
                       </span>
                     </TableCell>
@@ -546,7 +831,9 @@ export const OpportunitiesList = () => {
                       )}
                     </TableCell>
                     <TableCell className="text-right py-1" rowSpan={2}>
-                      <span className="font-mono text-[11px] font-bold text-binance-text-primary">
+                      <span className={`font-mono text-[11px] font-bold ${
+                        spread >= 0 ? 'text-binance-green' : 'text-binance-red'
+                      }`}>
                         {spread !== 0 ? `${spread >= 0 ? '+' : ''}${spread.toFixed(4)}%` : '-'}
                       </span>
                     </TableCell>
@@ -556,11 +843,29 @@ export const OpportunitiesList = () => {
                       </span>
                     </TableCell>
                     <TableCell className="text-right py-1" rowSpan={2}>
+                      <span className="font-mono text-[11px] font-bold text-binance-green">
+                        {profit8h3d !== null
+                          ? `${profit8h3d >= 0 ? '+' : ''}${profit8h3d.toFixed(4)}%`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1" rowSpan={2}>
                       <Badge variant="success" size="sm" className="text-[10px]">
                         <span className="font-mono font-bold">
                           {apr.toFixed(2)}%
                         </span>
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-right py-1" rowSpan={2}>
+                      {apr3d !== null ? (
+                        <Badge variant="success" size="sm" className="text-[10px]">
+                          <span className="font-mono font-bold">
+                            {apr3d.toFixed(2)}%
+                          </span>
+                        </Badge>
+                      ) : (
+                        <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
+                      )}
                     </TableCell>
                     <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                       {findMatchingPositions(opp).length > 0 ? (
@@ -603,7 +908,7 @@ export const OpportunitiesList = () => {
                     onMouseEnter={() => setHoveredRow(uniqueKey)}
                     onMouseLeave={() => setHoveredRow(null)}
                   >
-                    <TableCell className="py-1">
+                    <TableCell className={`sticky left-[145px] z-20 border-r border-binance-border py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`}>
                       <ExchangeBadge exchange={isSpotPerp ? opp.exchange : (isCrossFut ? opp.shortExchange : opp.shortExchange)} />
                     </TableCell>
                     <TableCell className="py-1">
@@ -636,6 +941,15 @@ export const OpportunitiesList = () => {
                           shortFundingData
                             ? `${(shortFundingData.rate * 100).toFixed(4)}%`
                             : `${(opp.shortFundingRate * 100).toFixed(4)}%`
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-1">
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {isSpotPerp ? '--' : (
+                          shortFundingData?.average3DayRate
+                            ? `${(shortFundingData.average3DayRate * 100).toFixed(4)}%`
+                            : '--'
                         )}
                       </span>
                     </TableCell>
