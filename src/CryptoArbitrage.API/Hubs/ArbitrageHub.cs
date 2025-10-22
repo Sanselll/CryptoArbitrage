@@ -54,11 +54,7 @@ public class ArbitrageHub : Hub
 
         // Add connection to user-specific group
         await Groups.AddToGroupAsync(Context.ConnectionId, $"user_{userId}");
-
-        _logger.LogInformation(
-            "User {UserId} ({Email}) connected to SignalR (ConnectionId: {ConnectionId})",
-            userId, email, Context.ConnectionId);
-
+        
         // Broadcast initial cached data in background to avoid blocking connection
         _ = Task.Run(async () =>
         {

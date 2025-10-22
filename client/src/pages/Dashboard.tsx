@@ -3,7 +3,7 @@ import { useArbitrageStore } from '../stores/arbitrageStore';
 import { Header } from '../components/Header';
 import { BalanceWidget } from '../components/BalanceWidget';
 import { OpportunitiesList } from '../components/OpportunitiesList';
-import { PositionsGrid } from '../components/PositionsGrid';
+import { TradingDataTabs } from '../components/TradingDataTabs';
 import apiClient from '../services/apiClient';
 import axios from 'axios';
 
@@ -88,9 +88,9 @@ export function Dashboard() {
               <OpportunitiesList />
             </div>
 
-            {/* Positions Grid - Bottom Section */}
+            {/* Trading Data Tabs - Bottom Section */}
             <div className="flex-shrink-0 h-80">
-              <PositionsGrid />
+              <TradingDataTabs />
             </div>
           </div>
         )}

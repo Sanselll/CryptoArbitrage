@@ -11,6 +11,8 @@ using Binance.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using PositionSide = CryptoArbitrage.API.Data.Entities.PositionSide;
+using BinanceOrderSide = Binance.Net.Enums.OrderSide;
+using ModelOrderSide = CryptoArbitrage.API.Models.OrderSide;
 
 namespace CryptoArbitrage.API.Services.Exchanges;
 
@@ -63,7 +65,6 @@ public class BinanceConnector : IExchangeConnector
 
                 if (accountInfo.Success)
                 {
-                    _logger.LogInformation("Successfully connected to Binance with API credentials");
                     return true;
                 }
 
@@ -303,9 +304,7 @@ public class BinanceConnector : IExchangeConnector
                 }
             }
 
-            var spotSymbolsList = string.Join(", ", spotPrices.Keys.OrderBy(s => s));
-            _logger.LogInformation("Fetched {Count} spot prices from Binance: {Symbols}", spotPrices.Count,
-                spotSymbolsList);
+         
         }
         catch (Exception ex)
         {
@@ -342,7 +341,6 @@ public class BinanceConnector : IExchangeConnector
                 }
             }
 
-            _logger.LogInformation("Fetched {Count} perpetual prices from Binance", perpPrices.Count);
         }
         catch (Exception ex)
         {
@@ -422,8 +420,7 @@ public class BinanceConnector : IExchangeConnector
     {
         if (_restClient == null)
             throw new InvalidOperationException("Not connected to Binance");
-
-        _logger.LogInformation("=== GetAccountBalanceAsync Started ===");
+        
 
         decimal futuresTotal = 0;
         decimal futuresAvailable = 0;
@@ -435,16 +432,9 @@ public class BinanceConnector : IExchangeConnector
         try
         {
             var futuresBalances = await _restClient.UsdFuturesApi.Account.GetBalancesAsync();
+            
 
-            _logger.LogInformation("Futures API call completed. Success: {Success}", futuresBalances.Success);
-
-            if (!futuresBalances.Success)
-            {
-                _logger.LogWarning("Futures balance fetch FAILED");
-                _logger.LogWarning("Error Code: {Code}", futuresBalances.Error?.Code);
-                _logger.LogWarning("Error Message: {Message}", futuresBalances.Error?.Message);
-            }
-            else if (futuresBalances.Data != null && futuresBalances.Data.Any())
+            if (futuresBalances.Data != null && futuresBalances.Data.Any())
             {
                 var usdtBalance = futuresBalances.Data.FirstOrDefault(b => b.Asset == "USDT");
                 if (usdtBalance != null)
@@ -480,8 +470,7 @@ public class BinanceConnector : IExchangeConnector
         try
         {
             spotBalances = await GetSpotBalancesAsync();
-
-            _logger.LogInformation("✓ Spot balances fetched successfully. Assets count: {Count}", spotBalances.Count);
+            
 
             // Convert spot assets to USD equivalent
             if (spotBalances.Any())
@@ -526,23 +515,13 @@ public class BinanceConnector : IExchangeConnector
         {
             _logger.LogError(ex, "✗ Exception fetching spot balances - will continue with futures only");
         }
-
-        // Log final summary
-        _logger.LogInformation("=== Balance Fetch Summary ===");
-        _logger.LogInformation("Futures Success: {FuturesSuccess}", futuresSuccess);
-        _logger.LogInformation("Spot Success: {SpotSuccess}", spotSuccess);
+        
 
         if (!futuresSuccess && !spotSuccess)
         {
             _logger.LogError("CRITICAL: Both futures and spot balance fetches FAILED - returning DTO with zeros");
         }
-
-        // If futures failed, log that we're using 0 values
-        if (!futuresSuccess)
-        {
-            _logger.LogInformation("Using default futures values (all 0) since futures fetch failed");
-        }
-
+        
         // Calculate operational balance
         decimal operationalBalance = spotTotalUsd + futuresTotal;
 
@@ -744,7 +723,7 @@ public class BinanceConnector : IExchangeConnector
             // Set leverage first
             await _restClient.UsdFuturesApi.Account.ChangeInitialLeverageAsync(symbol, (int) leverage);
 
-            var orderSide = side == PositionSide.Long ? OrderSide.Buy : OrderSide.Sell;
+            var orderSide = side == PositionSide.Long ? BinanceOrderSide.Buy : BinanceOrderSide.Sell;
             var positionSide = side == PositionSide.Long
                 ? Binance.Net.Enums.PositionSide.Long
                 : Binance.Net.Enums.PositionSide.Short;
@@ -795,7 +774,7 @@ public class BinanceConnector : IExchangeConnector
             {
                 foreach (var position in positions.Data.Where(p => p.Quantity != 0))
                 {
-                    var orderSide = position.Quantity > 0 ? OrderSide.Sell : OrderSide.Buy;
+                    var orderSide = position.Quantity > 0 ? BinanceOrderSide.Sell : BinanceOrderSide.Buy;
                     var quantity = Math.Abs(position.Quantity);
 
                     await _restClient.UsdFuturesApi.Trading.PlaceOrderAsync(
@@ -976,8 +955,7 @@ public class BinanceConnector : IExchangeConnector
                 {
                     balances[balance.Asset] = balance.Total;
                 }
-
-                _logger.LogInformation("Fetched {Count} spot asset balances from Binance", balances.Count);
+                
             }
         }
         catch (Exception ex)
@@ -1219,5 +1197,323 @@ public class BinanceConnector : IExchangeConnector
         }
 
         return adjustedQuantity;
+    }
+
+    public async Task<List<OrderDto>> GetOpenOrdersAsync()
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Binance");
+
+        var orders = new List<OrderDto>();
+
+        try
+        {
+            var result = await _restClient.UsdFuturesApi.Trading.GetOpenOrdersAsync();
+
+            if (result.Success && result.Data != null)
+            {
+                orders = result.Data.Select(o => new OrderDto
+                {
+                    Exchange = ExchangeName,
+                    OrderId = o.Id.ToString(),
+                    ClientOrderId = o.ClientOrderId,
+                    Symbol = o.Symbol,
+                    Side = o.Side == Binance.Net.Enums.OrderSide.Buy ? Models.OrderSide.Buy : Models.OrderSide.Sell,
+                    Type = MapBinanceOrderType(o.Type),
+                    Status = MapBinanceOrderStatus(o.Status),
+                    TimeInForce = o.TimeInForce.ToString(),
+                    Price = o.Price,
+                    AveragePrice = o.AveragePrice,
+                    StopPrice = o.StopPrice,
+                    Quantity = o.Quantity,
+                    FilledQuantity = o.QuantityFilled,
+                    Fee = 0,
+                    FeeAsset = null,
+                    CreatedAt = o.CreateTime,
+                    UpdatedAt = o.UpdateTime > DateTime.MinValue ? o.UpdateTime : o.CreateTime,
+                    WorkingTime = null,
+                    ReduceOnly = o.ReduceOnly.ToString(),
+                    PostOnly = null
+                }).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching open orders from Binance");
+        }
+
+        return orders;
+    }
+
+    public async Task<List<OrderDto>> GetOrderHistoryAsync(DateTime? startTime = null, DateTime? endTime = null, int limit = 100)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Binance");
+
+        var orders = new List<OrderDto>();
+
+        try
+        {
+            _logger.LogDebug("Fetching order history from Binance (startTime: {StartTime}, endTime: {EndTime}, limit: {Limit})",
+                startTime, endTime, limit);
+
+            var result = await _restClient.UsdFuturesApi.Trading.GetOrdersAsync(
+                startTime: startTime,
+                endTime: endTime,
+                limit: limit);
+
+            if (!result.Success)
+            {
+                _logger.LogWarning("Failed to fetch orders from Binance: {Error} (Code: {Code})",
+                    result.Error?.Message ?? "Unknown error",
+                    result.Error?.Code);
+                return orders;
+            }
+
+            if (result.Data == null)
+            {
+                _logger.LogWarning("Binance GetOrdersAsync returned null data");
+                return orders;
+            }
+
+            if (!result.Data.Any())
+            {
+                _logger.LogDebug("No orders found in Binance order history");
+                return orders;
+            }
+
+            orders = result.Data.Select(o => new OrderDto
+            {
+                Exchange = ExchangeName,
+                OrderId = o.Id.ToString(),
+                ClientOrderId = o.ClientOrderId,
+                Symbol = o.Symbol,
+                Side = o.Side == Binance.Net.Enums.OrderSide.Buy ? Models.OrderSide.Buy : Models.OrderSide.Sell,
+                Type = MapBinanceOrderType(o.Type),
+                Status = MapBinanceOrderStatus(o.Status),
+                TimeInForce = o.TimeInForce.ToString(),
+                Price = o.Price,
+                AveragePrice = o.AveragePrice,
+                StopPrice = o.StopPrice,
+                Quantity = o.Quantity,
+                FilledQuantity = o.QuantityFilled,
+                Fee = 0,
+                FeeAsset = null,
+                CreatedAt = o.CreateTime,
+                UpdatedAt = o.UpdateTime > DateTime.MinValue ? o.UpdateTime : o.CreateTime,
+                WorkingTime = null,
+                ReduceOnly = o.ReduceOnly.ToString(),
+                PostOnly = null
+            }).ToList();
+
+            _logger.LogInformation("Fetched {Count} orders from Binance", orders.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching order history from Binance");
+        }
+
+        return orders;
+    }
+
+    public async Task<List<TradeDto>> GetUserTradesAsync(DateTime? startTime = null, DateTime? endTime = null, int limit = 100)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Binance");
+
+        var trades = new List<TradeDto>();
+
+        try
+        {
+            // Binance API requires symbol parameter for trades. First, get all orders to determine symbols with activity
+            var ordersResult = await _restClient.UsdFuturesApi.Trading.GetOrdersAsync(
+                startTime: startTime,
+                endTime: endTime,
+                limit: 1000); // Get more orders to find all active symbols
+
+            if (!ordersResult.Success || ordersResult.Data == null)
+            {
+                _logger.LogWarning("Could not fetch orders to determine symbols for trade history: {Error}",
+                    ordersResult.Error?.Message ?? "Unknown error");
+                return trades;
+            }
+
+            // Get unique symbols from orders
+            var symbols = ordersResult.Data
+                .Select(o => o.Symbol)
+                .Distinct()
+                .ToList();
+
+            if (!symbols.Any())
+            {
+                _logger.LogDebug("No symbols found in order history for Binance");
+                return trades;
+            }
+
+            _logger.LogDebug("Fetching trades for {Count} symbols on Binance", symbols.Count);
+
+            // Fetch trades for each symbol
+            foreach (var symbol in symbols)
+            {
+                try
+                {
+                    var tradesResult = await _restClient.UsdFuturesApi.Trading.GetUserTradesAsync(
+                        symbol: symbol,
+                        startTime: startTime,
+                        endTime: endTime,
+                        limit: limit);
+
+                    if (tradesResult.Success && tradesResult.Data != null)
+                    {
+                        var symbolTrades = tradesResult.Data.Select(t => new TradeDto
+                        {
+                            Exchange = ExchangeName,
+                            TradeId = t.Id.ToString(),
+                            OrderId = t.OrderId.ToString(),
+                            Symbol = t.Symbol,
+                            Side = t.Side == Binance.Net.Enums.OrderSide.Buy ? Models.OrderSide.Buy : Models.OrderSide.Sell,
+                            Price = t.Price,
+                            Quantity = t.Quantity,
+                            QuoteQuantity = t.QuoteQuantity,
+                            Commission = t.Fee,
+                            CommissionAsset = t.FeeAsset,
+                            IsMaker = t.Maker,
+                            IsBuyer = t.Side == Binance.Net.Enums.OrderSide.Buy,
+                            ExecutedAt = t.Timestamp
+                        }).ToList();
+
+                        trades.AddRange(symbolTrades);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error fetching trades for symbol {Symbol} from Binance", symbol);
+                }
+            }
+
+            _logger.LogInformation("Fetched {Count} trades across {SymbolCount} symbols from Binance",
+                trades.Count, symbols.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching user trades from Binance");
+        }
+
+        return trades;
+    }
+
+    public async Task<List<TransactionDto>> GetTransactionsAsync(DateTime? startTime = null, DateTime? endTime = null, int limit = 100)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Binance");
+
+        var transactions = new List<TransactionDto>();
+
+        try
+        {
+            _logger.LogDebug("Fetching Binance income history from {StartTime} to {EndTime}, limit {Limit}",
+                startTime, endTime, limit);
+
+            var result = await _restClient.UsdFuturesApi.Account.GetIncomeHistoryAsync(
+                startTime: startTime,
+                endTime: endTime,
+                limit: limit);
+
+            if (result.Success && result.Data != null)
+            {
+                transactions = result.Data.Select(t =>
+                {
+                    var incomeType = t.IncomeType ?? Binance.Net.Enums.IncomeType.Transfer;
+                    // For commission transactions, the income value (negative) represents the fee paid
+                    var fee = incomeType == Binance.Net.Enums.IncomeType.Commission
+                        ? Math.Abs(t.Income)
+                        : 0m;
+
+                    return new TransactionDto
+                    {
+                        Exchange = ExchangeName,
+                        TransactionId = t.TransactionId?.ToString() ?? t.Timestamp.Ticks.ToString(),
+                        TxHash = t.TransactionId?.ToString(),
+                        Type = MapBinanceIncomeType(incomeType),
+                        Asset = t.Asset ?? string.Empty,
+                        Amount = t.Income,
+                        Status = Models.TransactionStatus.Confirmed,
+                        FromAddress = null,
+                        ToAddress = null,
+                        Network = null,
+                        Info = t.Info,
+                        Symbol = t.Symbol,
+                        TradeId = t.TradeId?.ToString(),
+                        Fee = fee,
+                        FeeAsset = fee > 0 ? t.Asset : null,
+                        CreatedAt = t.Timestamp,
+                        ConfirmedAt = t.Timestamp
+                    };
+                }).ToList();
+
+                _logger.LogInformation("Fetched {Count} income transactions from Binance (commissions: {CommissionCount}, PnL: {PnLCount})",
+                    transactions.Count,
+                    transactions.Count(t => t.Type == Models.TransactionType.Commission),
+                    transactions.Count(t => t.Type == Models.TransactionType.RealizedPnL));
+            }
+            else
+            {
+                _logger.LogWarning("Failed to fetch transactions from Binance: {Error}", result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching transactions from Binance");
+        }
+
+        return transactions;
+    }
+
+    private Models.OrderType MapBinanceOrderType(Binance.Net.Enums.FuturesOrderType type)
+    {
+        return type switch
+        {
+            Binance.Net.Enums.FuturesOrderType.Market => Models.OrderType.Market,
+            Binance.Net.Enums.FuturesOrderType.Limit => Models.OrderType.Limit,
+            Binance.Net.Enums.FuturesOrderType.Stop => Models.OrderType.StopMarket,
+            Binance.Net.Enums.FuturesOrderType.StopMarket => Models.OrderType.StopMarket,
+            Binance.Net.Enums.FuturesOrderType.TakeProfit => Models.OrderType.TakeProfitMarket,
+            Binance.Net.Enums.FuturesOrderType.TakeProfitMarket => Models.OrderType.TakeProfitMarket,
+            _ => Models.OrderType.Market
+        };
+    }
+
+    private Models.OrderStatus MapBinanceOrderStatus(Binance.Net.Enums.OrderStatus status)
+    {
+        return status switch
+        {
+            Binance.Net.Enums.OrderStatus.New => Models.OrderStatus.New,
+            Binance.Net.Enums.OrderStatus.PartiallyFilled => Models.OrderStatus.PartiallyFilled,
+            Binance.Net.Enums.OrderStatus.Filled => Models.OrderStatus.Filled,
+            Binance.Net.Enums.OrderStatus.Canceled => Models.OrderStatus.Canceled,
+            Binance.Net.Enums.OrderStatus.Rejected => Models.OrderStatus.Rejected,
+            Binance.Net.Enums.OrderStatus.Expired => Models.OrderStatus.Expired,
+            _ => Models.OrderStatus.New
+        };
+    }
+
+    private Models.TransactionType MapBinanceIncomeType(Binance.Net.Enums.IncomeType type)
+    {
+        return type switch
+        {
+            Binance.Net.Enums.IncomeType.RealizedPnl => Models.TransactionType.RealizedPnL,
+            Binance.Net.Enums.IncomeType.FundingFee => Models.TransactionType.FundingFee,
+            Binance.Net.Enums.IncomeType.Commission => Models.TransactionType.Commission,
+            Binance.Net.Enums.IncomeType.ReferralKickback => Models.TransactionType.ReferralKickback,
+            Binance.Net.Enums.IncomeType.CommissionRebate => Models.TransactionType.CommissionRebate,
+            Binance.Net.Enums.IncomeType.ApiRebate => Models.TransactionType.Rebate,
+            Binance.Net.Enums.IncomeType.ContestReward => Models.TransactionType.ContestReward,
+            Binance.Net.Enums.IncomeType.InsuranceClear => Models.TransactionType.InsuranceClear,
+            Binance.Net.Enums.IncomeType.Transfer => Models.TransactionType.Transfer,
+            Binance.Net.Enums.IncomeType.InternalTransfer => Models.TransactionType.InternalTransfer,
+            Binance.Net.Enums.IncomeType.WelcomeBonus => Models.TransactionType.WelcomeBonus,
+            Binance.Net.Enums.IncomeType.DeliveredSettlement => Models.TransactionType.Settlement,
+            _ => Models.TransactionType.Other
+        };
     }
 }

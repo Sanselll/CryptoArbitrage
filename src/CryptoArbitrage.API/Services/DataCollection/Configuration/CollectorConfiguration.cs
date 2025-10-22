@@ -152,6 +152,77 @@ public class LiquidityCollectorConfiguration : CollectorConfiguration
 }
 
 /// <summary>
+/// Configuration for open orders collector
+/// </summary>
+public class OpenOrdersCollectorConfiguration : CollectorConfiguration
+{
+    public OpenOrdersCollectorConfiguration()
+    {
+        CollectionIntervalSeconds = 30; // Every 30 seconds
+        StorageStrategy = StorageStrategy.MemoryOnly;
+        CacheTtlMinutes = 5;
+        MaxParallelFetches = 3;
+    }
+}
+
+/// <summary>
+/// Configuration for order history collector
+/// </summary>
+public class OrderHistoryCollectorConfiguration : CollectorConfiguration
+{
+    public OrderHistoryCollectorConfiguration()
+    {
+        CollectionIntervalSeconds = 300; // Every 5 minutes
+        StorageStrategy = StorageStrategy.MemoryOnly;
+        CacheTtlMinutes = 10;
+        MaxParallelFetches = 3;
+    }
+
+    /// <summary>
+    /// Number of days to fetch history for
+    /// </summary>
+    public int HistoryDays { get; set; } = 7;
+}
+
+/// <summary>
+/// Configuration for trade history collector
+/// </summary>
+public class TradeHistoryCollectorConfiguration : CollectorConfiguration
+{
+    public TradeHistoryCollectorConfiguration()
+    {
+        CollectionIntervalSeconds = 60; // Every minute
+        StorageStrategy = StorageStrategy.MemoryOnly;
+        CacheTtlMinutes = 10;
+        MaxParallelFetches = 3;
+    }
+
+    /// <summary>
+    /// Number of days to fetch history for
+    /// </summary>
+    public int HistoryDays { get; set; } = 7;
+}
+
+/// <summary>
+/// Configuration for transaction history collector
+/// </summary>
+public class TransactionHistoryCollectorConfiguration : CollectorConfiguration
+{
+    public TransactionHistoryCollectorConfiguration()
+    {
+        CollectionIntervalSeconds = 300; // Every 5 minutes
+        StorageStrategy = StorageStrategy.MemoryOnly;
+        CacheTtlMinutes = 15;
+        MaxParallelFetches = 3;
+    }
+
+    /// <summary>
+    /// Number of days to fetch history for
+    /// </summary>
+    public int HistoryDays { get; set; } = 7;
+}
+
+/// <summary>
 /// Master configuration for all data collectors
 /// </summary>
 public class DataCollectionConfiguration
@@ -162,4 +233,8 @@ public class DataCollectionConfiguration
     public VolumeCollectorConfiguration Volume { get; set; } = new();
     public UserDataCollectorConfiguration UserData { get; set; } = new();
     public LiquidityCollectorConfiguration Liquidity { get; set; } = new();
+    public OpenOrdersCollectorConfiguration OpenOrders { get; set; } = new();
+    public OrderHistoryCollectorConfiguration OrderHistory { get; set; } = new();
+    public TradeHistoryCollectorConfiguration TradeHistory { get; set; } = new();
+    public TransactionHistoryCollectorConfiguration TransactionHistory { get; set; } = new();
 }

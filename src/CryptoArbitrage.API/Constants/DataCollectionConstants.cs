@@ -84,5 +84,25 @@ public static class DataCollectionConstants
         /// Published when liquidity metrics are collected from exchanges
         /// </summary>
         public const string LiquidityMetricsCollected = "LiquidityMetricsCollected";
+
+        /// <summary>
+        /// Published when open orders are collected for users
+        /// </summary>
+        public const string OpenOrdersCollected = "OpenOrdersCollected";
+
+        /// <summary>
+        /// Published when order history is collected for users
+        /// </summary>
+        public const string OrderHistoryCollected = "OrderHistoryCollected";
+
+        /// <summary>
+        /// Published when trade history is collected for users
+        /// </summary>
+        public const string TradeHistoryCollected = "TradeHistoryCollected";
+
+        /// <summary>
+        /// Published when transaction history is collected for users
+        /// </summary>
+        public const string TransactionHistoryCollected = "TransactionHistoryCollected";
     }
 }

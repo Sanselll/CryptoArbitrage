@@ -76,7 +76,7 @@ const TableHead = forwardRef<
   <th
     ref={ref}
     className={cn(
-      'h-9 px-4 text-left align-middle font-bold text-binance-text-secondary uppercase text-[9px] tracking-wide',
+      'px-4 py-2 text-left align-middle font-bold text-binance-text-secondary uppercase text-[9px] tracking-wide',
       className
     )}
     {...props}
@@ -91,7 +91,7 @@ const TableCell = forwardRef<
   <td
     ref={ref}
     className={cn(
-      'px-4 py-3 align-middle text-binance-text',
+      'px-4 py-1 align-middle text-binance-text',
       className
     )}
     {...props}

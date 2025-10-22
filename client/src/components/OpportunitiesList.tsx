@@ -298,7 +298,7 @@ export const OpportunitiesList = () => {
 
       return sortDirection === 'desc' ? bValue - aValue : aValue - bValue;
     })
-    .slice(0, 50); // Show top 50 opportunities
+    .slice(0, 200); // Show top 200 opportunities
 
   const handleExecute = async (opp: any) => {
     try {
@@ -491,58 +491,58 @@ export const OpportunitiesList = () => {
 
       <Card className="h-full flex flex-col">
         <CardHeader className="p-2">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
               <CardTitle className="flex items-center gap-1.5 text-sm">
                 <Target className="w-3 h-3 text-binance-yellow" />
                 Arbitrage Opportunities
               </CardTitle>
-              <Badge variant="info" size="sm" className="text-[10px]">
-                {activeOpportunities.length} Active
-              </Badge>
+              {availableStrategies.size > 0 && (
+                <div className="flex items-center gap-1 flex-wrap">
+                  {availableStrategies.size > 1 && (
+                    <button
+                      onClick={() => setSelectedStrategy(null)}
+                      title="Show all strategies"
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
+                        selectedStrategy === null
+                          ? 'bg-binance-yellow/20 text-binance-yellow border-binance-yellow'
+                          : 'bg-gray-700/20 text-gray-600 opacity-50 border-gray-700'
+                      } hover:opacity-100 border`}
+                    >
+                      ALL
+                    </button>
+                  )}
+                  {[
+                    StrategySubType.SpotPerpetualSameExchange,
+                    StrategySubType.CrossExchangeFuturesFutures,
+                    StrategySubType.CrossExchangeSpotFutures,
+                    StrategySubType.CrossExchangeFuturesPriceSpread
+                  ]
+                    .filter(strategyType => availableStrategies.has(strategyType))
+                    .map((strategyType) => {
+                      const label = getStrategyLabel(strategyType);
+                      const isSelected = selectedStrategy === strategyType;
+                      return (
+                        <button
+                          key={strategyType}
+                          onClick={() => setSelectedStrategy(strategyType)}
+                          title={label.fullText}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
+                            isSelected
+                              ? `${label.color} border-transparent`
+                              : 'bg-gray-700/20 text-gray-600 opacity-50 border-gray-700'
+                          } hover:opacity-100 border`}
+                        >
+                          {label.text}
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
             </div>
-            {availableStrategies.size > 0 && (
-              <div className="flex items-center gap-1 flex-wrap">
-                {availableStrategies.size > 1 && (
-                  <button
-                    onClick={() => setSelectedStrategy(null)}
-                    title="Show all strategies"
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
-                      selectedStrategy === null
-                        ? 'bg-binance-yellow/20 text-binance-yellow border-binance-yellow'
-                        : 'bg-gray-700/20 text-gray-600 opacity-50 border-gray-700'
-                    } hover:opacity-100 border`}
-                  >
-                    ALL
-                  </button>
-                )}
-                {[
-                  StrategySubType.SpotPerpetualSameExchange,
-                  StrategySubType.CrossExchangeFuturesFutures,
-                  StrategySubType.CrossExchangeSpotFutures,
-                  StrategySubType.CrossExchangeFuturesPriceSpread
-                ]
-                  .filter(strategyType => availableStrategies.has(strategyType))
-                  .map((strategyType) => {
-                    const label = getStrategyLabel(strategyType);
-                    const isSelected = selectedStrategy === strategyType;
-                    return (
-                      <button
-                        key={strategyType}
-                        onClick={() => setSelectedStrategy(strategyType)}
-                        title={label.fullText}
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
-                          isSelected
-                            ? `${label.color} border-transparent`
-                            : 'bg-gray-700/20 text-gray-600 opacity-50 border-gray-700'
-                        } hover:opacity-100 border`}
-                      >
-                        {label.text}
-                      </button>
-                    );
-                  })}
-              </div>
-            )}
+            <Badge variant="info" size="sm" className="text-[10px]">
+              {activeOpportunities.length} Active
+            </Badge>
           </div>
         </CardHeader>
 
@@ -560,7 +560,7 @@ export const OpportunitiesList = () => {
                 <TableHead className="sticky left-0 z-40 bg-binance-bg-secondary border-r border-binance-border">Symbol</TableHead>
                 <TableHead className="sticky left-[80px] z-40 bg-binance-bg-secondary border-r border-binance-border">Type</TableHead>
                 <TableHead className="sticky left-[145px] z-40 bg-binance-bg-secondary border-r border-binance-border">Exchange</TableHead>
-                <TableHead>Side</TableHead>
+                <TableHead className="py-1">Side</TableHead>
                 <TableHead className="text-right">Fee Rate</TableHead>
                 <TableHead className="text-right">3D Avg</TableHead>
                 <TableHead className="text-right">Fee Interval</TableHead>
@@ -742,8 +742,8 @@ export const OpportunitiesList = () => {
                     onMouseEnter={() => setHoveredRow(uniqueKey)}
                     onMouseLeave={() => setHoveredRow(null)}
                   >
-                    <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{opp.symbol}</TableCell>
-                    <TableCell rowSpan={2} className={`sticky left-[80px] z-20 border-r border-binance-border py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`}>
+                    <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{opp.symbol}</TableCell>
+                    <TableCell rowSpan={2} className={`sticky left-[80px] z-20 border-r border-binance-border ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`}>
                       <Badge
                         size="sm"
                         className={`text-[10px] font-mono ${strategyLabel.color}`}
@@ -752,7 +752,7 @@ export const OpportunitiesList = () => {
                         {strategyLabel.text}
                       </Badge>
                     </TableCell>
-                    <TableCell className={`sticky left-[145px] z-20 border-r border-binance-border py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`}>
+                    <TableCell className={`sticky left-[145px] z-20 border-r border-binance-border ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`}>
                       <ExchangeBadge exchange={isSpotPerp ? opp.exchange : opp.longExchange} />
                     </TableCell>
                     <TableCell className="py-1">
@@ -779,7 +779,7 @@ export const OpportunitiesList = () => {
                         ))}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       <span className="font-mono text-[11px]">
                         {longFundingData
                           ? `${(longFundingData.rate * 100).toFixed(4)}%`
@@ -789,19 +789,19 @@ export const OpportunitiesList = () => {
                         }
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
                         {longFundingData?.average3DayRate
                           ? `${(longFundingData.average3DayRate * 100).toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
                         {longFundingData?.fundingIntervalHours || 8}h
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-0.5">
                         <Clock className="w-2.5 h-2.5 text-binance-text-secondary" />
                         <span className="font-mono text-[11px] text-binance-text-secondary">
@@ -809,14 +809,14 @@ export const OpportunitiesList = () => {
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
                         {opp.longVolume24h && opp.longVolume24h > 0
                           ? `$${(opp.longVolume24h / 1000000).toFixed(2)}M`
                           : '--'}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1" rowSpan={2}>
+                    <TableCell className="text-right" rowSpan={2}>
                       {opp.liquidityStatus !== undefined ? (
                         <Badge
                           variant={getLiquidityBadge(opp.liquidityStatus).variant}
@@ -830,33 +830,33 @@ export const OpportunitiesList = () => {
                         <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right py-1" rowSpan={2}>
+                    <TableCell className="text-right" rowSpan={2}>
                       <span className={`font-mono text-[11px] font-bold ${
                         spread >= 0 ? 'text-binance-green' : 'text-binance-red'
                       }`}>
                         {spread !== 0 ? `${spread >= 0 ? '+' : ''}${spread.toFixed(4)}%` : '-'}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1" rowSpan={2}>
+                    <TableCell className="text-right" rowSpan={2}>
                       <span className="font-mono text-[11px] font-bold text-binance-green">
                         {`${profit8h >= 0 ? '+' : ''}${profit8h.toFixed(4)}%`}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1" rowSpan={2}>
+                    <TableCell className="text-right" rowSpan={2}>
                       <span className="font-mono text-[11px] font-bold text-binance-green">
                         {profit8h3d !== null
                           ? `${profit8h3d >= 0 ? '+' : ''}${profit8h3d.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1" rowSpan={2}>
+                    <TableCell className="text-right" rowSpan={2}>
                       <Badge variant="success" size="sm" className="text-[10px]">
                         <span className="font-mono font-bold">
                           {apr.toFixed(2)}%
                         </span>
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right py-1" rowSpan={2}>
+                    <TableCell className="text-right" rowSpan={2}>
                       {apr3d !== null ? (
                         <Badge variant="success" size="sm" className="text-[10px]">
                           <span className="font-mono font-bold">
@@ -867,7 +867,7 @@ export const OpportunitiesList = () => {
                         <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
                       )}
                     </TableCell>
-                    <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                    <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                       {findMatchingPositions(opp).length > 0 ? (
                         <Badge
                           variant="success"
@@ -908,7 +908,7 @@ export const OpportunitiesList = () => {
                     onMouseEnter={() => setHoveredRow(uniqueKey)}
                     onMouseLeave={() => setHoveredRow(null)}
                   >
-                    <TableCell className={`sticky left-[145px] z-20 border-r border-binance-border py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`}>
+                    <TableCell className={`sticky left-[145px] z-20 border-r border-binance-border ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`}>
                       <ExchangeBadge exchange={isSpotPerp ? opp.exchange : (isCrossFut ? opp.shortExchange : opp.shortExchange)} />
                     </TableCell>
                     <TableCell className="py-1">
@@ -935,7 +935,7 @@ export const OpportunitiesList = () => {
                         ))}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
                         {isSpotPerp ? '--' : (
                           shortFundingData
@@ -944,7 +944,7 @@ export const OpportunitiesList = () => {
                         )}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
                         {isSpotPerp ? '--' : (
                           shortFundingData?.average3DayRate
@@ -953,12 +953,12 @@ export const OpportunitiesList = () => {
                         )}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
                         {isSpotPerp ? '--' : `${shortFundingData?.fundingIntervalHours || 8}h`}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       {isSpotPerp ? (
                         <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
                       ) : (
@@ -970,7 +970,7 @@ export const OpportunitiesList = () => {
                         </div>
                       )}
                     </TableCell>
-                    <TableCell className="text-right py-1">
+                    <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
                         {isSpotPerp
                           ? '--'

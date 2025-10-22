@@ -22,6 +22,10 @@ public class SignalRBroadcaster : IHostedService
     private int _lastOpportunitiesHash = 0;
     private readonly Dictionary<string, int> _lastUserBalancesHash = new();
     private readonly Dictionary<string, int> _lastUserPositionsHash = new();
+    private readonly Dictionary<string, int> _lastUserOpenOrdersHash = new();
+    private readonly Dictionary<string, int> _lastUserOrderHistoryHash = new();
+    private readonly Dictionary<string, int> _lastUserTradeHistoryHash = new();
+    private readonly Dictionary<string, int> _lastUserTransactionHistoryHash = new();
 
     private readonly object _hashLock = new();
 
@@ -49,6 +53,22 @@ public class SignalRBroadcaster : IHostedService
         _eventBus.Subscribe<IDictionary<string, UserDataSnapshot>>(
             DataCollectionConstants.EventTypes.UserDataCollected,
             OnUserDataCollectedAsync);
+
+        _eventBus.Subscribe<IDictionary<string, List<OrderDto>>>(
+            DataCollectionConstants.EventTypes.OpenOrdersCollected,
+            OnOpenOrdersCollectedAsync);
+
+        _eventBus.Subscribe<IDictionary<string, List<OrderDto>>>(
+            DataCollectionConstants.EventTypes.OrderHistoryCollected,
+            OnOrderHistoryCollectedAsync);
+
+        _eventBus.Subscribe<IDictionary<string, List<TradeDto>>>(
+            DataCollectionConstants.EventTypes.TradeHistoryCollected,
+            OnTradeHistoryCollectedAsync);
+
+        _eventBus.Subscribe<IDictionary<string, List<TransactionDto>>>(
+            DataCollectionConstants.EventTypes.TransactionHistoryCollected,
+            OnTransactionHistoryCollectedAsync);
 
         _logger.LogInformation("SignalRBroadcaster started and subscribed to events");
         return Task.CompletedTask;
@@ -92,8 +112,7 @@ public class SignalRBroadcaster : IHostedService
 
             // Broadcast to all clients
             await _signalRStreamingService.BroadcastFundingRatesAsync(fundingRates);
-
-            _logger.LogInformation("Broadcasted {Count} funding rates to clients", fundingRates.Count);
+            
         }
         catch (Exception ex)
         {
@@ -132,8 +151,6 @@ public class SignalRBroadcaster : IHostedService
 
             // Broadcast to all clients
             await _signalRStreamingService.BroadcastOpportunitiesAsync(opportunities);
-
-            _logger.LogInformation("Broadcasted {Count} opportunities to clients", opportunities.Count);
         }
         catch (Exception ex)
         {
@@ -190,11 +207,7 @@ public class SignalRBroadcaster : IHostedService
                     {
                         // Broadcast balances to this specific user
                         await _signalRStreamingService.BroadcastBalancesToUserAsync(userId, balances);
-
-                        _logger.LogInformation(
-                            "Broadcasted {Count} balances to user {UserId}",
-                            balances.Count,
-                            userId);
+                        
                     }
                     else
                     {
@@ -222,10 +235,6 @@ public class SignalRBroadcaster : IHostedService
                         // Broadcast positions to this specific user
                         await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positions);
 
-                        _logger.LogInformation(
-                            "Broadcasted {Count} positions to user {UserId}",
-                            positions.Count,
-                            userId);
                     }
                     else
                     {
@@ -237,6 +246,226 @@ public class SignalRBroadcaster : IHostedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error broadcasting user data");
+        }
+    }
+
+    /// <summary>
+    /// Called when open orders are collected
+    /// </summary>
+    private async Task OnOpenOrdersCollectedAsync(DataCollectionEvent<IDictionary<string, List<OrderDto>>> @event)
+    {
+        if (@event.Data == null || @event.Data.Count == 0)
+        {
+            _logger.LogDebug("No open orders to broadcast");
+            return;
+        }
+
+        try
+        {
+            // Each key is "openorders:{userId}:{exchange}"
+            foreach (var kvp in @event.Data)
+            {
+                // Parse userId from key (format: openorders:userId:exchange)
+                var parts = kvp.Key.Split(':');
+                if (parts.Length >= 2)
+                {
+                    var userId = parts[1];
+                    var orders = kvp.Value;
+
+                    // Check for changes using hash
+                    var ordersHash = ComputeHash(orders);
+                    bool shouldBroadcast = false;
+
+                    lock (_hashLock)
+                    {
+                        var cacheKey = $"{userId}_openorders";
+                        if (!_lastUserOpenOrdersHash.TryGetValue(cacheKey, out var lastHash) || lastHash != ordersHash)
+                        {
+                            _lastUserOpenOrdersHash[cacheKey] = ordersHash;
+                            shouldBroadcast = true;
+                        }
+                    }
+
+                    if (shouldBroadcast)
+                    {
+                        await _signalRStreamingService.BroadcastOpenOrdersToUserAsync(userId, orders);
+                        _logger.LogInformation("Broadcasted {Count} open orders to user {UserId}", orders.Count, userId);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Open orders unchanged for user {UserId}, skipping broadcast", userId);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting open orders");
+        }
+    }
+
+    /// <summary>
+    /// Called when order history is collected
+    /// </summary>
+    private async Task OnOrderHistoryCollectedAsync(DataCollectionEvent<IDictionary<string, List<OrderDto>>> @event)
+    {
+        if (@event.Data == null || @event.Data.Count == 0)
+        {
+            _logger.LogDebug("No order history to broadcast");
+            return;
+        }
+
+        try
+        {
+            // Each key is "orderhistory:{userId}:{exchange}"
+            foreach (var kvp in @event.Data)
+            {
+                // Parse userId from key
+                var parts = kvp.Key.Split(':');
+                if (parts.Length >= 2)
+                {
+                    var userId = parts[1];
+                    var orders = kvp.Value;
+
+                    // Check for changes using hash
+                    var ordersHash = ComputeHash(orders);
+                    bool shouldBroadcast = false;
+
+                    lock (_hashLock)
+                    {
+                        var cacheKey = $"{userId}_orderhistory";
+                        if (!_lastUserOrderHistoryHash.TryGetValue(cacheKey, out var lastHash) || lastHash != ordersHash)
+                        {
+                            _lastUserOrderHistoryHash[cacheKey] = ordersHash;
+                            shouldBroadcast = true;
+                        }
+                    }
+
+                    if (shouldBroadcast)
+                    {
+                        await _signalRStreamingService.BroadcastOrderHistoryToUserAsync(userId, orders);
+                        _logger.LogInformation("Broadcasted {Count} historical orders to user {UserId}", orders.Count, userId);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Order history unchanged for user {UserId}, skipping broadcast", userId);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting order history");
+        }
+    }
+
+    /// <summary>
+    /// Called when trade history is collected
+    /// </summary>
+    private async Task OnTradeHistoryCollectedAsync(DataCollectionEvent<IDictionary<string, List<TradeDto>>> @event)
+    {
+        if (@event.Data == null || @event.Data.Count == 0)
+        {
+            _logger.LogDebug("No trade history to broadcast");
+            return;
+        }
+
+        try
+        {
+            // Each key is "tradehistory:{userId}:{exchange}"
+            foreach (var kvp in @event.Data)
+            {
+                // Parse userId from key
+                var parts = kvp.Key.Split(':');
+                if (parts.Length >= 2)
+                {
+                    var userId = parts[1];
+                    var trades = kvp.Value;
+
+                    // Check for changes using hash
+                    var tradesHash = ComputeHash(trades);
+                    bool shouldBroadcast = false;
+
+                    lock (_hashLock)
+                    {
+                        var cacheKey = $"{userId}_tradehistory";
+                        if (!_lastUserTradeHistoryHash.TryGetValue(cacheKey, out var lastHash) || lastHash != tradesHash)
+                        {
+                            _lastUserTradeHistoryHash[cacheKey] = tradesHash;
+                            shouldBroadcast = true;
+                        }
+                    }
+
+                    if (shouldBroadcast)
+                    {
+                        await _signalRStreamingService.BroadcastTradeHistoryToUserAsync(userId, trades);
+                        _logger.LogInformation("Broadcasted {Count} trades to user {UserId}", trades.Count, userId);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Trade history unchanged for user {UserId}, skipping broadcast", userId);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting trade history");
+        }
+    }
+
+    /// <summary>
+    /// Called when transaction history is collected
+    /// </summary>
+    private async Task OnTransactionHistoryCollectedAsync(DataCollectionEvent<IDictionary<string, List<TransactionDto>>> @event)
+    {
+        if (@event.Data == null || @event.Data.Count == 0)
+        {
+            _logger.LogDebug("No transaction history to broadcast");
+            return;
+        }
+
+        try
+        {
+            // Each key is "transactionhistory:{userId}:{exchange}"
+            foreach (var kvp in @event.Data)
+            {
+                // Parse userId from key
+                var parts = kvp.Key.Split(':');
+                if (parts.Length >= 2)
+                {
+                    var userId = parts[1];
+                    var transactions = kvp.Value;
+
+                    // Check for changes using hash
+                    var transactionsHash = ComputeHash(transactions);
+                    bool shouldBroadcast = false;
+
+                    lock (_hashLock)
+                    {
+                        var cacheKey = $"{userId}_transactionhistory";
+                        if (!_lastUserTransactionHistoryHash.TryGetValue(cacheKey, out var lastHash) || lastHash != transactionsHash)
+                        {
+                            _lastUserTransactionHistoryHash[cacheKey] = transactionsHash;
+                            shouldBroadcast = true;
+                        }
+                    }
+
+                    if (shouldBroadcast)
+                    {
+                        await _signalRStreamingService.BroadcastTransactionHistoryToUserAsync(userId, transactions);
+                        _logger.LogInformation("Broadcasted {Count} transactions to user {UserId}", transactions.Count, userId);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Transaction history unchanged for user {UserId}, skipping broadcast", userId);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting transaction history");
         }
     }
 
