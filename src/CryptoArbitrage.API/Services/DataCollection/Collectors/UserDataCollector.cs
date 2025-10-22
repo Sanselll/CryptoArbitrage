@@ -1,4 +1,6 @@
 using CryptoArbitrage.API.Data;
+using CryptoArbitrage.API.Data.Entities;
+using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.DataCollection.Configuration;
@@ -108,6 +110,9 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                     var balance = await dynamicConnector.GetAccountBalanceAsync();
                     var positions = await dynamicConnector.GetOpenPositionsAsync();
 
+                    // Enrich positions with database data (Id and ExecutionId)
+                    await EnrichPositionsWithDatabaseDataAsync(positions, apiKey.UserId, apiKey.ExchangeName, cancellationToken);
+
                     // Store count before using in snapshot to avoid dynamic in log call
                     int positionCount = positions.Count;
 
@@ -166,5 +171,81 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
         LastResult = result;
 
         return result;
+    }
+
+    /// <summary>
+    /// Enriches exchange positions with database data (Id and ExecutionId)
+    /// Matches positions by Symbol and Side to find the corresponding database record
+    /// </summary>
+    private async Task EnrichPositionsWithDatabaseDataAsync(
+        List<PositionDto> exchangePositions,
+        string userId,
+        string exchangeName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!exchangePositions.Any())
+            {
+                return;
+            }
+
+            // Query database for open positions for this user and exchange
+            var dbPositions = await _dbContext.Positions
+                .Where(p => p.UserId == userId &&
+                            p.Exchange == exchangeName &&
+                            p.Status == PositionStatus.Open)
+                .ToListAsync(cancellationToken);
+
+            if (!dbPositions.Any())
+            {
+                _logger.LogDebug("No database positions found for user {UserId} on {Exchange}", userId, exchangeName);
+                return;
+            }
+
+            // Match and enrich each exchange position
+            int enrichedCount = 0;
+            foreach (var exchangePosition in exchangePositions)
+            {
+                // Find matching database position by Symbol and Side
+                var dbPosition = dbPositions.FirstOrDefault(p =>
+                    p.Symbol == exchangePosition.Symbol &&
+                    p.Side == exchangePosition.Side);
+
+                if (dbPosition != null)
+                {
+                    // Copy Id and ExecutionId from database
+                    exchangePosition.Id = dbPosition.Id;
+                    exchangePosition.ExecutionId = dbPosition.ExecutionId;
+                    enrichedCount++;
+
+                    _logger.LogDebug(
+                        "Enriched position {Symbol} {Side} with Id={Id}, ExecutionId={ExecutionId}",
+                        exchangePosition.Symbol,
+                        exchangePosition.Side,
+                        dbPosition.Id,
+                        dbPosition.ExecutionId);
+                }
+                else
+                {
+                    _logger.LogDebug(
+                        "No database match found for exchange position {Symbol} {Side}",
+                        exchangePosition.Symbol,
+                        exchangePosition.Side);
+                }
+            }
+
+            _logger.LogInformation(
+                "Enriched {EnrichedCount}/{TotalCount} exchange positions with database data for user {UserId} on {Exchange}",
+                enrichedCount,
+                exchangePositions.Count,
+                userId,
+                exchangeName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error enriching positions with database data for user {UserId} on {Exchange}",
+                userId, exchangeName);
+        }
     }
 }

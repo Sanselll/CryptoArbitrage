@@ -42,7 +42,11 @@ public class ArbitrageOpportunityDto
     public decimal SpreadRate { get; set; }
     public decimal AnnualizedSpread { get; set; }
     public decimal EstimatedProfitPercentage { get; set; }
-    public decimal Volume24h { get; set; }  // 24-hour trading volume in USDT
+    public decimal Volume24h { get; set; }  // 24-hour trading volume in USDT (min of long/short for cross-exchange)
+
+    // Per-exchange volumes for cross-exchange arbitrage
+    public decimal? LongVolume24h { get; set; }  // 24h volume on long exchange
+    public decimal? ShortVolume24h { get; set; } // 24h volume on short exchange
 
     // Liquidity metrics
     public decimal? BidAskSpreadPercent { get; set; }

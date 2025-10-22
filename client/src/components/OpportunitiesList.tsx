@@ -526,7 +526,9 @@ export const OpportunitiesList = () => {
                     </TableCell>
                     <TableCell className="text-right py-1">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {longFundingData?.volume24h ? `$${(longFundingData.volume24h / 1000000).toFixed(2)}M` : '--'}
+                        {opp.longVolume24h && opp.longVolume24h > 0
+                          ? `$${(opp.longVolume24h / 1000000).toFixed(2)}M`
+                          : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right py-1" rowSpan={2}>
@@ -656,7 +658,11 @@ export const OpportunitiesList = () => {
                     </TableCell>
                     <TableCell className="text-right py-1">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {isSpotPerp ? '--' : (shortFundingData?.volume24h ? `$${(shortFundingData.volume24h / 1000000).toFixed(2)}M` : '--')}
+                        {isSpotPerp
+                          ? '--'
+                          : (opp.shortVolume24h && opp.shortVolume24h > 0
+                            ? `$${(opp.shortVolume24h / 1000000).toFixed(2)}M`
+                            : '--')}
                       </span>
                     </TableCell>
                   </TableRow>

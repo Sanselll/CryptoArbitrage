@@ -496,19 +496,18 @@ public class BinanceConnector : IExchangeConnector
                         {
                             // USDT is already in USD
                             spotTotalUsd += asset.Value;
-                            spotAvailableUsd += asset.Value;
+                            spotAvailableUsd = asset.Value; // Only USDT for available
                             spotUsdtOnly = asset.Value;
                         }
                         else
                         {
-                            // Find price in USDT
+                            // Find price in USDT for other assets
                             var symbol = $"{asset.Key}USDT";
                             var price = prices.Data.FirstOrDefault(p => p.Symbol == symbol);
                             if (price != null)
                             {
                                 var usdValue = asset.Value * price.Price;
-                                spotTotalUsd += usdValue;
-                                spotAvailableUsd += usdValue;
+                                spotTotalUsd += usdValue; // Add to total only
                             }
                         }
                     }
@@ -615,7 +614,7 @@ public class BinanceConnector : IExchangeConnector
                         {
                             // USDT is already in USD
                             spotTotalUsd += asset.Value;
-                            spotAvailableUsd += asset.Value;
+                            spotAvailableUsd = asset.Value; // Only USDT for available
                             spotUsdtOnly = asset.Value; // Track USDT separately
                         }
                         else
@@ -626,8 +625,7 @@ public class BinanceConnector : IExchangeConnector
                             if (price != null)
                             {
                                 var usdValue = asset.Value * price.Price;
-                                spotTotalUsd += usdValue;
-                                spotAvailableUsd += usdValue;
+                                spotTotalUsd += usdValue; // Add to total only
                             }
                         }
                     }
