@@ -187,8 +187,6 @@ public class FundingRateCollector : IDataCollector<FundingRateDto, FundingRateCo
                 result[key] = rate;
             }
 
-            _logger.LogDebug("Fetched {Count} funding rates from {Exchange}",
-                fundingRates.Count, exchangeName);
         }
         catch (Exception ex)
         {

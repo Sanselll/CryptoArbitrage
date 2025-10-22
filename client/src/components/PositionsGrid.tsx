@@ -1,7 +1,6 @@
 import { Layers, StopCircle, TrendingUp, TrendingDown } from 'lucide-react';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { PositionSide, PositionStatus, PositionType, StrategySubType } from '../types/index';
-import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { EmptyState } from './ui/EmptyState';
@@ -206,30 +205,7 @@ export const PositionsGrid = () => {
         message="Closing position..."
       />
 
-      <Card className="h-full flex flex-col">
-        <CardHeader className="p-2 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-1.5 text-sm">
-              <Layers className="w-3 h-3 text-binance-yellow" />
-              Active Executions
-            </CardTitle>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-binance-text-secondary">Total P&L:</span>
-            <span
-              className={`text-xs font-bold font-mono ${
-                totalPnL >= 0 ? 'text-binance-green' : 'text-binance-red'
-              }`}
-            >
-              {totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)}
-            </span>
-            <Badge variant="info" size="sm" className="text-[10px]">
-              {openPositions.length} Active
-            </Badge>
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent className="flex-1 overflow-x-auto overflow-y-auto p-0 min-h-0">
+      <div className="h-full flex flex-col overflow-x-auto overflow-y-auto">
         {openPositions.length === 0 ? (
           <EmptyState
             icon={<Layers className="w-12 h-12" />}
@@ -241,10 +217,10 @@ export const PositionsGrid = () => {
             <TableHeader className="sticky top-0 z-30">
               <TableRow hover={false}>
                 <TableHead className="sticky left-0 z-40 bg-binance-bg-secondary border-r border-binance-border">Symbol</TableHead>
-                <TableHead>Strategy</TableHead>
-                <TableHead>Exchange</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Side</TableHead>
+                <TableHead className="py-1">Strategy</TableHead>
+                <TableHead className="py-1">Exchange</TableHead>
+                <TableHead className="py-1">Type</TableHead>
+                <TableHead className="py-1">Side</TableHead>
                 <TableHead className="text-right">Entry</TableHead>
                 <TableHead className="text-right">Size</TableHead>
                 <TableHead className="text-right">Value</TableHead>
@@ -344,7 +320,7 @@ export const PositionsGrid = () => {
                       onMouseEnter={() => setHoveredRow(uniqueKey)}
                       onMouseLeave={() => setHoveredRow(null)}
                     >
-                      <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{pair.symbol}</TableCell>
+                      <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{pair.symbol}</TableCell>
                       <TableCell rowSpan={2} className="py-1">
                         <Badge
                           size="sm"
@@ -369,21 +345,21 @@ export const PositionsGrid = () => {
                           Long
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${longPerpPosition.entryPrice.toFixed(2)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">{longPerpPosition.quantity.toFixed(4)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${(longPerpPosition.quantity * longPerpPosition.entryPrice).toFixed(2)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <Badge variant="warning" size="sm" className="text-[10px]">
                           <span className="font-mono">{longPerpPosition.leverage}x</span>
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <div className="flex flex-col items-end gap-0.5">
                           <span
                             className={`font-mono text-[11px] font-bold ${
@@ -407,7 +383,7 @@ export const PositionsGrid = () => {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span
                           className={`font-mono text-[11px] ${
                             longEstimatedFunding >= 0 ? 'text-binance-green' : 'text-binance-red'
@@ -417,7 +393,7 @@ export const PositionsGrid = () => {
                           {longEstimatedFunding.toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className="text-right" rowSpan={2}>
                         <span
                           className={`font-mono text-[11px] font-bold ${
                             combinedUnrealizedPnL >= 0
@@ -429,7 +405,7 @@ export const PositionsGrid = () => {
                           {combinedUnrealizedPnL.toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className="text-right" rowSpan={2}>
                         <span
                           className={`font-mono text-[11px] font-bold ${
                             (combinedFunding + estimatedFunding) >= 0
@@ -441,7 +417,7 @@ export const PositionsGrid = () => {
                           {(combinedFunding + estimatedFunding).toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className="text-right" rowSpan={2}>
                         <span
                           className={`font-mono text-[11px] font-bold ${
                             totalPairPnL >= 0
@@ -453,12 +429,12 @@ export const PositionsGrid = () => {
                           {totalPairPnL.toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className="text-right" rowSpan={2}>
                         <span className="font-mono text-[11px] text-binance-text-secondary">
                           {pair.executionId ? executionTimes[pair.executionId] || '--' : '--'}
                         </span>
                       </TableCell>
-                      <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                      <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                         {pair.executionId ? (
                           <Button
                             variant="danger"
@@ -517,21 +493,21 @@ export const PositionsGrid = () => {
                           Short
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${shortPerpPosition.entryPrice.toFixed(2)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">{shortPerpPosition.quantity.toFixed(4)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${(shortPerpPosition.quantity * shortPerpPosition.entryPrice).toFixed(2)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <Badge variant="warning" size="sm" className="text-[10px]">
                           <span className="font-mono">{shortPerpPosition.leverage || 1}x</span>
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <div className="flex flex-col items-end gap-0.5">
                           <span
                             className={`font-mono text-[11px] font-bold ${
@@ -555,7 +531,7 @@ export const PositionsGrid = () => {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span
                           className={`font-mono text-[11px] ${
                             shortEstimatedFunding >= 0 ? 'text-binance-green' : 'text-binance-red'
@@ -586,7 +562,7 @@ export const PositionsGrid = () => {
                       onMouseEnter={() => setHoveredRow(uniqueKey)}
                       onMouseLeave={() => setHoveredRow(null)}
                     >
-                      <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{pair.symbol}</TableCell>
+                      <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{pair.symbol}</TableCell>
                       <TableCell rowSpan={2} className="py-1">
                         <Badge
                           size="sm"
@@ -615,21 +591,21 @@ export const PositionsGrid = () => {
                           {perpPosition.side === PositionSide.Long ? 'Long' : 'Short'}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${perpPosition.entryPrice.toFixed(2)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">{perpPosition.quantity.toFixed(4)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${(perpPosition.quantity * perpPosition.entryPrice).toFixed(2)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <Badge variant="warning" size="sm" className="text-[10px]">
                           <span className="font-mono">{perpPosition.leverage || 1}x</span>
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <div className="flex flex-col items-end gap-0.5">
                           <span
                             className={`font-mono text-[11px] font-bold ${
@@ -653,7 +629,7 @@ export const PositionsGrid = () => {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span
                           className={`font-mono text-[11px] ${
                             estimatedFunding >= 0 ? 'text-binance-green' : 'text-binance-red'
@@ -663,7 +639,7 @@ export const PositionsGrid = () => {
                           {estimatedFunding.toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className="text-right" rowSpan={2}>
                         <span
                           className={`font-mono text-[11px] font-bold ${
                             combinedUnrealizedPnL >= 0
@@ -675,7 +651,7 @@ export const PositionsGrid = () => {
                           {combinedUnrealizedPnL.toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className="text-right" rowSpan={2}>
                         <span
                           className={`font-mono text-[11px] font-bold ${
                             (combinedFunding + estimatedFunding) >= 0
@@ -687,7 +663,7 @@ export const PositionsGrid = () => {
                           {(combinedFunding + estimatedFunding).toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className="text-right" rowSpan={2}>
                         <span
                           className={`font-mono text-[11px] font-bold ${
                             totalPairPnL >= 0
@@ -699,12 +675,12 @@ export const PositionsGrid = () => {
                           {totalPairPnL.toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right py-1" rowSpan={2}>
+                      <TableCell className="text-right" rowSpan={2}>
                         <span className="font-mono text-[11px] text-binance-text-secondary">
                           {pair.executionId ? executionTimes[pair.executionId] || '--' : '--'}
                         </span>
                       </TableCell>
-                      <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                      <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                         {pair.executionId ? (
                           <Button
                             variant="danger"
@@ -761,21 +737,21 @@ export const PositionsGrid = () => {
                           {spotPosition.side === PositionSide.Long ? 'Long' : 'Short'}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${spotPosition.entryPrice.toFixed(2)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">{spotPosition.quantity.toFixed(4)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${(spotPosition.quantity * spotPosition.entryPrice).toFixed(2)}</span>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <Badge variant="warning" size="sm" className="text-[10px]">
                           <span className="font-mono">{spotPosition.leverage || 1}x</span>
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <div className="flex flex-col items-end gap-0.5">
                           <span
                             className={`font-mono text-[11px] font-bold ${
@@ -799,7 +775,7 @@ export const PositionsGrid = () => {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right py-1">
+                      <TableCell className="text-right">
                         <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
                       </TableCell>
                     </TableRow>
@@ -811,8 +787,7 @@ export const PositionsGrid = () => {
             </TableBody>
           </Table>
         )}
-      </CardContent>
-    </Card>
+      </div>
 
     <AlertDialog
       isOpen={alertState.isOpen}

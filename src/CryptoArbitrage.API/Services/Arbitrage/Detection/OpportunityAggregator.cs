@@ -170,23 +170,13 @@ public class OpportunityAggregator : IHostedService
 
             // Build complete MarketDataSnapshot
             var aggregatedSnapshot = BuildMarketSnapshot(fundingRatesDict, marketSnapshotsDict);
-
-            // Log snapshot details for debugging
-            _logger.LogInformation(
-                "Built snapshot: {FundingExchanges} exchanges with funding rates, {SpotExchanges} spot exchanges, {PerpExchanges} perp exchanges",
-                aggregatedSnapshot.FundingRates.Count,
-                aggregatedSnapshot.SpotPrices.Count,
-                aggregatedSnapshot.PerpPrices.Count);
+            
 
             // Detect opportunities
             var opportunities = await _opportunityDetectionService.DetectOpportunitiesAsync(aggregatedSnapshot);
 
             var duration = DateTime.UtcNow - startTime;
-
-            _logger.LogInformation(
-                "Detected {Count} opportunities in {Duration}ms",
-                opportunities.Count,
-                duration.TotalMilliseconds);
+            
 
             // Publish event with detected opportunities
             await _eventBus.PublishAsync(new DataCollectionEvent<List<ArbitrageOpportunityDto>>

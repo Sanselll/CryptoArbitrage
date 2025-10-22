@@ -35,10 +35,7 @@ public class ApiKeyValidator : IApiKeyValidator
 
         try
         {
-            // Detect server's public IP address
-            _logger.LogInformation("Detecting server IP address...");
             var serverIp = await DetectServerIpAsync();
-            _logger.LogInformation("Server IP detected: {ServerIp}", serverIp ?? "null");
 
             var result = exchangeName.ToLower() switch
             {
@@ -50,14 +47,7 @@ public class ApiKeyValidator : IApiKeyValidator
                     null,
                     serverIp)
             };
-
-            _logger.LogInformation("=== Validation Result ===");
-            _logger.LogInformation("IsValid: {IsValid}", result.IsValid);
-            _logger.LogInformation("IsIpRestricted: {IsIpRestricted}", result.IsIpRestricted);
-            _logger.LogInformation("MissingPermissions: {Count}", result.MissingPermissions?.Count ?? 0);
-            _logger.LogInformation("DetailedMessage: {Message}", result.DetailedMessage);
-            _logger.LogInformation("=========================");
-
+            
             return result;
         }
         catch (Exception ex)

@@ -1,5 +1,5 @@
 import * as signalR from '@microsoft/signalr';
-import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Notification } from '../types/index';
+import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Notification, Order, Trade, Transaction } from '../types/index';
 import { notificationService } from './notificationService.tsx';
 
 type TradingMode = 'Demo' | 'Real';
@@ -23,6 +23,10 @@ class SignalRService {
     onPositions: [] as ((data: Position[]) => void)[],
     onOpportunities: [] as ((data: ArbitrageOpportunity[]) => void)[],
     onBalances: [] as ((data: AccountBalance[]) => void)[],
+    onOpenOrders: [] as ((data: Order[]) => void)[],
+    onOrderHistory: [] as ((data: Order[]) => void)[],
+    onTradeHistory: [] as ((data: Trade[]) => void)[],
+    onTransactionHistory: [] as ((data: Transaction[]) => void)[],
     onPnLUpdate: [] as ((data: { totalPnL: number; todayPnL: number }) => void)[],
     onAlert: [] as ((data: { message: string; severity: string; timestamp: string }) => void)[],
     onNotification: [] as ((data: Notification) => void)[],
@@ -126,6 +130,22 @@ class SignalRService {
       notificationService.showNotification(data);
       this.callbacks.onNotification.forEach(cb => cb(data));
     });
+
+    this.connection.on('ReceiveOpenOrders', (data: Order[]) => {
+      this.callbacks.onOpenOrders.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveOrderHistory', (data: Order[]) => {
+      this.callbacks.onOrderHistory.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveTradeHistory', (data: Trade[]) => {
+      this.callbacks.onTradeHistory.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveTransactionHistory', (data: Transaction[]) => {
+      this.callbacks.onTransactionHistory.forEach(cb => cb(data));
+    });
   }
 
   onFundingRates(callback: (data: FundingRate[]) => void) {
@@ -174,6 +194,34 @@ class SignalRService {
     this.callbacks.onNotification.push(callback);
     return () => {
       this.callbacks.onNotification = this.callbacks.onNotification.filter(cb => cb !== callback);
+    };
+  }
+
+  onOpenOrders(callback: (data: Order[]) => void) {
+    this.callbacks.onOpenOrders.push(callback);
+    return () => {
+      this.callbacks.onOpenOrders = this.callbacks.onOpenOrders.filter(cb => cb !== callback);
+    };
+  }
+
+  onOrderHistory(callback: (data: Order[]) => void) {
+    this.callbacks.onOrderHistory.push(callback);
+    return () => {
+      this.callbacks.onOrderHistory = this.callbacks.onOrderHistory.filter(cb => cb !== callback);
+    };
+  }
+
+  onTradeHistory(callback: (data: Trade[]) => void) {
+    this.callbacks.onTradeHistory.push(callback);
+    return () => {
+      this.callbacks.onTradeHistory = this.callbacks.onTradeHistory.filter(cb => cb !== callback);
+    };
+  }
+
+  onTransactionHistory(callback: (data: Transaction[]) => void) {
+    this.callbacks.onTransactionHistory.push(callback);
+    return () => {
+      this.callbacks.onTransactionHistory = this.callbacks.onTransactionHistory.filter(cb => cb !== callback);
     };
   }
 

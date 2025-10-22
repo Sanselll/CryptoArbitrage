@@ -235,3 +235,123 @@ export interface DashboardData {
   activeOpportunities: number;
   updatedAt: string;
 }
+
+// Trading data types
+export enum OrderType {
+  Limit = 0,
+  Market = 1,
+  StopLoss = 2,
+  StopLossLimit = 3,
+  TakeProfit = 4,
+  TakeProfitLimit = 5
+}
+
+export enum OrderSide {
+  Buy = 0,
+  Sell = 1
+}
+
+export enum OrderStatus {
+  New = 0,
+  PartiallyFilled = 1,
+  Filled = 2,
+  Canceled = 3,
+  PendingCancel = 4,
+  Rejected = 5,
+  Expired = 6
+}
+
+export enum TimeInForce {
+  GTC = 0,  // Good Till Cancel
+  IOC = 1,  // Immediate Or Cancel
+  FOK = 2,  // Fill Or Kill
+  GTX = 3   // Good Till Crossing (Post Only)
+}
+
+export interface Order {
+  exchange: string;
+  orderId: string;
+  clientOrderId?: string;
+  symbol: string;
+  type: OrderType;
+  side: OrderSide;
+  status: OrderStatus;
+  price?: number;
+  stopPrice?: number;
+  quantity: number;
+  filledQuantity: number;
+  remainingQuantity: number;
+  quoteQuantity?: number;
+  timeInForce?: TimeInForce;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export enum TradeRole {
+  Maker = 0,
+  Taker = 1
+}
+
+export interface Trade {
+  exchange: string;
+  tradeId: string;
+  orderId: string;
+  symbol: string;
+  side: OrderSide;
+  price: number;
+  quantity: number;
+  quoteQuantity: number;
+  commission: number;
+  commissionAsset: string;
+  role: TradeRole;
+  executedAt: string;
+}
+
+export enum TransactionType {
+  Deposit = 0,
+  Withdrawal = 1,
+  Transfer = 2,
+  Commission = 3,
+  Funding = 4,
+  Rebate = 5,
+  Airdrop = 6,
+  Other = 7,
+  RealizedPnL = 8,
+  Trade = 9,
+  Liquidation = 10,
+  Bonus = 11,
+  WelcomeBonus = 12,
+  FundingFee = 13,
+  InsuranceClear = 14,
+  ReferralKickback = 15,
+  CommissionRebate = 16,
+  ContestReward = 17,
+  InternalTransfer = 18,
+  Settlement = 19,
+  Delivery = 20,
+  Adl = 21
+}
+
+export enum TransactionStatus {
+  Pending = 0,
+  Completed = 1,
+  Failed = 2,
+  Canceled = 3,
+  Confirmed = 4
+}
+
+export interface Transaction {
+  exchange: string;
+  transactionId: string;
+  type: TransactionType;
+  status: TransactionStatus;
+  asset: string;
+  amount: number;
+  fee?: number;
+  feeAsset?: string;
+  fromAddress?: string;
+  toAddress?: string;
+  txHash?: string;
+  createdAt: string;
+  updatedAt?: string;
+}

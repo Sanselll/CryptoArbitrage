@@ -6,6 +6,8 @@ using CryptoArbitrage.API.Data.Entities;
 using Microsoft.Extensions.Configuration;
 using PositionSide = CryptoArbitrage.API.Data.Entities.PositionSide;
 using PositionStatus = CryptoArbitrage.API.Data.Entities.PositionStatus;
+using BybitOrderSide = Bybit.Net.Enums.OrderSide;
+using ModelOrderSide = CryptoArbitrage.API.Models.OrderSide;
 
 namespace CryptoArbitrage.API.Services.Exchanges;
 
@@ -31,10 +33,7 @@ public class BybitConnector : IExchangeConnector
             // Read environment configuration to determine live vs demo mode
             var isLive = _configuration.GetValue<bool>("Environment:IsLive");
             var environment = isLive ? Bybit.Net.BybitEnvironment.Live : Bybit.Net.BybitEnvironment.DemoTrading;
-
-            _logger.LogInformation("Connecting to Bybit using {Environment} environment (IsLive: {IsLive})",
-                environment == Bybit.Net.BybitEnvironment.Live ? "Live" : "Demo", isLive);
-
+            
             // For public API access (funding rates, prices), credentials are optional
             var hasCredentials = !string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(apiSecret);
 
@@ -65,7 +64,6 @@ public class BybitConnector : IExchangeConnector
 
                 if (accountInfo.Success)
                 {
-                    _logger.LogInformation("Successfully connected to Bybit");
                     return true;
                 }
 
@@ -78,7 +76,6 @@ public class BybitConnector : IExchangeConnector
                 var fundingTest = await _restClient.V5Api.ExchangeData.GetFundingRateHistoryAsync(Category.Linear, "BTCUSDT", limit: 1);
                 if (fundingTest.Success)
                 {
-                    _logger.LogInformation("Successfully connected to Bybit (public data only - no API credentials)");
                     return true;
                 }
 
@@ -264,9 +261,7 @@ public class BybitConnector : IExchangeConnector
                 var relevantInstruments = instruments.Data.List
                     .Where(i => symbols.Count == 0 || symbols.Contains(i.Symbol))
                     .ToList();
-
-                _logger.LogInformation("Fetching funding rates for {Count} symbols from Bybit", relevantInstruments.Count);
-
+                
                 foreach (var instrument in relevantInstruments)
                 {
                     if (instrument.FundingRate.HasValue && instrument.NextFundingTime.HasValue)
@@ -352,7 +347,6 @@ public class BybitConnector : IExchangeConnector
                 }
             }
 
-            _logger.LogInformation("Fetched {Count} spot prices from Bybit", spotPrices.Count);
         }
         catch (Exception ex)
         {
@@ -389,7 +383,6 @@ public class BybitConnector : IExchangeConnector
                 }
             }
 
-            _logger.LogInformation("Fetched {Count} perpetual prices from Bybit", perpPrices.Count);
         }
         catch (Exception ex)
         {
@@ -420,7 +413,6 @@ public class BybitConnector : IExchangeConnector
                 }
             }
 
-            _logger.LogInformation("Fetched {Count} 24h volumes from Bybit", volumes.Count);
         }
         catch (Exception ex)
         {
@@ -564,9 +556,6 @@ public class BybitConnector : IExchangeConnector
                 decimal futuresAvailable = account.TotalAvailableBalance ?? 0;
                 decimal marginUsed = (account.TotalInitialMargin ?? 0);
                 decimal unrealizedPnL = usdtBalance?.UnrealizedPnl ?? 0;
-
-                _logger.LogInformation("Bybit Raw API Data - WalletBalance: {WalletBalance}, AvailableToWithdraw: {Available}, MarginUsed: {Margin}, UnrealizedPnL: {PnL}",
-                    futuresTotal, futuresAvailable, marginUsed, unrealizedPnL);
                 
                 // Calculate coins in active positions value
                 decimal coinsInActivePositionsUsd = 0;
@@ -591,10 +580,7 @@ public class BybitConnector : IExchangeConnector
                 // spotTotalUsd may be slightly different due to price calculation timing
                 // Use account-level totals which are authoritative
                 decimal totalBalance = futuresTotal; // This already includes all assets in USD
-
-                _logger.LogInformation("Bybit Balances - Total: {Total} USD, Available: {Available} USD, Margin: {Margin} USD",
-                    totalBalance, futuresAvailable, marginUsed);
-
+                
                 // For frontend calculations (Bybit Unified Account):
                 // In Bybit's unified account, all assets are in one pool
                 // For the frontend display:
@@ -668,7 +654,7 @@ public class BybitConnector : IExchangeConnector
                 _logger.LogWarning(ex, "Error setting leverage for {Symbol}, continuing with current leverage setting", symbol);
             }
 
-            var orderSide = side == PositionSide.Long ? OrderSide.Buy : OrderSide.Sell;
+            var orderSide = side == PositionSide.Long ? BybitOrderSide.Buy : BybitOrderSide.Sell;
 
             var order = await _restClient.V5Api.Trading.PlaceOrderAsync(
                 Category.Linear,
@@ -710,7 +696,7 @@ public class BybitConnector : IExchangeConnector
             {
                 foreach (var position in positions.Data.List.Where(p => p.Quantity > 0))
                 {
-                    var orderSide = position.Side == Bybit.Net.Enums.PositionSide.Buy ? OrderSide.Sell : OrderSide.Buy;
+                    var orderSide = position.Side == Bybit.Net.Enums.PositionSide.Buy ? BybitOrderSide.Sell : BybitOrderSide.Buy;
 
                     await _restClient.V5Api.Trading.PlaceOrderAsync(
                         Category.Linear,
@@ -741,27 +727,14 @@ public class BybitConnector : IExchangeConnector
 
         try
         {
-            _logger.LogInformation("🔍 Fetching Bybit positions via GetPositionsAsync with settleAsset=USDT...");
+           
             // Bybit V5 API - use settleAsset parameter (4th param) to get all USDT-settled positions
             // Parameters: (category, symbol, baseAsset, settleAsset, limit, cursor, ct)
             var result = await _restClient.V5Api.Trading.GetPositionsAsync(Category.Linear, settleAsset: "USDT");
-
-            _logger.LogInformation("📡 Bybit GetPositions API Response - Success: {Success}, HasData: {HasData}, Error: {Error}",
-                result.Success, result.Data != null, result.Error?.Message ?? "None");
-
+            
             if (result.Success && result.Data != null)
             {
-                _logger.LogInformation("Bybit Open Positions Check - Total positions returned: {Count}", result.Data.List.Count());
-
-                // Log detailed position information for debugging P&L issues
-                foreach (var p in result.Data.List)
-                {
-                    _logger.LogInformation("  Position: {Symbol}, Qty: {Qty}, Side: {Side}, AvgPrice: {Price}, MarkPrice: {MarkPrice}, UnrealizedPnL: {PnL}",
-                        p.Symbol, p.Quantity, p.Side, p.AveragePrice, p.MarkPrice, p.UnrealizedPnl);
-                }
-
-                _logger.LogInformation("🔎 Positions with Qty > 0: {Count}", result.Data.List.Count(p => p.Quantity > 0));
-
+                
                 // Get current mark prices for manual P&L calculation fallback
                 var markPrices = new Dictionary<string, decimal>();
                 try
@@ -820,9 +793,6 @@ public class BybitConnector : IExchangeConnector
                         };
                     })
                     .ToList();
-
-                _logger.LogInformation("Bybit Open Positions (Qty > 0) - Count: {Count}, Total Unrealized P&L: {TotalPnL}",
-                    positions.Count, positions.Sum(p => p.UnrealizedPnL));
             }
         }
         catch (Exception ex)
@@ -853,7 +823,7 @@ public class BybitConnector : IExchangeConnector
             var order = await _restClient.V5Api.Trading.PlaceOrderAsync(
                 Category.Spot,
                 symbol,
-                OrderSide.Buy,
+                BybitOrderSide.Buy,
                 NewOrderType.Market,
                 quantity,
                 marketUnit: MarketUnit.BaseAsset
@@ -897,7 +867,7 @@ public class BybitConnector : IExchangeConnector
             var order = await _restClient.V5Api.Trading.PlaceOrderAsync(
                 Category.Spot,
                 symbol,
-                OrderSide.Sell,
+                BybitOrderSide.Sell,
                 NewOrderType.Market,
                 quantity
             );
@@ -969,7 +939,6 @@ public class BybitConnector : IExchangeConnector
                     balances[asset.Asset] = asset.WalletBalance.Value;
                 }
 
-                _logger.LogInformation("Fetched {Count} asset balances from Bybit Unified account", balances.Count);
             }
         }
         catch (Exception ex)
@@ -1253,6 +1222,275 @@ public class BybitConnector : IExchangeConnector
         int decimals = decimalPart.Length;
 
         return decimals;
+    }
+
+    // Trading data methods
+    public async Task<List<OrderDto>> GetOpenOrdersAsync()
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Bybit");
+
+        var orders = new List<OrderDto>();
+
+        try
+        {
+            var result = await _restClient.V5Api.Trading.GetOrdersAsync(Category.Linear);
+
+            if (result.Success && result.Data?.List != null)
+            {
+                orders = result.Data.List
+                    .Where(o => o.Status == Bybit.Net.Enums.OrderStatus.New ||
+                               o.Status == Bybit.Net.Enums.OrderStatus.PartiallyFilled)
+                    .Select(o => new OrderDto
+                    {
+                        Exchange = ExchangeName,
+                        OrderId = o.OrderId,
+                        ClientOrderId = o.ClientOrderId,
+                        Symbol = o.Symbol,
+                        Side = o.Side == Bybit.Net.Enums.OrderSide.Buy ? Models.OrderSide.Buy : Models.OrderSide.Sell,
+                        Type = MapBybitOrderType(o.OrderType),
+                        Status = MapBybitOrderStatus(o.Status),
+                        Price = o.Price ?? 0,
+                        AveragePrice = o.AveragePrice ?? 0,
+                        Quantity = o.Quantity,
+                        FilledQuantity = o.QuantityFilled ?? 0,
+                        Fee = 0, // Not available in open orders
+                        FeeAsset = null,
+                        ReduceOnly = o.ReduceOnly?.ToString(),
+                        TimeInForce = o.TimeInForce.ToString(),
+                        CreatedAt = o.CreateTime,
+                        UpdatedAt = o.UpdateTime
+                    })
+                    .ToList();
+
+     
+            }
+            else
+            {
+                _logger.LogWarning("Failed to fetch open orders from Bybit: {Error}", result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching open orders from Bybit");
+        }
+
+        return orders;
+    }
+
+    public async Task<List<OrderDto>> GetOrderHistoryAsync(DateTime? startTime = null, DateTime? endTime = null, int limit = 100)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Bybit");
+
+        var orders = new List<OrderDto>();
+
+        try
+        {
+            var result = await _restClient.V5Api.Trading.GetOrderHistoryAsync(
+                Category.Linear,
+                startTime: startTime,
+                endTime: endTime,
+                limit: limit);
+
+            if (result.Success && result.Data?.List != null)
+            {
+                orders = result.Data.List.Select(o => new OrderDto
+                {
+                    Exchange = ExchangeName,
+                    OrderId = o.OrderId,
+                    ClientOrderId = o.ClientOrderId,
+                    Symbol = o.Symbol,
+                    Side = o.Side == Bybit.Net.Enums.OrderSide.Buy ? Models.OrderSide.Buy : Models.OrderSide.Sell,
+                    Type = MapBybitOrderType(o.OrderType),
+                    Status = MapBybitOrderStatus(o.Status),
+                    Price = o.Price ?? 0,
+                    AveragePrice = o.AveragePrice ?? 0,
+                    Quantity = o.Quantity,
+                    FilledQuantity = o.QuantityFilled ?? 0,
+                    Fee = 0, // Fee details not in order history, see trades
+                    FeeAsset = null,
+                    // PositionSide and RejectReason not in OrderDto
+                    ReduceOnly = o.ReduceOnly?.ToString(),
+                    TimeInForce = o.TimeInForce.ToString(),
+                    CreatedAt = o.CreateTime,
+                    UpdatedAt = o.UpdateTime
+                }).ToList();
+
+    
+            }
+            else
+            {
+                _logger.LogWarning("Failed to fetch order history from Bybit: {Error}", result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching order history from Bybit");
+        }
+
+        return orders;
+    }
+
+    public async Task<List<TradeDto>> GetUserTradesAsync(DateTime? startTime = null, DateTime? endTime = null, int limit = 100)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Bybit");
+
+        var trades = new List<TradeDto>();
+
+        try
+        {
+            var result = await _restClient.V5Api.Trading.GetUserTradesAsync(
+                Category.Linear,
+                startTime: startTime,
+                endTime: endTime,
+                limit: limit);
+
+            if (result.Success && result.Data?.List != null)
+            {
+                trades = result.Data.List.Select(t => new TradeDto
+                {
+                    Exchange = ExchangeName,
+                    TradeId = t.TradeId,
+                    OrderId = t.OrderId,
+                    Symbol = t.Symbol,
+                    Side = t.Side == Bybit.Net.Enums.OrderSide.Buy ? Models.OrderSide.Buy : Models.OrderSide.Sell,
+                    Price = t.Price,
+                    Quantity = t.Quantity,
+                    QuoteQuantity = t.Price * t.Quantity,
+                    Fee = t.Fee ?? 0,
+                    FeeAsset = t.FeeAsset,
+                    IsMaker = t.IsMaker,
+                    IsBuyer = t.Side == Bybit.Net.Enums.OrderSide.Buy,
+                    ExecutedAt = t.Timestamp,
+                    OrderType = t.OrderType?.ToString(),
+                    PositionSide = null // BybitUserTrade does not have PositionSide property
+                }).ToList();
+
+                _logger.LogInformation("Fetched {Count} user trades from Bybit", trades.Count);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to fetch user trades from Bybit: {Error}", result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching user trades from Bybit");
+        }
+
+        return trades;
+    }
+
+    public async Task<List<TransactionDto>> GetTransactionsAsync(DateTime? startTime = null, DateTime? endTime = null, int limit = 100)
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Bybit");
+
+        var transactions = new List<TransactionDto>();
+
+        try
+        {
+            _logger.LogDebug("Fetching Bybit transaction history from {StartTime} to {EndTime}, limit {Limit}",
+                startTime, endTime, limit);
+
+            var result = await _restClient.V5Api.Account.GetTransactionHistoryAsync(
+                AccountType.Unified,
+                startTime: startTime,
+                endTime: endTime,
+                limit: limit);
+
+            if (result.Success && result.Data?.List != null)
+            {
+                transactions = result.Data.List.Select(t =>
+                {
+                    // Use cashflow for the amount when available (more accurate for PnL)
+                    var amount = t.Cashflow ?? t.Change ?? t.Quantity ?? t.Size ?? 0;
+                    // Fee is negative in the API, so take absolute value
+                    var fee = t.Fee.HasValue ? Math.Abs(t.Fee.Value) : 0m;
+
+                    return new TransactionDto
+                    {
+                        Exchange = ExchangeName,
+                        TransactionId = t.Id ?? string.Empty,
+                        Type = MapBybitTransactionType(t.Type),
+                        Asset = t.Asset ?? string.Empty,
+                        Amount = amount,
+                        Status = TransactionStatus.Confirmed, // Bybit transaction history only shows confirmed
+                        Symbol = t.Symbol,
+                        TradeId = t.TradeId,
+                        Fee = fee,
+                        FeeAsset = fee > 0 ? t.Asset : null,
+                        Info = $"{t.Type} - {t.SubType}",
+                        CreatedAt = t.TransactionTime,
+                        ConfirmedAt = t.TransactionTime
+                    };
+                })
+                .Where(tx => tx.Amount != 0 || tx.Fee > 0) // Filter out empty transactions (both amount=0 and fee=0)
+                .ToList();
+
+                _logger.LogInformation("Fetched {Count} transactions from Bybit (trades: {TradeCount}, settlements: {SettlementCount}, fees with amount: {FeeCount})",
+                    transactions.Count,
+                    transactions.Count(t => t.Type == Models.TransactionType.Trade),
+                    transactions.Count(t => t.Type == Models.TransactionType.RealizedPnL),
+                    transactions.Count(t => t.Fee > 0));
+            }
+            else
+            {
+                _logger.LogWarning("Failed to fetch transactions from Bybit: {Error}", result.Error?.Message ?? "Unknown error");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching transactions from Bybit");
+        }
+
+        return transactions;
+    }
+
+    // Helper methods to map Bybit enums to application enums
+    private Models.OrderType MapBybitOrderType(Bybit.Net.Enums.OrderType bybitType)
+    {
+        return bybitType switch
+        {
+            Bybit.Net.Enums.OrderType.Market => Models.OrderType.Market,
+            Bybit.Net.Enums.OrderType.Limit => Models.OrderType.Limit,
+            _ => Models.OrderType.Market
+        };
+    }
+
+    private Models.OrderStatus MapBybitOrderStatus(Bybit.Net.Enums.OrderStatus bybitStatus)
+    {
+        return bybitStatus switch
+        {
+            Bybit.Net.Enums.OrderStatus.New => Models.OrderStatus.New,
+            Bybit.Net.Enums.OrderStatus.PartiallyFilled => Models.OrderStatus.PartiallyFilled,
+            Bybit.Net.Enums.OrderStatus.Filled => Models.OrderStatus.Filled,
+            Bybit.Net.Enums.OrderStatus.Cancelled => Models.OrderStatus.Canceled,
+            Bybit.Net.Enums.OrderStatus.Rejected => Models.OrderStatus.Rejected,
+            _ => Models.OrderStatus.New
+        };
+    }
+
+    private Models.TransactionType MapBybitTransactionType(Bybit.Net.Enums.TransactionLogType bybitType)
+    {
+        return bybitType switch
+        {
+            Bybit.Net.Enums.TransactionLogType.TransferIn => Models.TransactionType.Transfer,
+            Bybit.Net.Enums.TransactionLogType.TransferOut => Models.TransactionType.Transfer,
+            Bybit.Net.Enums.TransactionLogType.Trade => Models.TransactionType.Trade,
+            Bybit.Net.Enums.TransactionLogType.Settlement => Models.TransactionType.RealizedPnL,
+            Bybit.Net.Enums.TransactionLogType.Delivery => Models.TransactionType.Delivery,
+            Bybit.Net.Enums.TransactionLogType.Liquidation => Models.TransactionType.Liquidation,
+            Bybit.Net.Enums.TransactionLogType.Adl => Models.TransactionType.Adl,
+            Bybit.Net.Enums.TransactionLogType.Airdrop => Models.TransactionType.Airdrop,
+            Bybit.Net.Enums.TransactionLogType.Bonus => Models.TransactionType.Bonus,
+            Bybit.Net.Enums.TransactionLogType.BonusTransferIn => Models.TransactionType.Bonus,
+            Bybit.Net.Enums.TransactionLogType.BonusTransferOut => Models.TransactionType.Bonus,
+            Bybit.Net.Enums.TransactionLogType.FeeRefund => Models.TransactionType.Rebate,
+            _ => Models.TransactionType.Other
+        };
     }
 }
 
