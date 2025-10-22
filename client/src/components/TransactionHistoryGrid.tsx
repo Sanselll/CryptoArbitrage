@@ -45,66 +45,66 @@ const getTransactionTypeLabel = (type: TransactionType): string => {
 const getTransactionStatusBadge = (status: TransactionStatus) => {
   switch (status) {
     case TransactionStatus.Pending:
-      return <Badge variant="yellow" size="sm" className="text-[10px]">Pending</Badge>;
+      return <Badge variant="warning" size="sm" className="text-[10px]">Pending</Badge>;
     case TransactionStatus.Completed:
-      return <Badge variant="green" size="sm" className="text-[10px]">Completed</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Completed</Badge>;
     case TransactionStatus.Failed:
-      return <Badge variant="red" size="sm" className="text-[10px]">Failed</Badge>;
+      return <Badge variant="danger" size="sm" className="text-[10px]">Failed</Badge>;
     case TransactionStatus.Canceled:
-      return <Badge variant="gray" size="sm" className="text-[10px]">Canceled</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">Canceled</Badge>;
     case TransactionStatus.Confirmed:
-      return <Badge variant="green" size="sm" className="text-[10px]">Confirmed</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Confirmed</Badge>;
     default:
-      return <Badge variant="gray" size="sm" className="text-[10px]">Unknown</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">Unknown</Badge>;
   }
 };
 
 const getTransactionTypeBadge = (type: TransactionType) => {
   switch (type) {
     case TransactionType.Deposit:
-      return <Badge variant="green" size="sm" className="text-[10px]">Deposit</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Deposit</Badge>;
     case TransactionType.Withdrawal:
-      return <Badge variant="red" size="sm" className="text-[10px]">Withdrawal</Badge>;
+      return <Badge variant="danger" size="sm" className="text-[10px]">Withdrawal</Badge>;
     case TransactionType.Transfer:
-      return <Badge variant="blue" size="sm" className="text-[10px]">Transfer</Badge>;
+      return <Badge variant="info" size="sm" className="text-[10px]">Transfer</Badge>;
     case TransactionType.Commission:
-      return <Badge variant="gray" size="sm" className="text-[10px]">Commission</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">Commission</Badge>;
     case TransactionType.Funding:
-      return <Badge variant="blue" size="sm" className="text-[10px]">Funding</Badge>;
+      return <Badge variant="info" size="sm" className="text-[10px]">Funding</Badge>;
     case TransactionType.Rebate:
-      return <Badge variant="green" size="sm" className="text-[10px]">Rebate</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Rebate</Badge>;
     case TransactionType.Airdrop:
-      return <Badge variant="green" size="sm" className="text-[10px]">Airdrop</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Airdrop</Badge>;
     case TransactionType.RealizedPnL:
-      return <Badge variant="blue" size="sm" className="text-[10px]">Realized PnL</Badge>;
+      return <Badge variant="info" size="sm" className="text-[10px]">Realized PnL</Badge>;
     case TransactionType.Trade:
-      return <Badge variant="blue" size="sm" className="text-[10px]">Trade</Badge>;
+      return <Badge variant="info" size="sm" className="text-[10px]">Trade</Badge>;
     case TransactionType.Liquidation:
-      return <Badge variant="red" size="sm" className="text-[10px]">Liquidation</Badge>;
+      return <Badge variant="danger" size="sm" className="text-[10px]">Liquidation</Badge>;
     case TransactionType.Bonus:
-      return <Badge variant="green" size="sm" className="text-[10px]">Bonus</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Bonus</Badge>;
     case TransactionType.WelcomeBonus:
-      return <Badge variant="green" size="sm" className="text-[10px]">Welcome Bonus</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Welcome Bonus</Badge>;
     case TransactionType.FundingFee:
-      return <Badge variant="yellow" size="sm" className="text-[10px]">Funding Fee</Badge>;
+      return <Badge variant="warning" size="sm" className="text-[10px]">Funding Fee</Badge>;
     case TransactionType.InsuranceClear:
-      return <Badge variant="gray" size="sm" className="text-[10px]">Insurance Clear</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">Insurance Clear</Badge>;
     case TransactionType.ReferralKickback:
-      return <Badge variant="green" size="sm" className="text-[10px]">Referral</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Referral</Badge>;
     case TransactionType.CommissionRebate:
-      return <Badge variant="green" size="sm" className="text-[10px]">Comm Rebate</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Comm Rebate</Badge>;
     case TransactionType.ContestReward:
-      return <Badge variant="green" size="sm" className="text-[10px]">Contest</Badge>;
+      return <Badge variant="success" size="sm" className="text-[10px]">Contest</Badge>;
     case TransactionType.InternalTransfer:
-      return <Badge variant="blue" size="sm" className="text-[10px]">Internal</Badge>;
+      return <Badge variant="info" size="sm" className="text-[10px]">Internal</Badge>;
     case TransactionType.Settlement:
-      return <Badge variant="gray" size="sm" className="text-[10px]">Settlement</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">Settlement</Badge>;
     case TransactionType.Delivery:
-      return <Badge variant="gray" size="sm" className="text-[10px]">Delivery</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">Delivery</Badge>;
     case TransactionType.Adl:
-      return <Badge variant="red" size="sm" className="text-[10px]">ADL</Badge>;
+      return <Badge variant="danger" size="sm" className="text-[10px]">ADL</Badge>;
     default:
-      return <Badge variant="gray" size="sm" className="text-[10px]">{getTransactionTypeLabel(type)}</Badge>;
+      return <Badge variant="secondary" size="sm" className="text-[10px]">{getTransactionTypeLabel(type)}</Badge>;
   }
 };
 
