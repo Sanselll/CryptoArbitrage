@@ -18,6 +18,7 @@ public class OpportunityEnricher : IHostedService
     private readonly IDataCollectionEventBus _eventBus;
     private readonly IDataRepository<MarketDataSnapshot> _marketDataRepository;
     private readonly IDataRepository<LiquidityMetricsDto> _liquidityRepository;
+    private readonly IDataRepository<ArbitrageOpportunityDto> _opportunityRepository;
     private readonly ArbitrageConfig _config;
 
     public OpportunityEnricher(
@@ -25,12 +26,14 @@ public class OpportunityEnricher : IHostedService
         IDataCollectionEventBus eventBus,
         IDataRepository<MarketDataSnapshot> marketDataRepository,
         IDataRepository<LiquidityMetricsDto> liquidityRepository,
+        IDataRepository<ArbitrageOpportunityDto> opportunityRepository,
         IOptions<ArbitrageConfig> config)
     {
         _logger = logger;
         _eventBus = eventBus;
         _marketDataRepository = marketDataRepository;
         _liquidityRepository = liquidityRepository;
+        _opportunityRepository = opportunityRepository;
         _config = config.Value;
     }
 
@@ -196,6 +199,10 @@ public class OpportunityEnricher : IHostedService
                     }
                 }
 
+                // Store individual exchange volumes
+                opportunity.LongVolume24h = longVolume;
+                opportunity.ShortVolume24h = shortVolume;
+
                 // Use the minimum of the two volumes (bottleneck)
                 opportunity.Volume24h = Math.Min(
                     longVolume > 0 ? longVolume : decimal.MaxValue,
@@ -335,6 +342,26 @@ public class OpportunityEnricher : IHostedService
     /// </summary>
     private async Task PublishEnrichedOpportunitiesAsync(List<ArbitrageOpportunityDto> opportunities)
     {
+        // Store opportunities in repository (cache) for retrieval on page refresh
+        try
+        {
+            var opportunitiesDict = opportunities.ToDictionary(
+                o => $"opportunity:{o.Symbol}:{o.Exchange}",
+                o => o
+            );
+
+            await _opportunityRepository.StoreBatchAsync(
+                opportunitiesDict,
+                TimeSpan.FromMinutes(5));
+
+            _logger.LogDebug("Stored {Count} opportunities in cache", opportunities.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error storing opportunities in cache");
+        }
+
+        // Publish event for SignalR broadcasting
         await _eventBus.PublishAsync(new DataCollectionEvent<List<ArbitrageOpportunityDto>>
         {
             EventType = DataCollectionConstants.EventTypes.OpportunitiesEnriched,

@@ -459,15 +459,22 @@ export const PositionsGrid = () => {
                         </span>
                       </TableCell>
                       <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => pair.executionId && handleStop(pair.executionId)}
-                          className="gap-0.5 h-6 px-2 text-[10px]"
-                        >
-                          <StopCircle className="w-2.5 h-2.5" />
-                          Stop
-                        </Button>
+                        {pair.executionId ? (
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStop(pair.executionId!);
+                            }}
+                            className="gap-0.5 h-6 px-2 text-[10px]"
+                          >
+                            <StopCircle className="w-2.5 h-2.5" />
+                            Stop
+                          </Button>
+                        ) : (
+                          <span className="text-[10px] text-binance-text-secondary">--</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -698,15 +705,22 @@ export const PositionsGrid = () => {
                         </span>
                       </TableCell>
                       <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right py-1 ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => pair.executionId && handleStop(pair.executionId)}
-                          className="gap-0.5 h-6 px-2 text-[10px]"
-                        >
-                          <StopCircle className="w-2.5 h-2.5" />
-                          Stop
-                        </Button>
+                        {pair.executionId ? (
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStop(pair.executionId!);
+                            }}
+                            className="gap-0.5 h-6 px-2 text-[10px]"
+                          >
+                            <StopCircle className="w-2.5 h-2.5" />
+                            Stop
+                          </Button>
+                        ) : (
+                          <span className="text-[10px] text-binance-text-secondary">--</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

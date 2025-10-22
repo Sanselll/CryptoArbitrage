@@ -20,21 +20,24 @@ public class ArbitrageHub : Hub
     private readonly ILogger<ArbitrageHub> _logger;
     private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
     private readonly IDataRepository<UserDataSnapshot> _userDataRepository;
+    private readonly IDataRepository<ArbitrageOpportunityDto> _opportunityRepository;
 
     public ArbitrageHub(
         ILogger<ArbitrageHub> logger,
         IDataRepository<FundingRateDto> fundingRateRepository,
-        IDataRepository<UserDataSnapshot> userDataRepository)
+        IDataRepository<UserDataSnapshot> userDataRepository,
+        IDataRepository<ArbitrageOpportunityDto> opportunityRepository)
     {
         _logger = logger;
         _fundingRateRepository = fundingRateRepository;
         _userDataRepository = userDataRepository;
+        _opportunityRepository = opportunityRepository;
     }
 
     /// <summary>
     /// Called when a client connects to the hub.
     /// Adds the connection to a user-specific group for targeted broadcasting.
-    /// Broadcasts initial cached data (funding rates, balances, positions).
+    /// Broadcasts initial cached data (funding rates, balances, positions, opportunities) asynchronously.
     /// </summary>
     public override async Task OnConnectedAsync()
     {
@@ -56,8 +59,18 @@ public class ArbitrageHub : Hub
             "User {UserId} ({Email}) connected to SignalR (ConnectionId: {ConnectionId})",
             userId, email, Context.ConnectionId);
 
-        // Broadcast initial cached data to newly connected client
-        await BroadcastInitialDataAsync(userId);
+        // Broadcast initial cached data in background to avoid blocking connection
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await BroadcastInitialDataAsync(userId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in background broadcast for user {UserId}", userId);
+            }
+        });
 
         await base.OnConnectedAsync();
     }
@@ -108,6 +121,15 @@ public class ArbitrageHub : Hub
                     await Clients.Caller.SendAsync("ReceivePositions", positions);
                     _logger.LogDebug("Sent {Count} cached positions to user {UserId}", positions.Count, userId);
                 }
+            }
+
+            // Broadcast cached opportunities (global or user-specific)
+            var opportunitiesDict = await _opportunityRepository.GetByPatternAsync("opportunity:*");
+            if (opportunitiesDict.Any())
+            {
+                var opportunities = opportunitiesDict.Values.ToList();
+                await Clients.Caller.SendAsync("ReceiveOpportunities", opportunities);
+                _logger.LogDebug("Sent {Count} cached opportunities to user {UserId}", opportunities.Count, userId);
             }
 
             _logger.LogInformation("Initial data broadcast completed for user {UserId}", userId);

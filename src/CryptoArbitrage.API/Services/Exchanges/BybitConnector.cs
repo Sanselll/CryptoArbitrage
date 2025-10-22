@@ -534,7 +534,7 @@ public class BybitConnector : IExchangeConnector
                             if (asset.Key == "USDT")
                             {
                                 spotTotalUsd += asset.Value;
-                                spotAvailableUsd += asset.Value;
+                                spotAvailableUsd = asset.Value; // Only USDT for available
                                 spotUsdtOnly = asset.Value; // Track USDT separately
                             }
                             else
@@ -544,8 +544,7 @@ public class BybitConnector : IExchangeConnector
                                 if (price != null)
                                 {
                                     var usdValue = asset.Value * price.LastPrice;
-                                    spotTotalUsd += usdValue;
-                                    spotAvailableUsd += usdValue;
+                                    spotTotalUsd += usdValue; // Add to total only
                                 }
                             }
                         }
@@ -596,12 +595,15 @@ public class BybitConnector : IExchangeConnector
                 _logger.LogInformation("Bybit Balances - Total: {Total} USD, Available: {Available} USD, Margin: {Margin} USD",
                     totalBalance, futuresAvailable, marginUsed);
 
-                // For frontend calculations:
-                // - TotalBalance = all assets
-                // - FuturesAvailableUsd = available balance for trading
+                // For frontend calculations (Bybit Unified Account):
+                // In Bybit's unified account, all assets are in one pool
+                // For the frontend display:
+                // - SpotBalanceUsd = USDT + other assets (total "spot-like" balance)
+                // - SpotAvailableUsd = USDT only (the liquid stablecoin)
+                // - FuturesBalanceUsd = total wallet balance
+                // - FuturesAvailableUsd = available for trading
                 // - MarginUsed = what's locked in positions
-                // - SpotBalanceUsd = non-USDT coins (for "in positions" calculation)
-                decimal spotAssetsOnly = spotTotalUsd - spotUsdtOnly;
+                decimal spotAssetsOnly = spotTotalUsd - spotUsdtOnly; // Non-USDT assets value
 
                 return new AccountBalanceDto
                 {
@@ -610,9 +612,9 @@ public class BybitConnector : IExchangeConnector
                     TotalBalance = totalBalance,
                     AvailableBalance = futuresAvailable,
                     OperationalBalanceUsd = totalBalance,
-                    // Spot specific (only non-USDT assets like BTC, ETH)
-                    SpotBalanceUsd = spotAssetsOnly,
-                    SpotAvailableUsd = spotAssetsOnly - coinsInActivePositionsUsd,
+                    // Spot balances: For unified account, show USDT + other assets
+                    SpotBalanceUsd = spotTotalUsd, // USDT + other assets
+                    SpotAvailableUsd = spotUsdtOnly, // Only USDT (the stablecoin)
                     SpotAssets = spotBalances,
                     // Futures/Unified account totals
                     FuturesBalanceUsd = totalBalance,

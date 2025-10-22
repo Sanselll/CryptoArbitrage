@@ -104,6 +104,10 @@ export interface ArbitrageOpportunity {
   estimatedProfitPercentage: number;
   volume24h?: number;
 
+  // Per-exchange volumes for cross-exchange arbitrage
+  longVolume24h?: number;
+  shortVolume24h?: number;
+
   // Liquidity metrics
   bidAskSpreadPercent?: number;
   orderbookDepthUsd?: number;
