@@ -152,8 +152,37 @@ public class FundingRateCollector : IDataCollector<FundingRateDto, FundingRateCo
 
             var fundingRates = await connector.GetFundingRatesAsync(symbols);
 
+            // Calculate 3-day average for each symbol
+            var endTime = DateTime.UtcNow;
+            var startTime = endTime.AddDays(-3);
+            
             foreach (var rate in fundingRates)
             {
+                // Fetch historical funding rates for the past 3 days
+                try
+                {
+
+                    var historicalRates = await connector.GetFundingRateHistoryAsync(rate.Symbol, startTime, endTime);
+
+                    if (historicalRates.Any())
+                    {
+                        // Calculate the average funding rate
+                        var average = historicalRates.Average(r => r.Rate);
+                        rate.Average3DayRate = average;
+                        
+                    }
+                    else
+                    {
+                        _logger.LogWarning("✗ No historical data returned for {Symbol} on {Exchange}, skipping 3-day average",
+                            rate.Symbol, exchangeName);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "✗ Failed to fetch 3-day average for {Symbol} on {Exchange}: {Message}",
+                        rate.Symbol, exchangeName, ex.Message);
+                }
+
                 var key = DataCollectionConstants.CacheKeys.BuildFundingRateKey(exchangeName, rate.Symbol);
                 result[key] = rate;
             }

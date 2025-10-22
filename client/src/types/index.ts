@@ -67,7 +67,8 @@ export enum ExecutionState {
 export enum StrategySubType {
   SpotPerpetualSameExchange = 0,
   CrossExchangeFuturesFutures = 1,
-  CrossExchangeSpotFutures = 2
+  CrossExchangeSpotFutures = 2,
+  CrossExchangeFuturesPriceSpread = 3
 }
 
 export enum LiquidityStatus {

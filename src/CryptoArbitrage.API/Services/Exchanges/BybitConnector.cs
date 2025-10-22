@@ -1134,64 +1134,87 @@ public class BybitConnector : IExchangeConnector
         try
         {
             var results = new List<FundingRateDto>();
-            var startTimeMs = new DateTimeOffset(startTime).ToUnixTimeMilliseconds();
-            var endTimeMs = new DateTimeOffset(endTime).ToUnixTimeMilliseconds();
 
-            // Bybit returns max 200 records per request, may need pagination
-            const int limit = 200;
-            var currentStartTime = startTimeMs;
+            // Bybit uses variable funding intervals: 1h, 4h, or 8h
+            // To cover 3 days (72 hours) for all intervals:
+            // - 1h interval: 72 records needed
+            // - 4h interval: 18 records needed
+            // - 8h interval: 9 records needed
+            // Fetch last 75 records to cover 3+ days for all interval types
+            const int limit = 75;
 
-            while (currentStartTime < endTimeMs)
+            var historicalRates = await _restClient.V5Api.ExchangeData.GetFundingRateHistoryAsync(
+                Category.Linear,
+                symbol,
+                limit: limit);
+
+            if (!historicalRates.Success || historicalRates.Data?.List == null || !historicalRates.Data.List.Any())
             {
-                var historicalRates = await _restClient.V5Api.ExchangeData.GetFundingRateHistoryAsync(
-                    Category.Linear,
-                    symbol,
-                    startTime: DateTimeOffset.FromUnixTimeMilliseconds(currentStartTime).DateTime,
-                    endTime: DateTimeOffset.FromUnixTimeMilliseconds(endTimeMs).DateTime,
-                    limit: limit);
-
-                if (!historicalRates.Success || historicalRates.Data?.List == null || !historicalRates.Data.List.Any())
+                if (!historicalRates.Success)
                 {
-                    if (!historicalRates.Success)
-                    {
-                        _logger.LogWarning("Failed to fetch funding rate history for {Symbol} on {Exchange}: {Error}",
-                            symbol, ExchangeName, historicalRates.Error?.Message ?? "Unknown error");
-                    }
-                    break;
+                    _logger.LogWarning("Failed to fetch funding rate history for {Symbol} on {Exchange}: {Error}",
+                        symbol, ExchangeName, historicalRates.Error?.Message ?? "Unknown error");
+                }
+                else if (historicalRates.Data?.List == null)
+                {
+                    _logger.LogWarning("Funding rate history returned null data for {Symbol} on {Exchange}", symbol, ExchangeName);
+                }
+                else
+                {
+                    _logger.LogWarning("Funding rate history returned empty list for {Symbol} on {Exchange}", symbol, ExchangeName);
                 }
 
-                foreach (var rate in historicalRates.Data.List)
-                {
-                    // Get funding interval hours (Bybit uses 8-hour intervals for most pairs)
-                    var fundingIntervalHours = 8; // Default for linear contracts
-
-                    // Calculate annualized rate
-                    var periodsPerYear = (365.0m * 24.0m) / fundingIntervalHours;
-                    var annualizedRate = rate.FundingRate * periodsPerYear;
-
-                    results.Add(new FundingRateDto
-                    {
-                        Exchange = ExchangeName,
-                        Symbol = rate.Symbol,
-                        Rate = rate.FundingRate,
-                        AnnualizedRate = annualizedRate,
-                        FundingIntervalHours = fundingIntervalHours,
-                        FundingTime = rate.Timestamp,
-                        NextFundingTime = rate.Timestamp.AddHours(fundingIntervalHours),
-                        RecordedAt = DateTime.UtcNow
-                    });
-                }
-
-                // Check if we got less than limit, meaning we've reached the end
-                if (historicalRates.Data.List.Count() < limit)
-                    break;
-
-                // Update start time for next page (use last record's timestamp + 1ms)
-                currentStartTime = new DateTimeOffset(historicalRates.Data.List.Last().Timestamp).ToUnixTimeMilliseconds() + 1;
+                return results;
             }
 
-            _logger.LogInformation("Fetched {Count} historical funding rates for {Symbol} on {Exchange}",
-                results.Count, symbol, ExchangeName);
+            // Filter to only include rates from the last 3 days
+            var threeDaysAgo = DateTime.UtcNow.AddDays(-3);
+            var filteredRates = historicalRates.Data.List
+                .Where(r => r.Timestamp >= threeDaysAgo)
+                .OrderBy(r => r.Timestamp)
+                .ToList();
+
+            if (!filteredRates.Any())
+            {
+                _logger.LogWarning("No funding rates found within last 3 days for {Symbol} on {Exchange}",
+                    symbol, ExchangeName);
+                return results;
+            }
+
+            // Determine the actual funding interval by comparing timestamps
+            int fundingIntervalHours = 8; // Default to 8h
+            if (filteredRates.Count >= 2)
+            {
+                var timeDiff = (filteredRates[1].Timestamp - filteredRates[0].Timestamp).TotalHours;
+
+                // Round to nearest hour and determine interval (1h, 4h, or 8h)
+                if (Math.Abs(timeDiff - 1) < 0.1) fundingIntervalHours = 1;
+                else if (Math.Abs(timeDiff - 4) < 0.1) fundingIntervalHours = 4;
+                else if (Math.Abs(timeDiff - 8) < 0.1) fundingIntervalHours = 8;
+
+                _logger.LogDebug("Detected {Interval}h funding interval for {Symbol} on {Exchange}",
+                    fundingIntervalHours, symbol, ExchangeName);
+            }
+
+            foreach (var rate in filteredRates)
+            {
+                // Calculate annualized rate
+                var periodsPerYear = (365.0m * 24.0m) / fundingIntervalHours;
+                var annualizedRate = rate.FundingRate * periodsPerYear;
+
+                results.Add(new FundingRateDto
+                {
+                    Exchange = ExchangeName,
+                    Symbol = rate.Symbol,
+                    Rate = rate.FundingRate,
+                    AnnualizedRate = annualizedRate,
+                    FundingIntervalHours = fundingIntervalHours,
+                    FundingTime = rate.Timestamp,
+                    NextFundingTime = rate.Timestamp.AddHours(fundingIntervalHours),
+                    RecordedAt = DateTime.UtcNow
+                });
+            }
+            
 
             return results.OrderBy(r => r.FundingTime).ToList();
         }

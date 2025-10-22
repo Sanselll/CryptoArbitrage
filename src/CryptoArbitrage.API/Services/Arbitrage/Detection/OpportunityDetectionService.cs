@@ -31,12 +31,21 @@ public class OpportunityDetectionService : IOpportunityDetectionService
         // Cross-exchange arbitrage (requires 2+ exchanges)
         if (snapshot.FundingRates.Count >= 2)
         {
-            // Futures/Futures cross-exchange
+            // Futures/Futures cross-exchange (FUNDING arbitrage)
             if (_config.IsStrategyEnabled(StrategySubType.CrossExchangeFuturesFutures))
             {
                 var crossExchangeFuturesOpps = await DetectCrossExchangeFuturesOpportunitiesAsync(
                     snapshot.FundingRates, snapshot.PerpPrices);
                 opportunities.AddRange(crossExchangeFuturesOpps);
+            }
+
+            // Futures/Futures cross-exchange (PRICE spread arbitrage)
+            if (_config.IsStrategyEnabled(StrategySubType.CrossExchangeFuturesPriceSpread)
+                && snapshot.PerpPrices.Count >= 2)
+            {
+                var crossExchangePriceSpreadOpps = await DetectCrossExchangePriceSpreadOpportunitiesAsync(
+                    snapshot.PerpPrices, snapshot.FundingRates);
+                opportunities.AddRange(crossExchangePriceSpreadOpps);
             }
 
             // Spot/Futures cross-exchange
@@ -190,6 +199,130 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
         await Task.CompletedTask;
         return opportunities.OrderByDescending(o => o.AnnualizedSpread).ToList();
+    }
+
+    private async Task<List<ArbitrageOpportunityDto>> DetectCrossExchangePriceSpreadOpportunitiesAsync(
+        Dictionary<string, Dictionary<string, PriceDto>> perpPrices,
+        Dictionary<string, List<FundingRateDto>> fundingRates)
+    {
+        var opportunities = new List<ArbitrageOpportunityDto>();
+
+        if (perpPrices.Count < 2)
+            return opportunities;
+
+        var exchangeNames = perpPrices.Keys.ToList();
+
+        // Find common symbols across all exchanges
+        var commonSymbols = perpPrices.Values
+            .Select(prices => prices.Keys.ToHashSet())
+            .Aggregate((a, b) => { a.IntersectWith(b); return a; });
+
+        foreach (var symbol in commonSymbols)
+        {
+            // Compare perpetual prices between all exchange pairs
+            for (int i = 0; i < exchangeNames.Count; i++)
+            {
+                for (int j = i + 1; j < exchangeNames.Count; j++)
+                {
+                    var exchange1 = exchangeNames[i];
+                    var exchange2 = exchangeNames[j];
+
+                    decimal price1 = perpPrices[exchange1][symbol].Price;
+                    decimal price2 = perpPrices[exchange2][symbol].Price;
+
+                    // Skip if prices are invalid
+                    if (price1 == 0 || price2 == 0)
+                        continue;
+
+                    // Determine cheaper and expensive exchanges
+                    string cheaperExchange, expensiveExchange;
+                    decimal cheaperPrice, expensivePrice;
+
+                    if (price1 < price2)
+                    {
+                        cheaperExchange = exchange1;
+                        expensiveExchange = exchange2;
+                        cheaperPrice = price1;
+                        expensivePrice = price2;
+                    }
+                    else
+                    {
+                        cheaperExchange = exchange2;
+                        expensiveExchange = exchange1;
+                        cheaperPrice = price2;
+                        expensivePrice = price1;
+                    }
+
+                    // Calculate percentage price spread
+                    decimal priceSpread = Math.Abs(expensivePrice - cheaperPrice) / cheaperPrice;
+                    decimal priceSpreadPercent = priceSpread * 100;
+
+                    // Estimate trading fees (0.05% maker fee on both sides = 0.1% total)
+                    decimal estimatedTradingFees = 0.001m; // 0.1%
+
+                    // Estimate slippage (conservative estimate)
+                    decimal estimatedSlippage = 0.0005m; // 0.05%
+
+                    // Net profit = price spread - fees - slippage
+                    decimal netProfit = priceSpread - estimatedTradingFees - estimatedSlippage;
+                    decimal netProfitPercent = netProfit * 100;
+
+                    // Only profitable if net profit exceeds minimum threshold
+                    if (netProfitPercent >= _config.MinPriceSpreadPercentage)
+                    {
+                        // Get funding rates for both exchanges (optional context)
+                        decimal cheaperFundingRate = 0;
+                        decimal expensiveFundingRate = 0;
+                        int? cheaperFundingIntervalHours = null;
+                        int? expensiveFundingIntervalHours = null;
+
+                        if (fundingRates.ContainsKey(cheaperExchange))
+                        {
+                            var rate = fundingRates[cheaperExchange].FirstOrDefault(r => r.Symbol == symbol);
+                            if (rate != null)
+                            {
+                                cheaperFundingRate = rate.Rate;
+                                cheaperFundingIntervalHours = rate.FundingIntervalHours;
+                            }
+                        }
+
+                        if (fundingRates.ContainsKey(expensiveExchange))
+                        {
+                            var rate = fundingRates[expensiveExchange].FirstOrDefault(r => r.Symbol == symbol);
+                            if (rate != null)
+                            {
+                                expensiveFundingRate = rate.Rate;
+                                expensiveFundingIntervalHours = rate.FundingIntervalHours;
+                            }
+                        }
+
+                        opportunities.Add(new ArbitrageOpportunityDto
+                        {
+                            Strategy = ArbitrageStrategy.CrossExchange,
+                            SubType = StrategySubType.CrossExchangeFuturesPriceSpread,
+                            Symbol = symbol,
+                            LongExchange = cheaperExchange,    // Long on cheaper exchange
+                            ShortExchange = expensiveExchange, // Short on expensive exchange
+                            LongFundingRate = cheaperFundingRate,
+                            ShortFundingRate = expensiveFundingRate,
+                            LongFundingIntervalHours = cheaperFundingIntervalHours,
+                            ShortFundingIntervalHours = expensiveFundingIntervalHours,
+                            // Use SpotPrice for cheaper exchange price, PerpetualPrice for expensive exchange price
+                            SpotPrice = cheaperPrice,
+                            PerpetualPrice = expensivePrice,
+                            SpreadRate = netProfit,
+                            AnnualizedSpread = netProfit, // Not annualized for price arbitrage (one-time profit)
+                            EstimatedProfitPercentage = netProfitPercent,
+                            Status = OpportunityStatus.Detected,
+                            DetectedAt = DateTime.UtcNow
+                        });
+                    }
+                }
+            }
+        }
+
+        await Task.CompletedTask;
+        return opportunities.OrderByDescending(o => o.EstimatedProfitPercentage).ToList();
     }
 
     private async Task<List<ArbitrageOpportunityDto>> DetectSpotPerpetualOpportunitiesAsync(

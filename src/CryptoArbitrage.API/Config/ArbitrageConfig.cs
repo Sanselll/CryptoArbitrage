@@ -50,9 +50,13 @@ public class ArbitrageConfig
     public decimal MinHighPriorityFundingRate { get; set; } = 0.01m; // 1% = 365% APR - always include these
 
     // === STRATEGY CONFIGURATION ===
-    public bool EnableSpotPerpetualSameExchange { get; set; } = true;       // Buy spot + short perp on same exchange
-    public bool EnableCrossExchangeFuturesFutures { get; set; } = true;     // Long perp on one exchange + short perp on another
-    public bool EnableCrossExchangeSpotFutures { get; set; } = true;        // Buy spot on one exchange + short perp on another
+    public bool EnableSpotPerpetualSameExchange { get; set; } = true;         // Buy spot + short perp on same exchange
+    public bool EnableCrossExchangeFuturesFutures { get; set; } = true;       // Long perp on one exchange + short perp on another (FUNDING arbitrage)
+    public bool EnableCrossExchangeSpotFutures { get; set; } = true;          // Buy spot on one exchange + short perp on another
+    public bool EnableCrossExchangeFuturesPriceSpread { get; set; } = true;   // Long perp on cheaper exchange + short perp on expensive (PRICE arbitrage)
+
+    // Price spread arbitrage threshold (higher than funding since more execution risk)
+    public decimal MinPriceSpreadPercentage { get; set; } = 0.3m;              // 0.3% minimum price spread for cross-exchange price arbitrage
 
     // === EXCHANGE CONFIGURATIONS ===
     public List<ExchangeConfig> Exchanges { get; set; } = new();
@@ -65,6 +69,7 @@ public class ArbitrageConfig
             StrategySubType.SpotPerpetualSameExchange => EnableSpotPerpetualSameExchange,
             StrategySubType.CrossExchangeFuturesFutures => EnableCrossExchangeFuturesFutures,
             StrategySubType.CrossExchangeSpotFutures => EnableCrossExchangeSpotFutures,
+            StrategySubType.CrossExchangeFuturesPriceSpread => EnableCrossExchangeFuturesPriceSpread,
             _ => false
         };
     }
