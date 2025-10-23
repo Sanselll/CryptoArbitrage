@@ -1,4 +1,5 @@
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
+using CryptoArbitrage.API.Models;
 
 namespace CryptoArbitrage.API.Services.DataCollection.Configuration;
 
@@ -49,7 +50,7 @@ public class CollectorConfiguration
 }
 
 /// <summary>
-/// Configuration for funding rate collector
+/// Configuration for funding rate collector (current rates only)
 /// </summary>
 public class FundingRateCollectorConfiguration : CollectorConfiguration
 {
@@ -59,16 +60,6 @@ public class FundingRateCollectorConfiguration : CollectorConfiguration
         StorageStrategy = StorageStrategy.Dual; // Memory + Database
         CacheTtlMinutes = 60;
     }
-
-    /// <summary>
-    /// Whether to fetch historical rates on startup
-    /// </summary>
-    public bool FetchHistoryOnStartup { get; set; } = false;
-
-    /// <summary>
-    /// Number of historical data points to fetch
-    /// </summary>
-    public int HistoricalDataPoints { get; set; } = 100;
 }
 
 /// <summary>
@@ -223,6 +214,30 @@ public class TransactionHistoryCollectorConfiguration : CollectorConfiguration
 }
 
 /// <summary>
+/// Configuration for historical price collector (KLines data for spread projections)
+/// </summary>
+public class HistoricalPriceCollectorConfiguration : CollectorConfiguration
+{
+    public HistoricalPriceCollectorConfiguration()
+    {
+        CollectionIntervalSeconds = 3600; // Every hour
+        StorageStrategy = StorageStrategy.MemoryOnly;
+        CacheTtlMinutes = 120; // 2 hours TTL
+        MaxParallelFetches = 20;
+    }
+
+    /// <summary>
+    /// Number of days of historical price data to collect
+    /// </summary>
+    public int HistoryDays { get; set; } = 3;
+
+    /// <summary>
+    /// Kline interval for data collection (hourly by default)
+    /// </summary>
+    public KlineInterval KlineInterval { get; set; } = KlineInterval.OneHour;
+}
+
+/// <summary>
 /// Master configuration for all data collectors
 /// </summary>
 public class DataCollectionConfiguration
@@ -237,4 +252,5 @@ public class DataCollectionConfiguration
     public OrderHistoryCollectorConfiguration OrderHistory { get; set; } = new();
     public TradeHistoryCollectorConfiguration TradeHistory { get; set; } = new();
     public TransactionHistoryCollectorConfiguration TransactionHistory { get; set; } = new();
+    public HistoricalPriceCollectorConfiguration HistoricalPrice { get; set; } = new();
 }

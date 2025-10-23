@@ -188,6 +188,13 @@ builder.Services.AddSingleton(sp =>
 
 builder.Services.AddSingleton(sp =>
 {
+    var config = new FundingRateHistoryCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:FundingRateHistory").Bind(config);
+    return config;
+});
+
+builder.Services.AddSingleton(sp =>
+{
     var config = new MarketPriceCollectorConfiguration();
     builder.Configuration.GetSection("DataCollection:MarketPrice").Bind(config);
     return config;
@@ -235,6 +242,13 @@ builder.Services.AddSingleton(sp =>
     return config;
 });
 
+builder.Services.AddSingleton(sp =>
+{
+    var config = new HistoricalPriceCollectorConfiguration();
+    builder.Configuration.GetSection("DataCollection:HistoricalPrice").Bind(config);
+    return config;
+});
+
 // Repositories
 builder.Services.AddSingleton<IDataRepository<FundingRateDto>, FundingRateRepository>();
 builder.Services.AddSingleton<IDataRepository<MarketDataSnapshot>, MarketDataRepository>();
@@ -244,9 +258,11 @@ builder.Services.AddSingleton<IDataRepository<ArbitrageOpportunityDto>, Opportun
 builder.Services.AddSingleton<IDataRepository<List<OrderDto>>, MemoryDataRepository<List<OrderDto>>>();
 builder.Services.AddSingleton<IDataRepository<List<TradeDto>>, MemoryDataRepository<List<TradeDto>>>();
 builder.Services.AddSingleton<IDataRepository<List<TransactionDto>>, MemoryDataRepository<List<TransactionDto>>>();
+builder.Services.AddSingleton<IDataRepository<Dictionary<string, List<HistoricalPriceDto>>>, MemoryDataRepository<Dictionary<string, List<HistoricalPriceDto>>>>();
 
 // Collectors - register as interfaces so background services can resolve them
 builder.Services.AddSingleton<IDataCollector<FundingRateDto, FundingRateCollectorConfiguration>, FundingRateCollector>();
+builder.Services.AddSingleton<IDataCollector<FundingRateDto, FundingRateHistoryCollectorConfiguration>, FundingRateHistoryCollector>();
 builder.Services.AddSingleton<IDataCollector<MarketDataSnapshot, MarketPriceCollectorConfiguration>, MarketPriceCollector>();
 builder.Services.AddSingleton<IDataCollector<UserDataSnapshot, UserDataCollectorConfiguration>, UserDataCollector>();
 builder.Services.AddSingleton<IDataCollector<LiquidityMetricsDto, LiquidityCollectorConfiguration>, LiquidityMetricsCollector>();
@@ -254,12 +270,14 @@ builder.Services.AddSingleton<IDataCollector<List<OrderDto>, OpenOrdersCollector
 builder.Services.AddSingleton<IDataCollector<List<OrderDto>, OrderHistoryCollectorConfiguration>, OrderHistoryCollector>();
 builder.Services.AddSingleton<IDataCollector<List<TradeDto>, TradeHistoryCollectorConfiguration>, TradeHistoryCollector>();
 builder.Services.AddSingleton<IDataCollector<List<TransactionDto>, TransactionHistoryCollectorConfiguration>, TransactionHistoryCollector>();
+builder.Services.AddSingleton<IDataCollector<Dictionary<string, List<HistoricalPriceDto>>, HistoricalPriceCollectorConfiguration>, HistoricalPriceCollector>();
 
 // Event Bus - coordinates data flow between collectors, aggregators, enrichers, and broadcasters
 builder.Services.AddSingleton<IDataCollectionEventBus, DataCollectionEventBus>();
 
 // Background Services - Data Collection (Layer 1: Pure Collectors)
 builder.Services.AddHostedService<FundingRateCollectionBackgroundService>();
+builder.Services.AddHostedService<FundingRateHistoryCollectionBackgroundService>();
 builder.Services.AddHostedService<MarketPriceCollectionBackgroundService>();
 builder.Services.AddHostedService<UserDataCollectionBackgroundService>();
 builder.Services.AddHostedService<LiquidityCollectionBackgroundService>();
@@ -267,6 +285,7 @@ builder.Services.AddHostedService<OpenOrdersCollectionBackgroundService>();
 builder.Services.AddHostedService<OrderHistoryCollectionBackgroundService>();
 builder.Services.AddHostedService<TradeHistoryCollectionBackgroundService>();
 builder.Services.AddHostedService<TransactionHistoryCollectionBackgroundService>();
+builder.Services.AddHostedService<HistoricalPriceCollectionBackgroundService>();
 
 // Background Services - Aggregation (Layer 3: Aggregators)
 builder.Services.AddHostedService<OpportunityAggregator>();

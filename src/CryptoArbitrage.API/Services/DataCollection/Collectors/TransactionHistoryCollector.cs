@@ -78,9 +78,11 @@ public class TransactionHistoryCollector : IDataCollector<List<TransactionDto>, 
             _logger.LogDebug("Fetching transactions from {StartTime:yyyy-MM-dd HH:mm:ss} to {EndTime:yyyy-MM-dd HH:mm:ss}",
                 startTime, endTime);
 
-            // Collect from each user/exchange combination
-            foreach (var apiKey in userApiKeys)
+            // Collect from each user/exchange combination IN PARALLEL
+            var semaphore = new SemaphoreSlim(Configuration.MaxParallelFetches);
+            var tasks = userApiKeys.Select(async apiKey =>
             {
+                await semaphore.WaitAsync(cancellationToken);
                 try
                 {
                     // Create a new scoped connector for this user
@@ -107,12 +109,12 @@ public class TransactionHistoryCollector : IDataCollector<List<TransactionDto>, 
                         default:
                             _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
                                 apiKey.ExchangeName, apiKey.UserId);
-                            continue;
+                            return ((string?)null, (List<TransactionDto>?)null);
                     }
 
                     if (connector == null)
                     {
-                        continue;
+                        return ((string?)null, (List<TransactionDto>?)null);
                     }
 
                     // Fetch transaction history using dynamic
@@ -120,7 +122,6 @@ public class TransactionHistoryCollector : IDataCollector<List<TransactionDto>, 
                     List<TransactionDto> transactions = await dynamicConnector.GetTransactionsAsync(startTime, endTime, 100);
 
                     var key = $"transactionhistory:{apiKey.UserId}:{apiKey.ExchangeName}";
-                    allTransactions[key] = transactions;
 
                     if (transactions.Count > 0)
                     {
@@ -135,12 +136,27 @@ public class TransactionHistoryCollector : IDataCollector<List<TransactionDto>, 
                         _logger.LogWarning("No transactions found for user {UserId} on {Exchange} in the last {Days} days",
                             apiKey.UserId, apiKey.ExchangeName, _configuration.HistoryDays);
                     }
+
+                    return (key, transactions);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to collect transaction history for user {UserId} on {Exchange}",
                         apiKey.UserId, apiKey.ExchangeName);
+                    return ((string?)null, (List<TransactionDto>?)null);
                 }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+
+            // Aggregate successful results
+            foreach (var item in results.Where(r => r.Item1 != null && r.Item2 != null))
+            {
+                allTransactions[item.Item1!] = item.Item2!;
             }
 
             // Store in memory repository

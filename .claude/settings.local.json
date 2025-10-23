@@ -53,7 +53,10 @@
       "Bash(dotnet build)",
       "Bash(dotnet build --no-incremental)",
       "Bash(journalctl --user -t dotnet -n 100 --since \"5 minutes ago\")",
-      "Bash(npm run build)"
+      "Bash(npm run build)",
+      "Bash(curl:*)",
+      "Bash(npm run dev:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

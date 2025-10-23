@@ -70,9 +70,11 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
             using var encryptionScope = _serviceProvider.CreateScope();
             var encryptionService = encryptionScope.ServiceProvider.GetRequiredService<IEncryptionService>();
 
-            // Collect from each user/exchange combination
-            foreach (var apiKey in userApiKeys)
+            // Collect from each user/exchange combination IN PARALLEL
+            var semaphore = new SemaphoreSlim(Configuration.MaxParallelFetches);
+            var tasks = userApiKeys.Select(async apiKey =>
             {
+                await semaphore.WaitAsync(cancellationToken);
                 try
                 {
                     // Create a new scoped connector for this user
@@ -99,12 +101,12 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                         default:
                             _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
                                 apiKey.ExchangeName, apiKey.UserId);
-                            continue;
+                            return ((string?)null, (UserDataSnapshot?)null);
                     }
 
                     if (connector == null)
                     {
-                        continue;
+                        return ((string?)null, (UserDataSnapshot?)null);
                     }
 
                     // Fetch balance and positions using dynamic to call connector methods
@@ -128,16 +130,30 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                     };
 
                     var key = $"userdata:{apiKey.UserId}:{apiKey.ExchangeName}";
-                    snapshots[key] = snapshot;
 
                     _logger.LogDebug("Collected data for user {UserId} on {Exchange}: {PositionCount} positions",
                         apiKey.UserId, apiKey.ExchangeName, positionCount);
+
+                    return (key, snapshot);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to collect data for user {UserId} on {Exchange}",
                         apiKey.UserId, apiKey.ExchangeName);
+                    return ((string?)null, (UserDataSnapshot?)null);
                 }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+
+            // Aggregate successful results
+            foreach (var item in results.Where(r => r.Item1 != null && r.Item2 != null))
+            {
+                snapshots[item.Item1!] = item.Item2!;
             }
 
             // Store in repository (memory cache)
