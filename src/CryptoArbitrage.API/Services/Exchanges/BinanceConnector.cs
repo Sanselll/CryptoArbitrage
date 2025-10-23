@@ -1115,23 +1115,32 @@ public class BinanceConnector : IExchangeConnector
                 return results;
             }
 
-            // Determine the actual funding interval by comparing timestamps
-            int fundingIntervalHours = 8; // Default to 8h
-            if (filteredRates.Count >= 2)
+            // Detect interval for EACH rate individually to handle interval changes mid-period
+            for (int i = 0; i < filteredRates.Count; i++)
             {
-                var timeDiff = (filteredRates[1].FundingTime - filteredRates[0].FundingTime).TotalHours;
+                var rate = filteredRates[i];
+                int fundingIntervalHours = 8; // Default to 8h
 
-                // Round to nearest hour and determine interval (1h, 4h, or 8h)
-                if (Math.Abs(timeDiff - 1) < 0.1) fundingIntervalHours = 1;
-                else if (Math.Abs(timeDiff - 4) < 0.1) fundingIntervalHours = 4;
-                else if (Math.Abs(timeDiff - 8) < 0.1) fundingIntervalHours = 8;
+                // Detect interval by comparing with next rate (if available)
+                if (i < filteredRates.Count - 1)
+                {
+                    var timeDiff = (filteredRates[i + 1].FundingTime - rate.FundingTime).TotalHours;
 
-                _logger.LogDebug("Detected {Interval}h funding interval for {Symbol} on {Exchange}",
-                    fundingIntervalHours, symbol, ExchangeName);
-            }
+                    // Round to nearest hour and determine interval (1h, 4h, or 8h)
+                    if (Math.Abs(timeDiff - 1) < 0.1) fundingIntervalHours = 1;
+                    else if (Math.Abs(timeDiff - 4) < 0.1) fundingIntervalHours = 4;
+                    else if (Math.Abs(timeDiff - 8) < 0.1) fundingIntervalHours = 8;
+                }
+                else if (i > 0)
+                {
+                    // For the last rate, use the interval from the previous rate
+                    var timeDiff = (rate.FundingTime - filteredRates[i - 1].FundingTime).TotalHours;
 
-            foreach (var rate in filteredRates)
-            {
+                    if (Math.Abs(timeDiff - 1) < 0.1) fundingIntervalHours = 1;
+                    else if (Math.Abs(timeDiff - 4) < 0.1) fundingIntervalHours = 4;
+                    else if (Math.Abs(timeDiff - 8) < 0.1) fundingIntervalHours = 8;
+                }
+
                 // Calculate annualized rate
                 var periodsPerYear = (365.0m * 24.0m) / fundingIntervalHours;
                 var annualizedRate = rate.FundingRate * periodsPerYear;
@@ -1148,6 +1157,9 @@ public class BinanceConnector : IExchangeConnector
                     RecordedAt = DateTime.UtcNow
                 });
             }
+
+            _logger.LogDebug("Fetched {Count} funding rates for {Symbol} on {Exchange} (intervals detected per-rate)",
+                results.Count, symbol, ExchangeName);
             
 
             return results.OrderBy(r => r.FundingTime).ToList();
@@ -1157,6 +1169,70 @@ public class BinanceConnector : IExchangeConnector
             _logger.LogError(ex, "Error fetching funding rate history for {Symbol} on {Exchange}", symbol,
                 ExchangeName);
             return new List<FundingRateDto>();
+        }
+    }
+
+    public async Task<List<KlineDto>> GetKlinesAsync(string symbol, DateTime startTime, DateTime endTime, Models.KlineInterval interval)
+    {
+        if (_restClient == null)
+        {
+            _logger.LogWarning("Cannot get klines for {Exchange} - not connected", ExchangeName);
+            return new List<KlineDto>();
+        }
+
+        try
+        {
+            // Convert our KlineInterval enum to Binance.Net enum
+            var binanceInterval = interval switch
+            {
+                Models.KlineInterval.OneMinute => Binance.Net.Enums.KlineInterval.OneMinute,
+                Models.KlineInterval.FiveMinutes => Binance.Net.Enums.KlineInterval.FiveMinutes,
+                Models.KlineInterval.FifteenMinutes => Binance.Net.Enums.KlineInterval.FifteenMinutes,
+                Models.KlineInterval.ThirtyMinutes => Binance.Net.Enums.KlineInterval.ThirtyMinutes,
+                Models.KlineInterval.OneHour => Binance.Net.Enums.KlineInterval.OneHour,
+                Models.KlineInterval.FourHours => Binance.Net.Enums.KlineInterval.FourHour,
+                Models.KlineInterval.OneDay => Binance.Net.Enums.KlineInterval.OneDay,
+                _ => Binance.Net.Enums.KlineInterval.OneHour
+            };
+
+            // Binance API limit is 1500 records per request
+            var klines = await _restClient.UsdFuturesApi.ExchangeData.GetKlinesAsync(
+                symbol,
+                binanceInterval,
+                startTime,
+                endTime,
+                limit: 1500);
+
+            if (!klines.Success || klines.Data == null || !klines.Data.Any())
+            {
+                if (!klines.Success)
+                {
+                    _logger.LogWarning("Failed to fetch klines for {Symbol} on {Exchange}: {Error}",
+                        symbol, ExchangeName, klines.Error?.Message ?? "Unknown error");
+                }
+                return new List<KlineDto>();
+            }
+
+            var results = klines.Data.Select(k => new KlineDto
+            {
+                Exchange = ExchangeName,
+                Symbol = symbol,
+                OpenTime = k.OpenTime,
+                CloseTime = k.CloseTime,
+                Open = k.OpenPrice,
+                High = k.HighPrice,
+                Low = k.LowPrice,
+                Close = k.ClosePrice,
+                Volume = k.Volume
+            }).ToList();
+
+            _logger.LogDebug("Fetched {Count} klines for {Symbol} on {Exchange}", results.Count, symbol, ExchangeName);
+            return results;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching klines for {Symbol} on {Exchange}", symbol, ExchangeName);
+            return new List<KlineDto>();
         }
     }
 

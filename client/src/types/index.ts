@@ -4,6 +4,7 @@ export interface FundingRate {
   rate: number;
   annualizedRate: number;
   average3DayRate?: number;
+  average24hRate?: number;
   fundingIntervalHours?: number;
   volume24h?: number;
   fundingTime: string;
@@ -103,7 +104,27 @@ export interface ArbitrageOpportunity {
   spreadRate: number;
   annualizedSpread: number;
   estimatedProfitPercentage: number;
+  positionCostPercent: number;
+  breakEvenTimeHours?: number;
   volume24h?: number;
+
+  // Calculated metrics (current funding rate)
+  fundProfit8h: number;           // 8-hour profit percentage using current funding rate
+  fundApr: number;                // Annualized percentage rate using current funding rate
+
+  // Projected metrics (24-hour average)
+  fundProfit8h24hProj?: number;       // 8-hour profit % using 24h average funding rate
+  fundApr24hProj?: number;            // APR % using 24h average funding rate
+  fundBreakEvenTime24hProj?: number;  // Break-even hours using 24h average funding rate
+
+  // Projected metrics (3-day average)
+  fundProfit8h3dProj?: number;        // 8-hour profit % using 3D average funding rate
+  fundApr3dProj?: number;             // APR % using 3D average funding rate
+  fundBreakEvenTime3dProj?: number;   // Break-even hours using 3D average funding rate
+
+  // Price spread projection metrics (for CFPS - CrossExchangeFuturesPriceSpread)
+  priceSpread24hAvg?: number;         // 24-hour average price spread %
+  priceSpread3dAvg?: number;          // 3-day average price spread %
 
   // Per-exchange volumes for cross-exchange arbitrage
   longVolume24h?: number;

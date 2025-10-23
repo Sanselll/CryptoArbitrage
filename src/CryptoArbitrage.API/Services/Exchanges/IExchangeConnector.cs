@@ -30,6 +30,9 @@ public interface IExchangeConnector
     Task SubscribeToFundingRatesAsync(Action<FundingRateDto> onUpdate);
     Task<List<FundingRateDto>> GetFundingRateHistoryAsync(string symbol, DateTime startTime, DateTime endTime);
 
+    // Historical price data
+    Task<List<KlineDto>> GetKlinesAsync(string symbol, DateTime startTime, DateTime endTime, KlineInterval interval);
+
     // Trading data methods
     Task<List<OrderDto>> GetOpenOrdersAsync();
     Task<List<OrderDto>> GetOrderHistoryAsync(DateTime? startTime = null, DateTime? endTime = null, int limit = 100);

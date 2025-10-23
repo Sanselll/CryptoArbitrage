@@ -10,6 +10,7 @@ public class FundingRateDto
     public decimal AnnualizedRate { get; set; }
     public int FundingIntervalHours { get; set; } = 8;
     public decimal? Average3DayRate { get; set; }
+    public decimal? Average24hRate { get; set; }
     public FundingDirection? Direction { get; set; }
     public decimal? PreviousRate { get; set; }
     public decimal? PreviousAnnualizedRate { get; set; }
