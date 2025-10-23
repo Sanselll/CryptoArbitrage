@@ -74,9 +74,11 @@ public class TradeHistoryCollector : IDataCollector<List<TradeDto>, TradeHistory
             var startTime = DateTime.UtcNow.AddDays(-_configuration.HistoryDays);
             var endTime = DateTime.UtcNow;
 
-            // Collect from each user/exchange combination
-            foreach (var apiKey in userApiKeys)
+            // Collect from each user/exchange combination IN PARALLEL
+            var semaphore = new SemaphoreSlim(Configuration.MaxParallelFetches);
+            var tasks = userApiKeys.Select(async apiKey =>
             {
+                await semaphore.WaitAsync(cancellationToken);
                 try
                 {
                     // Create a new scoped connector for this user
@@ -103,12 +105,12 @@ public class TradeHistoryCollector : IDataCollector<List<TradeDto>, TradeHistory
                         default:
                             _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
                                 apiKey.ExchangeName, apiKey.UserId);
-                            continue;
+                            return ((string?)null, (List<TradeDto>?)null);
                     }
 
                     if (connector == null)
                     {
-                        continue;
+                        return ((string?)null, (List<TradeDto>?)null);
                     }
 
                     // Fetch trade history using dynamic
@@ -116,16 +118,30 @@ public class TradeHistoryCollector : IDataCollector<List<TradeDto>, TradeHistory
                     List<TradeDto> trades = await dynamicConnector.GetUserTradesAsync(startTime, endTime, 100);
 
                     var key = $"tradehistory:{apiKey.UserId}:{apiKey.ExchangeName}";
-                    allTrades[key] = trades;
 
                     _logger.LogDebug("Collected {Count} trades for user {UserId} on {Exchange}",
                         trades.Count, apiKey.UserId, apiKey.ExchangeName);
+
+                    return (key, trades);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to collect trade history for user {UserId} on {Exchange}",
                         apiKey.UserId, apiKey.ExchangeName);
+                    return ((string?)null, (List<TradeDto>?)null);
                 }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+
+            // Aggregate successful results
+            foreach (var item in results.Where(r => r.Item1 != null && r.Item2 != null))
+            {
+                allTrades[item.Item1!] = item.Item2!;
             }
 
             // Store in memory repository

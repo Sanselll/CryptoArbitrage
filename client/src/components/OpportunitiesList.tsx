@@ -1,4 +1,4 @@
-import { Target, ArrowUpCircle, ArrowDownCircle, Play, Clock, TrendingUp, TrendingDown, ArrowUpDown } from 'lucide-react';
+import { Target, ArrowUpCircle, ArrowDownCircle, Play, Clock, TrendingUp, TrendingDown, ArrowUpDown, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
@@ -105,7 +105,8 @@ const formatExecutionTime = (openedAt: string) => {
   return `${hours}h ${minutes}m ${seconds}s`;
 };
 
-type SortField = 'spread' | '8hProfit' | '8hProfit3d' | 'apr' | 'apr3d';
+type SortField = 'spread' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
+  | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d';
 type SortDirection = 'asc' | 'desc';
 
 export const OpportunitiesList = () => {
@@ -118,9 +119,10 @@ export const OpportunitiesList = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
-  const [sortField, setSortField] = useState<SortField>('apr');
+  const [sortField, setSortField] = useState<SortField>('fundApr');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedStrategy, setSelectedStrategy] = useState<number | null>(null); // null means show all
+  const [symbolFilter, setSymbolFilter] = useState<string>(''); // Symbol search filter
   const { alertState, showSuccess, showError, showInfo, closeAlert, confirmState, showConfirm, closeConfirm } = useDialog();
 
   // Helper function to find matching positions for an opportunity
@@ -165,88 +167,18 @@ export const OpportunitiesList = () => {
     }
   };
 
-  // Pre-calculate values for all opportunities for sorting
+  // No need to calculate - all metrics come from backend now!
   const opportunitiesWithCalculations = opportunities.map(opp => {
-    const isSpotPerp = opp.strategy === 1;
-    const isCrossFut = opp.subType === StrategySubType.CrossExchangeFuturesFutures;
-
-    const longFundingData = fundingRates.find(fr =>
-      fr.symbol === opp.symbol &&
-      fr.exchange === (isSpotPerp ? opp.exchange : opp.longExchange)
-    );
-    const shortFundingData = isCrossFut ? fundingRates.find(fr =>
-      fr.symbol === opp.symbol &&
-      fr.exchange === opp.shortExchange
-    ) : null;
-
-    // Calculate spread
+    // Calculate spread for display only (not used in backend)
     const spotPrice = opp.spotPrice || 0;
     const perpPrice = opp.perpetualPrice || 0;
     const spread = (spotPrice > 0 && perpPrice > 0)
       ? ((perpPrice - spotPrice) / spotPrice) * 100
       : 0;
 
-    // Calculate APR
-    const apr = isSpotPerp
-      ? opp.estimatedProfitPercentage
-      : opp.annualizedSpread * 100;
-
-    // Calculate 8H profit
-    let profit8h: number;
-    if (isSpotPerp) {
-      const fundingIntervalHours = longFundingData?.fundingIntervalHours || 8;
-      const periodsIn8Hours = 8 / fundingIntervalHours;
-      profit8h = (apr / 365) * periodsIn8Hours;
-    } else if (isCrossFut) {
-      const longInterval = opp.longFundingIntervalHours || longFundingData?.fundingIntervalHours || 8;
-      const shortInterval = opp.shortFundingIntervalHours || shortFundingData?.fundingIntervalHours || 8;
-      const longDailyRate = (opp.longFundingRate * 100) * (24 / longInterval);
-      const shortDailyRate = (opp.shortFundingRate * 100) * (24 / shortInterval);
-      const netDailyRate = shortDailyRate - longDailyRate;
-      profit8h = netDailyRate / 3;
-    } else {
-      const shortInterval = opp.shortFundingIntervalHours || shortFundingData?.fundingIntervalHours || 8;
-      const periodsIn8Hours = 8 / shortInterval;
-      profit8h = (apr / 365) * periodsIn8Hours;
-    }
-
-    // Calculate 3D average metrics
-    let apr3d: number | null = null;
-    let profit8h3d: number | null = null;
-
-    if (longFundingData?.average3DayRate !== undefined && longFundingData?.average3DayRate !== null) {
-      if (isSpotPerp) {
-        const fundingIntervalHours = longFundingData?.fundingIntervalHours || 8;
-        const periodsPerYear = (365 * 24) / fundingIntervalHours;
-        apr3d = (longFundingData.average3DayRate * 100) * periodsPerYear;
-        const periodsIn8Hours = 8 / fundingIntervalHours;
-        profit8h3d = (apr3d / 365) * periodsIn8Hours;
-      } else if (isCrossFut && shortFundingData?.average3DayRate !== undefined && shortFundingData?.average3DayRate !== null) {
-        const longInterval = longFundingData?.fundingIntervalHours || 8;
-        const shortInterval = shortFundingData?.fundingIntervalHours || 8;
-        const longDailyRate = (longFundingData.average3DayRate * 100) * (24 / longInterval);
-        const shortDailyRate = (shortFundingData.average3DayRate * 100) * (24 / shortInterval);
-        const netDailyRate = shortDailyRate - longDailyRate;
-        apr3d = netDailyRate * 365;
-        profit8h3d = netDailyRate / 3;
-      } else if (shortFundingData?.average3DayRate !== undefined && shortFundingData?.average3DayRate !== null) {
-        const shortInterval = shortFundingData?.fundingIntervalHours || 8;
-        const periodsPerYear = (365 * 24) / shortInterval;
-        apr3d = (shortFundingData.average3DayRate * 100) * periodsPerYear;
-        const periodsIn8Hours = 8 / shortInterval;
-        profit8h3d = (apr3d / 365) * periodsIn8Hours;
-      }
-    }
-
     return {
       ...opp,
-      _calculated: {
-        spread,
-        apr,
-        profit8h,
-        apr3d,
-        profit8h3d
-      }
+      _calculated: { spread }  // Only keep spread for UI display
     };
   });
 
@@ -265,6 +197,9 @@ export const OpportunitiesList = () => {
       // Filter by selected strategy (null means show all)
       if (selectedStrategy !== null && opp.subType !== selectedStrategy) return false;
 
+      // Filter by symbol (case-insensitive partial match)
+      if (symbolFilter && !opp.symbol.toLowerCase().includes(symbolFilter.toLowerCase())) return false;
+
       return true; // Show all detected opportunities, including those being executed
     })
     .sort((a, b) => {
@@ -275,25 +210,57 @@ export const OpportunitiesList = () => {
           aValue = a._calculated.spread;
           bValue = b._calculated.spread;
           break;
-        case '8hProfit':
-          aValue = a._calculated.profit8h;
-          bValue = b._calculated.profit8h;
+        case 'fundProfit8h':
+          aValue = a.fundProfit8h;
+          bValue = b.fundProfit8h;
           break;
-        case '8hProfit3d':
-          aValue = a._calculated.profit8h3d ?? -Infinity;
-          bValue = b._calculated.profit8h3d ?? -Infinity;
+        case 'fundProfit8h3d':
+          aValue = a.fundProfit8h3dProj ?? -Infinity;
+          bValue = b.fundProfit8h3dProj ?? -Infinity;
           break;
-        case 'apr':
-          aValue = a._calculated.apr;
-          bValue = b._calculated.apr;
+        case 'fundProfit8h24h':
+          aValue = a.fundProfit8h24hProj ?? -Infinity;
+          bValue = b.fundProfit8h24hProj ?? -Infinity;
           break;
-        case 'apr3d':
-          aValue = a._calculated.apr3d ?? -Infinity;
-          bValue = b._calculated.apr3d ?? -Infinity;
+        case 'fundApr':
+          aValue = a.fundApr;
+          bValue = b.fundApr;
+          break;
+        case 'fundApr3d':
+          aValue = a.fundApr3dProj ?? -Infinity;
+          bValue = b.fundApr3dProj ?? -Infinity;
+          break;
+        case 'fundApr24h':
+          aValue = a.fundApr24hProj ?? -Infinity;
+          bValue = b.fundApr24hProj ?? -Infinity;
+          break;
+        case 'volume':
+          aValue = a.volume24h ?? 0;
+          bValue = b.volume24h ?? 0;
+          break;
+        case 'liquidity':
+          aValue = a.orderbookDepthUsd ?? 0;
+          bValue = b.orderbookDepthUsd ?? 0;
+          break;
+        case 'posCost':
+          aValue = a.positionCostPercent;
+          bValue = b.positionCostPercent;
+          break;
+        case 'breakEven':
+          aValue = a.breakEvenTimeHours ?? Infinity;
+          bValue = b.breakEvenTimeHours ?? Infinity;
+          break;
+        case 'fundBreakEven24h':
+          aValue = a.fundBreakEvenTime24hProj ?? Infinity;
+          bValue = b.fundBreakEvenTime24hProj ?? Infinity;
+          break;
+        case 'fundBreakEven3d':
+          aValue = a.fundBreakEvenTime3dProj ?? Infinity;
+          bValue = b.fundBreakEvenTime3dProj ?? Infinity;
           break;
         default:
-          aValue = a._calculated.apr;
-          bValue = b._calculated.apr;
+          aValue = a.fundApr;
+          bValue = b.fundApr;
       }
 
       return sortDirection === 'desc' ? bValue - aValue : aValue - bValue;
@@ -497,6 +464,17 @@ export const OpportunitiesList = () => {
                 <Target className="w-3 h-3 text-binance-yellow" />
                 Arbitrage Opportunities
               </CardTitle>
+              {/* Symbol Filter */}
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-binance-text-secondary pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Filter symbol..."
+                  value={symbolFilter}
+                  onChange={(e) => setSymbolFilter(e.target.value)}
+                  className="w-40 pl-7 pr-2 py-1 text-xs bg-binance-bg-tertiary border border-binance-border rounded text-binance-text placeholder:text-binance-text-secondary/50 focus:outline-none focus:border-binance-yellow/50 focus:ring-1 focus:ring-binance-yellow/20 transition-all"
+                />
+              </div>
               {availableStrategies.size > 0 && (
                 <div className="flex items-center gap-1 flex-wrap">
                   {availableStrategies.size > 1 && (
@@ -555,74 +533,123 @@ export const OpportunitiesList = () => {
           />
         ) : (
           <Table>
-            <TableHeader className="sticky top-0 z-30">
-              <TableRow hover={false}>
-                <TableHead className="sticky left-0 z-40 bg-binance-bg-secondary border-r border-binance-border">Symbol</TableHead>
-                <TableHead className="sticky left-[80px] z-40 bg-binance-bg-secondary border-r border-binance-border">Type</TableHead>
-                <TableHead className="sticky left-[145px] z-40 bg-binance-bg-secondary border-r border-binance-border">Exchange</TableHead>
-                <TableHead className="py-1">Side</TableHead>
-                <TableHead className="text-right">Fee Rate</TableHead>
-                <TableHead className="text-right">3D Avg</TableHead>
-                <TableHead className="text-right">Fee Interval</TableHead>
-                <TableHead className="text-right">Next Funding</TableHead>
-                <TableHead className="text-right">24h Volume</TableHead>
-                <TableHead className="text-right">Liquidity</TableHead>
-                <TableHead
-                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('spread')}
-                >
-                  <div className="flex items-center justify-end gap-1">
-                    Spread
-                    {sortField === 'spread' && (
-                      <ArrowUpDown className="w-3 h-3" />
-                    )}
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('8hProfit')}
-                >
-                  <div className="flex items-center justify-end gap-1">
-                    8h Profit
-                    {sortField === '8hProfit' && (
-                      <ArrowUpDown className="w-3 h-3" />
-                    )}
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('8hProfit3d')}
-                >
-                  <div className="flex items-center justify-end gap-1">
-                    8h Profit (3D)
-                    {sortField === '8hProfit3d' && (
-                      <ArrowUpDown className="w-3 h-3" />
-                    )}
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('apr')}
-                >
-                  <div className="flex items-center justify-end gap-1">
-                    APR
-                    {sortField === 'apr' && (
-                      <ArrowUpDown className="w-3 h-3" />
-                    )}
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('apr3d')}
-                >
-                  <div className="flex items-center justify-end gap-1">
-                    APR (3D)
-                    {sortField === 'apr3d' && (
-                      <ArrowUpDown className="w-3 h-3" />
-                    )}
-                  </div>
-                </TableHead>
-                <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right">Action</TableHead>
+              <TableHeader className="sticky top-0 z-30">
+                <TableRow hover={false}>
+                  <TableHead className="sticky left-0 z-40 bg-binance-bg-secondary border-r border-binance-border" title="trading pair (e.g., BTCUSDT)">Symbol</TableHead>
+                  <TableHead className="sticky left-[80px] z-40 bg-binance-bg-secondary border-r border-binance-border" title="arbitrage strategy type">Type</TableHead>
+                  <TableHead className="sticky left-[145px] z-40 bg-binance-bg-secondary border-r border-binance-border" title="exchange where position is held">Exchange</TableHead>
+                  <TableHead className="py-1" title="long (buy) or short (sell) position">Side</TableHead>
+                  <TableHead className="text-right" title="current funding rate (% per interval)">Fund Rate</TableHead>
+                  <TableHead className="text-right" title="24-hour time-weighted average funding rate">Fund Rate (24h)</TableHead>
+                  <TableHead className="text-right" title="3-day time-weighted average funding rate">Fund Rate (3D)</TableHead>
+                  <TableHead className="text-right w-[40px]" title="funding interval in hours (1h, 4h, 8h)">Fund Int</TableHead>
+                  <TableHead className="text-right min-w-[100px]" title="countdown to next funding payment">Next Funding</TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('volume')} title="24-hour trading volume in USDT"><div className="flex items-center justify-end gap-1">
+                        24h Volume
+                        {sortField === 'volume' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('liquidity')} title="orderbook depth and bid-ask spread quality"><div className="flex items-center justify-end gap-1">
+                        Liquidity
+                        {sortField === 'liquidity' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('spread')} title="price difference between spot and perpetual (%)"><div className="flex items-center justify-end gap-1">
+                        Spread
+                        {sortField === 'spread' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('priceSpread24h')} title="24-hour average price spread (%)"><div className="flex items-center justify-end gap-1">
+                        Spread (24h AVG)
+                        {sortField === 'priceSpread24h' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('priceSpread3d')} title="3-day average price spread (%)"><div className="flex items-center justify-end gap-1">
+                        Spread (3D AVG)
+                        {sortField === 'priceSpread3d' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('posCost')} title="cost to open + close position (trading fees %)"><div className="flex items-center justify-end gap-1">
+                        Pos Cost
+                        {sortField === 'posCost' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('breakEven')} title="hours to recover position cost at current rate"><div className="flex items-center justify-end gap-1">
+                        Break Even
+                        {sortField === 'breakEven' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('fundBreakEven24h')} title="break-even time projected from 24h average rate"><div className="flex items-center justify-end gap-1">
+                        Break Even (24h PROJ)
+                        {sortField === 'fundBreakEven24h' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('fundBreakEven3d')} title="break-even time projected from 3D average rate"><div className="flex items-center justify-end gap-1">
+                        Break Even (3D PROJ)
+                        {sortField === 'fundBreakEven3d' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('fundProfit8h')} title="estimated profit % per 8-hour period at current rate"><div className="flex items-center justify-end gap-1">
+                        Fund 8h
+                        {sortField === 'fundProfit8h' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('fundProfit8h24h')} title="projected 8h profit based on 24h average rate"><div className="flex items-center justify-end gap-1">
+                        Fund 8h (24h PROJ)
+                        {sortField === 'fundProfit8h24h' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('fundProfit8h3d')} title="projected 8h profit based on 3D average rate"><div className="flex items-center justify-end gap-1">
+                        Fund 8h (3D PROJ)
+                        {sortField === 'fundProfit8h3d' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('fundApr')} title="annualized percentage rate at current funding rate"><div className="flex items-center justify-end gap-1">
+                        Fund APR
+                        {sortField === 'fundApr' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('fundApr24h')} title="projected APR based on 24h average rate"><div className="flex items-center justify-end gap-1">
+                        Fund APR (24h PROJ)
+                        {sortField === 'fundApr24h' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('fundApr3d')} title="projected APR based on 3D average rate"><div className="flex items-center justify-end gap-1">
+                        Fund APR (3D PROJ)
+                        {sortField === 'fundApr3d' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right" title="execute or view opportunity details">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -653,81 +680,20 @@ export const OpportunitiesList = () => {
                   fr.exchange === opp.shortExchange
                 ) : null;
 
-                // Calculate 8-hour profit and spread for merged cells
-                const apr = isSpotPerp
-                  ? opp.estimatedProfitPercentage
-                  : opp.annualizedSpread * 100;
+                // All metrics now come from backend - no calculations needed!
+                const profit8h = opp.fundProfit8h;
+                const apr = opp.fundApr;
+                const profit8h24h = opp.fundProfit8h24hProj;
+                const apr24h = opp.fundApr24hProj;
+                const profit8h3d = opp.fundProfit8h3dProj;
+                const apr3d = opp.fundApr3dProj;
 
-                // Calculate 8H profit based on funding intervals
-                let profit8h: number;
-                if (isSpotPerp) {
-                  // For spot-perp, use the long exchange funding interval
-                  const fundingIntervalHours = longFundingData?.fundingIntervalHours || 8;
-                  const periodsIn8Hours = 8 / fundingIntervalHours;
-                  profit8h = (apr / 365) * periodsIn8Hours;
-                } else if (isCrossFut) {
-                  // For cross-futures, calculate weighted average based on both intervals
-                  const longInterval = opp.longFundingIntervalHours || longFundingData?.fundingIntervalHours || 8;
-                  const shortInterval = opp.shortFundingIntervalHours || shortFundingData?.fundingIntervalHours || 8;
-
-                  // Calculate daily earnings from each position
-                  const longDailyRate = (opp.longFundingRate * 100) * (24 / longInterval);
-                  const shortDailyRate = (opp.shortFundingRate * 100) * (24 / shortInterval);
-
-                  // Net daily rate = short rate - long rate (we earn on short, pay on long)
-                  const netDailyRate = shortDailyRate - longDailyRate;
-
-                  // 8H profit = (daily rate / 3)
-                  profit8h = netDailyRate / 3;
-                } else {
-                  // For cross-exchange spot-futures, only short position has funding
-                  const shortInterval = opp.shortFundingIntervalHours || shortFundingData?.fundingIntervalHours || 8;
-                  const periodsIn8Hours = 8 / shortInterval;
-                  profit8h = (apr / 365) * periodsIn8Hours;
-                }
-
+                // Calculate spread for display only
                 const spotPrice = opp.spotPrice || 0;
                 const perpPrice = opp.perpetualPrice || 0;
                 const spread = (spotPrice > 0 && perpPrice > 0)
                   ? ((perpPrice - spotPrice) / spotPrice) * 100
                   : 0;
-
-                // Calculate APR and 8H profit based on 3D average rates
-                let apr3d: number | null = null;
-                let profit8h3d: number | null = null;
-
-                if (longFundingData?.average3DayRate !== undefined && longFundingData?.average3DayRate !== null) {
-                  if (isSpotPerp) {
-                    // For spot-perp, use the long exchange 3D average
-                    const fundingIntervalHours = longFundingData?.fundingIntervalHours || 8;
-                    const periodsPerYear = (365 * 24) / fundingIntervalHours;
-                    apr3d = (longFundingData.average3DayRate * 100) * periodsPerYear;
-                    const periodsIn8Hours = 8 / fundingIntervalHours;
-                    profit8h3d = (apr3d / 365) * periodsIn8Hours;
-                  } else if (isCrossFut && shortFundingData?.average3DayRate !== undefined && shortFundingData?.average3DayRate !== null) {
-                    // For cross-futures, calculate based on both 3D averages
-                    const longInterval = longFundingData?.fundingIntervalHours || 8;
-                    const shortInterval = shortFundingData?.fundingIntervalHours || 8;
-
-                    // Calculate daily earnings from each position using 3D averages
-                    const longDailyRate = (longFundingData.average3DayRate * 100) * (24 / longInterval);
-                    const shortDailyRate = (shortFundingData.average3DayRate * 100) * (24 / shortInterval);
-
-                    // Net daily rate = short rate - long rate
-                    const netDailyRate = shortDailyRate - longDailyRate;
-                    apr3d = netDailyRate * 365;
-
-                    // 8H profit = (daily rate / 3)
-                    profit8h3d = netDailyRate / 3;
-                  } else if (shortFundingData?.average3DayRate !== undefined && shortFundingData?.average3DayRate !== null) {
-                    // For cross-exchange spot-futures, only short position has funding
-                    const shortInterval = shortFundingData?.fundingIntervalHours || 8;
-                    const periodsPerYear = (365 * 24) / shortInterval;
-                    apr3d = (shortFundingData.average3DayRate * 100) * periodsPerYear;
-                    const periodsIn8Hours = 8 / shortInterval;
-                    profit8h3d = (apr3d / 365) * periodsIn8Hours;
-                  }
-                }
 
                 const rows = [];
 
@@ -791,18 +757,25 @@ export const OpportunitiesList = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {longFundingData?.average3DayRate
-                          ? `${(longFundingData.average3DayRate * 100).toFixed(4)}%`
+                        {longFundingData?.average24hRate
+                          ? `${(longFundingData.average24hRate * 100).toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {longFundingData?.average3DayRate
+                          ? `${(longFundingData.average3DayRate * 100).toFixed(4)}%`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right w-[40px]">
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
                         {longFundingData?.fundingIntervalHours || 8}h
                       </span>
                     </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-0.5">
+                    <TableCell className="text-right min-w-[100px]">
+                      <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
                         <Clock className="w-2.5 h-2.5 text-binance-text-secondary" />
                         <span className="font-mono text-[11px] text-binance-text-secondary">
                           {getExchangeFundingTime(longFundingData?.nextFundingTime)}
@@ -838,27 +811,103 @@ export const OpportunitiesList = () => {
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
-                      <span className="font-mono text-[11px] font-bold text-binance-green">
+                      <span className={`font-mono text-[11px] ${
+                        opp.priceSpread24hAvg !== null && opp.priceSpread24hAvg !== undefined
+                          ? opp.priceSpread24hAvg >= 0 ? 'text-binance-green' : 'text-binance-red'
+                          : 'text-binance-text-secondary'
+                      }`}>
+                        {opp.priceSpread24hAvg !== null && opp.priceSpread24hAvg !== undefined
+                          ? `${opp.priceSpread24hAvg >= 0 ? '+' : ''}${opp.priceSpread24hAvg.toFixed(4)}%`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className={`font-mono text-[11px] ${
+                        opp.priceSpread3dAvg !== null && opp.priceSpread3dAvg !== undefined
+                          ? opp.priceSpread3dAvg >= 0 ? 'text-binance-green' : 'text-binance-red'
+                          : 'text-binance-text-secondary'
+                      }`}>
+                        {opp.priceSpread3dAvg !== null && opp.priceSpread3dAvg !== undefined
+                          ? `${opp.priceSpread3dAvg >= 0 ? '+' : ''}${opp.priceSpread3dAvg.toFixed(4)}%`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {opp.positionCostPercent.toFixed(2)}%
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {opp.breakEvenTimeHours !== null && opp.breakEvenTimeHours !== undefined
+                          ? `${Math.round(opp.breakEvenTimeHours)}h`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {opp.fundBreakEvenTime24hProj !== null && opp.fundBreakEvenTime24hProj !== undefined
+                          ? `${Math.round(opp.fundBreakEvenTime24hProj)}h`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {opp.fundBreakEvenTime3dProj !== null && opp.fundBreakEvenTime3dProj !== undefined
+                          ? `${Math.round(opp.fundBreakEvenTime3dProj)}h`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className={`font-mono text-[11px] font-bold ${
+                        profit8h >= 0 ? 'text-binance-green' : 'text-binance-red'
+                      }`}>
                         {`${profit8h >= 0 ? '+' : ''}${profit8h.toFixed(4)}%`}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
-                      <span className="font-mono text-[11px] font-bold text-binance-green">
+                      <span className={`font-mono text-[11px] font-bold ${
+                        profit8h24h !== null
+                          ? profit8h24h >= 0 ? 'text-binance-green' : 'text-binance-red'
+                          : 'text-binance-text-secondary'
+                      }`}>
+                        {profit8h24h !== null
+                          ? `${profit8h24h >= 0 ? '+' : ''}${profit8h24h.toFixed(4)}%`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className={`font-mono text-[11px] font-bold ${
+                        profit8h3d !== null
+                          ? profit8h3d >= 0 ? 'text-binance-green' : 'text-binance-red'
+                          : 'text-binance-text-secondary'
+                      }`}>
                         {profit8h3d !== null
                           ? `${profit8h3d >= 0 ? '+' : ''}${profit8h3d.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
-                      <Badge variant="success" size="sm" className="text-[10px]">
+                      <Badge variant={apr >= 0 ? "success" : "danger"} size="sm" className="text-[10px]">
                         <span className="font-mono font-bold">
                           {apr.toFixed(2)}%
                         </span>
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
+                      {apr24h !== null ? (
+                        <Badge variant={apr24h >= 0 ? "success" : "danger"} size="sm" className="text-[10px]">
+                          <span className="font-mono font-bold">
+                            {apr24h.toFixed(2)}%
+                          </span>
+                        </Badge>
+                      ) : (
+                        <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
                       {apr3d !== null ? (
-                        <Badge variant="success" size="sm" className="text-[10px]">
+                        <Badge variant={apr3d >= 0 ? "success" : "danger"} size="sm" className="text-[10px]">
                           <span className="font-mono font-bold">
                             {apr3d.toFixed(2)}%
                           </span>
@@ -947,22 +996,31 @@ export const OpportunitiesList = () => {
                     <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
                         {isSpotPerp ? '--' : (
-                          shortFundingData?.average3DayRate
-                            ? `${(shortFundingData.average3DayRate * 100).toFixed(4)}%`
+                          shortFundingData?.average24hRate
+                            ? `${(shortFundingData.average24hRate * 100).toFixed(4)}%`
                             : '--'
                         )}
                       </span>
                     </TableCell>
                     <TableCell className="text-right">
                       <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {isSpotPerp ? '--' : (
+                          shortFundingData?.average3DayRate
+                            ? `${(shortFundingData.average3DayRate * 100).toFixed(4)}%`
+                            : '--'
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right w-[40px]">
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
                         {isSpotPerp ? '--' : `${shortFundingData?.fundingIntervalHours || 8}h`}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right min-w-[100px]">
                       {isSpotPerp ? (
                         <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
                       ) : (
-                        <div className="flex items-center justify-end gap-0.5">
+                        <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
                           <Clock className="w-2.5 h-2.5 text-binance-text-secondary" />
                           <span className="font-mono text-[11px] text-binance-text-secondary">
                             {getExchangeFundingTime(shortFundingData?.nextFundingTime)}
