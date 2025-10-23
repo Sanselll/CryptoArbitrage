@@ -43,7 +43,27 @@ public class ArbitrageOpportunityDto
     public decimal SpreadRate { get; set; }
     public decimal AnnualizedSpread { get; set; }
     public decimal EstimatedProfitPercentage { get; set; }
+    public decimal PositionCostPercent { get; set; } = 0.2m; // Trading fees for open/close (0.1% each = 0.2% total)
+    public decimal? BreakEvenTimeHours { get; set; } // Time to recover position cost from funding fees
     public decimal Volume24h { get; set; }  // 24-hour trading volume in USDT (min of long/short for cross-exchange)
+
+    // Calculated metrics (current funding rate)
+    public decimal FundProfit8h { get; set; }  // 8-hour profit percentage using current funding rate
+    public decimal FundApr { get; set; }       // Annualized percentage rate using current funding rate
+
+    // Projected metrics (24-hour average)
+    public decimal? FundProfit8h24hProj { get; set; }      // 8-hour profit % using 24h average funding rate
+    public decimal? FundApr24hProj { get; set; }           // APR % using 24h average funding rate
+    public decimal? FundBreakEvenTime24hProj { get; set; } // Break-even hours using 24h average funding rate
+
+    // Projected metrics (3-day average)
+    public decimal? FundProfit8h3dProj { get; set; }       // 8-hour profit % using 3D average funding rate
+    public decimal? FundApr3dProj { get; set; }            // APR % using 3D average funding rate
+    public decimal? FundBreakEvenTime3dProj { get; set; }  // Break-even hours using 3D average funding rate
+
+    // Price spread projection metrics (for CFPS - CrossExchangeFuturesPriceSpread)
+    public decimal? PriceSpread24hAvg { get; set; }        // 24-hour average price spread %
+    public decimal? PriceSpread3dAvg { get; set; }         // 3-day average price spread %
 
     // Per-exchange volumes for cross-exchange arbitrage
     public decimal? LongVolume24h { get; set; }  // 24h volume on long exchange

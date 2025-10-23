@@ -1150,23 +1150,32 @@ public class BybitConnector : IExchangeConnector
                 return results;
             }
 
-            // Determine the actual funding interval by comparing timestamps
-            int fundingIntervalHours = 8; // Default to 8h
-            if (filteredRates.Count >= 2)
+            // Detect interval for EACH rate individually to handle interval changes mid-period
+            for (int i = 0; i < filteredRates.Count; i++)
             {
-                var timeDiff = (filteredRates[1].Timestamp - filteredRates[0].Timestamp).TotalHours;
+                var rate = filteredRates[i];
+                int fundingIntervalHours = 8; // Default to 8h
 
-                // Round to nearest hour and determine interval (1h, 4h, or 8h)
-                if (Math.Abs(timeDiff - 1) < 0.1) fundingIntervalHours = 1;
-                else if (Math.Abs(timeDiff - 4) < 0.1) fundingIntervalHours = 4;
-                else if (Math.Abs(timeDiff - 8) < 0.1) fundingIntervalHours = 8;
+                // Detect interval by comparing with next rate (if available)
+                if (i < filteredRates.Count - 1)
+                {
+                    var timeDiff = (filteredRates[i + 1].Timestamp - rate.Timestamp).TotalHours;
 
-                _logger.LogDebug("Detected {Interval}h funding interval for {Symbol} on {Exchange}",
-                    fundingIntervalHours, symbol, ExchangeName);
-            }
+                    // Round to nearest hour and determine interval (1h, 4h, or 8h)
+                    if (Math.Abs(timeDiff - 1) < 0.1) fundingIntervalHours = 1;
+                    else if (Math.Abs(timeDiff - 4) < 0.1) fundingIntervalHours = 4;
+                    else if (Math.Abs(timeDiff - 8) < 0.1) fundingIntervalHours = 8;
+                }
+                else if (i > 0)
+                {
+                    // For the last rate, use the interval from the previous rate
+                    var timeDiff = (rate.Timestamp - filteredRates[i - 1].Timestamp).TotalHours;
 
-            foreach (var rate in filteredRates)
-            {
+                    if (Math.Abs(timeDiff - 1) < 0.1) fundingIntervalHours = 1;
+                    else if (Math.Abs(timeDiff - 4) < 0.1) fundingIntervalHours = 4;
+                    else if (Math.Abs(timeDiff - 8) < 0.1) fundingIntervalHours = 8;
+                }
+
                 // Calculate annualized rate
                 var periodsPerYear = (365.0m * 24.0m) / fundingIntervalHours;
                 var annualizedRate = rate.FundingRate * periodsPerYear;
@@ -1183,6 +1192,9 @@ public class BybitConnector : IExchangeConnector
                     RecordedAt = DateTime.UtcNow
                 });
             }
+
+            _logger.LogDebug("Fetched {Count} funding rates for {Symbol} on {Exchange} (intervals detected per-rate)",
+                results.Count, symbol, ExchangeName);
             
 
             return results.OrderBy(r => r.FundingTime).ToList();
@@ -1192,6 +1204,86 @@ public class BybitConnector : IExchangeConnector
             _logger.LogError(ex, "Error fetching funding rate history for {Symbol} on {Exchange}", symbol, ExchangeName);
             return new List<FundingRateDto>();
         }
+    }
+
+    public async Task<List<KlineDto>> GetKlinesAsync(string symbol, DateTime startTime, DateTime endTime, Models.KlineInterval interval)
+    {
+        if (_restClient == null)
+        {
+            _logger.LogWarning("Cannot get klines for {Exchange} - not connected", ExchangeName);
+            return new List<KlineDto>();
+        }
+
+        try
+        {
+            // Convert our KlineInterval enum to Bybit.Net enum
+            var bybitInterval = interval switch
+            {
+                Models.KlineInterval.OneMinute => Bybit.Net.Enums.KlineInterval.OneMinute,
+                Models.KlineInterval.FiveMinutes => Bybit.Net.Enums.KlineInterval.FiveMinutes,
+                Models.KlineInterval.FifteenMinutes => Bybit.Net.Enums.KlineInterval.FifteenMinutes,
+                Models.KlineInterval.ThirtyMinutes => Bybit.Net.Enums.KlineInterval.ThirtyMinutes,
+                Models.KlineInterval.OneHour => Bybit.Net.Enums.KlineInterval.OneHour,
+                Models.KlineInterval.FourHours => Bybit.Net.Enums.KlineInterval.FourHours,
+                Models.KlineInterval.OneDay => Bybit.Net.Enums.KlineInterval.OneDay,
+                _ => Bybit.Net.Enums.KlineInterval.OneHour
+            };
+
+            // Bybit API limit is 1000 records per request
+            var klines = await _restClient.V5Api.ExchangeData.GetKlinesAsync(
+                Category.Linear,
+                symbol,
+                bybitInterval,
+                startTime,
+                endTime,
+                limit: 1000);
+
+            if (!klines.Success || klines.Data?.List == null || !klines.Data.List.Any())
+            {
+                if (!klines.Success)
+                {
+                    _logger.LogWarning("Failed to fetch klines for {Symbol} on {Exchange}: {Error}",
+                        symbol, ExchangeName, klines.Error?.Message ?? "Unknown error");
+                }
+                return new List<KlineDto>();
+            }
+
+            var results = klines.Data.List.Select(k => new KlineDto
+            {
+                Exchange = ExchangeName,
+                Symbol = symbol,
+                OpenTime = k.StartTime,
+                CloseTime = k.StartTime.AddMinutes(GetIntervalMinutes(bybitInterval)), // Bybit doesn't provide CloseTime, calculate it
+                Open = k.OpenPrice,
+                High = k.HighPrice,
+                Low = k.LowPrice,
+                Close = k.ClosePrice,
+                Volume = k.Volume
+            }).ToList();
+
+            _logger.LogDebug("Fetched {Count} klines for {Symbol} on {Exchange}", results.Count, symbol, ExchangeName);
+            return results;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching klines for {Symbol} on {Exchange}", symbol, ExchangeName);
+            return new List<KlineDto>();
+        }
+    }
+
+    private int GetIntervalMinutes(Bybit.Net.Enums.KlineInterval interval)
+    {
+        return interval switch
+        {
+            Bybit.Net.Enums.KlineInterval.OneMinute => 1,
+            Bybit.Net.Enums.KlineInterval.FiveMinutes => 5,
+            Bybit.Net.Enums.KlineInterval.FifteenMinutes => 15,
+            Bybit.Net.Enums.KlineInterval.ThirtyMinutes => 30,
+            Bybit.Net.Enums.KlineInterval.OneHour => 60,
+            Bybit.Net.Enums.KlineInterval.FourHours => 240,
+            Bybit.Net.Enums.KlineInterval.OneDay => 1440,
+            _ => 60
+        };
     }
 
     /// <summary>
