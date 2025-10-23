@@ -105,7 +105,7 @@ const formatExecutionTime = (openedAt: string) => {
   return `${hours}h ${minutes}m ${seconds}s`;
 };
 
-type SortField = 'spread' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
+type SortField = 'spread' | 'priceSpread24h' | 'priceSpread3d' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
   | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d';
 type SortDirection = 'asc' | 'desc';
 
@@ -209,6 +209,14 @@ export const OpportunitiesList = () => {
         case 'spread':
           aValue = a._calculated.spread;
           bValue = b._calculated.spread;
+          break;
+        case 'priceSpread24h':
+          aValue = a.priceSpread24hAvg ?? -Infinity;
+          bValue = b.priceSpread24hAvg ?? -Infinity;
+          break;
+        case 'priceSpread3d':
+          aValue = a.priceSpread3dAvg ?? -Infinity;
+          bValue = b.priceSpread3dAvg ?? -Infinity;
           break;
         case 'fundProfit8h':
           aValue = a.fundProfit8h;

@@ -168,15 +168,20 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
             // Initialize connector for public data access
             await connector.ConnectAsync(string.Empty, string.Empty);
 
-            // Fetch spot prices
-            var spotPricesResult = await connector.GetSpotPricesAsync(symbols);
+            // Fetch spot and perpetual prices IN PARALLEL for better performance
+            var spotPricesTask = connector.GetSpotPricesAsync(symbols);
+            var perpPricesTask = connector.GetPerpetualPricesAsync(symbols);
+
+            await Task.WhenAll(spotPricesTask, perpPricesTask);
+
+            // Extract results from completed tasks
+            var spotPricesResult = await spotPricesTask;
             foreach (var (symbol, price) in spotPricesResult)
             {
                 spotPrices[symbol] = price;
             }
 
-            // Fetch perpetual prices
-            var perpPricesResult = await connector.GetPerpetualPricesAsync(symbols);
+            var perpPricesResult = await perpPricesTask;
             foreach (var (symbol, price) in perpPricesResult)
             {
                 perpPrices[symbol] = price;

@@ -98,6 +98,11 @@ public class OpportunityDetectionService : IOpportunityDetectionService
             int fundingIntervalHours = longFundingData?.FundingIntervalHours ?? 8;
             decimal periodsIn8Hours = 8m / fundingIntervalHours;
             opportunity.FundProfit8h = (opportunity.FundApr / 365m) * periodsIn8Hours;
+
+            // Calculate current break-even time
+            opportunity.BreakEvenTimeHours = opportunity.FundProfit8h > 0
+                ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h) * 8m, fundingIntervalHours)
+                : null;
         }
         else if (isCrossFut || isPriceSpread)
         {
@@ -111,6 +116,20 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
             opportunity.FundApr = netDailyRate * 365m;
             opportunity.FundProfit8h = netDailyRate / 3m; // Daily rate / 3 for 8h period
+
+            // Calculate current break-even time (only for funding arbitrage, not price spread)
+            if (isCrossFut)
+            {
+                int maxInterval = Math.Max(longInterval, shortInterval);
+                opportunity.BreakEvenTimeHours = opportunity.FundProfit8h > 0
+                    ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h) * 8m, maxInterval)
+                    : null;
+            }
+            else // isPriceSpread
+            {
+                // Price arbitrage is one-time profit, no break-even concept
+                opportunity.BreakEvenTimeHours = null;
+            }
         }
         else // CrossExchangeSpotFutures
         {
@@ -120,6 +139,11 @@ public class OpportunityDetectionService : IOpportunityDetectionService
             int shortInterval = opportunity.ShortFundingIntervalHours ?? shortFundingData?.FundingIntervalHours ?? 8;
             decimal periodsIn8Hours = 8m / shortInterval;
             opportunity.FundProfit8h = (opportunity.FundApr / 365m) * periodsIn8Hours;
+
+            // Calculate current break-even time
+            opportunity.BreakEvenTimeHours = opportunity.FundProfit8h > 0
+                ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h) * 8m, shortInterval)
+                : null;
         }
 
         // === 24H PROJECTION METRICS ===
