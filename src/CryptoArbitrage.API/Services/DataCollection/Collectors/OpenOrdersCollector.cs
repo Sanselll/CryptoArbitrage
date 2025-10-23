@@ -70,9 +70,11 @@ public class OpenOrdersCollector : IDataCollector<List<OrderDto>, OpenOrdersColl
             using var encryptionScope = _serviceProvider.CreateScope();
             var encryptionService = encryptionScope.ServiceProvider.GetRequiredService<IEncryptionService>();
 
-            // Collect from each user/exchange combination
-            foreach (var apiKey in userApiKeys)
+            // Collect from each user/exchange combination IN PARALLEL
+            var semaphore = new SemaphoreSlim(Configuration.MaxParallelFetches);
+            var tasks = userApiKeys.Select(async apiKey =>
             {
+                await semaphore.WaitAsync(cancellationToken);
                 try
                 {
                     // Create a new scoped connector for this user
@@ -99,12 +101,12 @@ public class OpenOrdersCollector : IDataCollector<List<OrderDto>, OpenOrdersColl
                         default:
                             _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
                                 apiKey.ExchangeName, apiKey.UserId);
-                            continue;
+                            return ((string?)null, (List<OrderDto>?)null);
                     }
 
                     if (connector == null)
                     {
-                        continue;
+                        return ((string?)null, (List<OrderDto>?)null);
                     }
 
                     // Fetch open orders using dynamic
@@ -112,16 +114,30 @@ public class OpenOrdersCollector : IDataCollector<List<OrderDto>, OpenOrdersColl
                     List<OrderDto> orders = await dynamicConnector.GetOpenOrdersAsync();
 
                     var key = $"openorders:{apiKey.UserId}:{apiKey.ExchangeName}";
-                    allOrders[key] = orders;
 
                     _logger.LogDebug("Collected {Count} open orders for user {UserId} on {Exchange}",
                         orders.Count, apiKey.UserId, apiKey.ExchangeName);
+
+                    return (key, orders);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to collect open orders for user {UserId} on {Exchange}",
                         apiKey.UserId, apiKey.ExchangeName);
+                    return ((string?)null, (List<OrderDto>?)null);
                 }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+
+            // Aggregate successful results
+            foreach (var item in results.Where(r => r.Item1 != null && r.Item2 != null))
+            {
+                allOrders[item.Item1!] = item.Item2!;
             }
 
             // Store in memory repository

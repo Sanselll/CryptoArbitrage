@@ -40,6 +40,12 @@ public static class DataCollectionConstants
             => $"{LiquidityMetricPrefix}:{exchangeName}:{symbol}";
 
         /// <summary>
+        /// Builds a general cache key (for historical prices, etc.)
+        /// </summary>
+        public static string BuildKey(string exchangeName, string symbol)
+            => $"{exchangeName}:{symbol}";
+
+        /// <summary>
         /// Pattern to match all funding rate keys
         /// </summary>
         public static string FundingRatePattern => $"{FundingRatePrefix}:*";
@@ -59,6 +65,11 @@ public static class DataCollectionConstants
         /// Published when funding rates are collected from exchanges
         /// </summary>
         public const string FundingRatesCollected = "FundingRatesCollected";
+
+        /// <summary>
+        /// Published when historical funding rate averages are collected and updated
+        /// </summary>
+        public const string FundingRateHistoryCollected = "FundingRateHistoryCollected";
 
         /// <summary>
         /// Published when market prices (spot and perp) are collected from exchanges
@@ -104,5 +115,10 @@ public static class DataCollectionConstants
         /// Published when transaction history is collected for users
         /// </summary>
         public const string TransactionHistoryCollected = "TransactionHistoryCollected";
+
+        /// <summary>
+        /// Published when historical price data (KLines) is collected for spread projections
+        /// </summary>
+        public const string HistoricalPriceCollected = "HistoricalPriceCollected";
     }
 }
