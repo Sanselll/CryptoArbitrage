@@ -65,6 +65,11 @@ public class ArbitrageOpportunityDto
     public decimal? PriceSpread24hAvg { get; set; }        // 24-hour average price spread %
     public decimal? PriceSpread3dAvg { get; set; }         // 3-day average price spread %
 
+    // Spread history metrics (30 samples) - for Cross-Exchange only
+    public decimal? Spread30SampleAvg { get; set; }        // Average spread based on last 30 price samples
+    public decimal? SpreadVolatilityStdDev { get; set; }   // Standard deviation of spread samples
+    public decimal? SpreadVolatilityCv { get; set; }       // Coefficient of variation (StdDev/Mean)
+
     // Per-exchange volumes for cross-exchange arbitrage
     public decimal? LongVolume24h { get; set; }  // 24h volume on long exchange
     public decimal? ShortVolume24h { get; set; } // 24h volume on short exchange

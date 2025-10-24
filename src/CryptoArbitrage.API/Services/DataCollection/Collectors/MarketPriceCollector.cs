@@ -16,6 +16,7 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
 {
     private readonly ILogger<MarketPriceCollector> _logger;
     private readonly IDataRepository<MarketDataSnapshot> _repository;
+    private readonly IDataRepository<PriceHistoryDto> _priceHistoryRepository;
     private readonly MarketPriceCollectorConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly SymbolDiscoveryService _symbolDiscoveryService;
@@ -27,12 +28,14 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
     public MarketPriceCollector(
         ILogger<MarketPriceCollector> logger,
         IDataRepository<MarketDataSnapshot> repository,
+        IDataRepository<PriceHistoryDto> priceHistoryRepository,
         MarketPriceCollectorConfiguration configuration,
         IServiceProvider serviceProvider,
         SymbolDiscoveryService symbolDiscoveryService)
     {
         _logger = logger;
         _repository = repository;
+        _priceHistoryRepository = priceHistoryRepository;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
         _symbolDiscoveryService = symbolDiscoveryService;
@@ -91,11 +94,16 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
 
             var exchangeResults = await Task.WhenAll(tasks);
 
+            // Fetch existing price history from repository
+            var existingPriceHistory = await _priceHistoryRepository.GetByPatternAsync(
+                DataCollectionConstants.CacheKeys.PriceHistoryPattern);
+
             // Aggregate results from all exchanges into a single snapshot
             var snapshot = new MarketDataSnapshot
             {
                 SpotPrices = new Dictionary<string, Dictionary<string, PriceDto>>(),
                 PerpPrices = new Dictionary<string, Dictionary<string, PriceDto>>(),
+                PerpPriceHistory = new Dictionary<string, Dictionary<string, PriceHistoryDto>>(),
                 FetchedAt = DateTime.UtcNow
             };
 
@@ -108,6 +116,45 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
                 if (perpPrices.Any())
                 {
                     snapshot.PerpPrices[exchange] = perpPrices;
+
+                    // Update price history for perpetual prices
+                    if (!snapshot.PerpPriceHistory.ContainsKey(exchange))
+                    {
+                        snapshot.PerpPriceHistory[exchange] = new Dictionary<string, PriceHistoryDto>();
+                    }
+
+                    foreach (var (symbol, priceDto) in perpPrices)
+                    {
+                        var historyKey = DataCollectionConstants.CacheKeys.BuildPriceHistoryKey(exchange, symbol);
+
+                        // Get existing history or create new
+                        PriceHistoryDto history;
+                        if (existingPriceHistory.TryGetValue(historyKey, out var existingHistory))
+                        {
+                            history = existingHistory;
+                        }
+                        else
+                        {
+                            history = new PriceHistoryDto
+                            {
+                                Exchange = exchange,
+                                Symbol = symbol
+                            };
+                        }
+
+                        // Append new price
+                        history.AppendPrice(priceDto.Price, priceDto.Timestamp);
+
+                        // Add to snapshot
+                        snapshot.PerpPriceHistory[exchange][symbol] = history;
+
+                        // Store updated history in repository (longer TTL to preserve across collections)
+                        await _priceHistoryRepository.StoreAsync(
+                            historyKey,
+                            history,
+                            TimeSpan.FromHours(2), // Keep history for 2 hours
+                            cancellationToken);
+                    }
                 }
             }
 
