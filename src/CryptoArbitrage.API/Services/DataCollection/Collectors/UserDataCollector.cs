@@ -109,10 +109,25 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                         return ((string?)null, (UserDataSnapshot?)null);
                     }
 
-                    // Fetch balance and positions using dynamic to call connector methods
+                    // Fetch balance, positions, and fees using dynamic to call connector methods
                     dynamic dynamicConnector = connector;
                     var balance = await dynamicConnector.GetAccountBalanceAsync();
                     var positions = await dynamicConnector.GetOpenPositionsAsync();
+
+                    // Fetch fee information
+                    FeeInfoDto? feeInfo = null;
+                    try
+                    {
+                        feeInfo = await dynamicConnector.GetTradingFeesAsync();
+                        feeInfo.UserId = apiKey.UserId; // Set user ID on the fee info
+                        _logger.LogDebug("Collected fee info for user {UserId} on {Exchange}: Maker={Maker}%, Taker={Taker}%",
+                            apiKey.UserId, apiKey.ExchangeName, feeInfo.MakerFeeRate * 100, feeInfo.TakerFeeRate * 100);
+                    }
+                    catch (Exception feeEx)
+                    {
+                        _logger.LogWarning(feeEx, "Failed to fetch fee info for user {UserId} on {Exchange}, continuing without fees",
+                            apiKey.UserId, apiKey.ExchangeName);
+                    }
 
                     // Enrich positions with database data (Id and ExecutionId)
                     await EnrichPositionsWithDatabaseDataAsync(positions, apiKey.UserId, apiKey.ExchangeName, cancellationToken);
@@ -126,6 +141,7 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                         Exchange = apiKey.ExchangeName,
                         Balance = balance,
                         Positions = positions,
+                        FeeInfo = feeInfo,
                         CollectedAt = DateTime.UtcNow
                     };
 

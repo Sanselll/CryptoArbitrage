@@ -16,6 +16,7 @@ public interface IExchangeConnector
     Task<AccountBalanceDto> GetAccountBalanceAsync();
     Task<AccountBalanceDto> GetAccountBalanceAsync(Dictionary<string, decimal> activeSpotPositions);
     Task<Dictionary<string, decimal>> GetSpotBalancesAsync();
+    Task<FeeInfoDto> GetTradingFeesAsync();
 
     // Perpetual futures trading
     Task<string> PlaceMarketOrderAsync(string symbol, PositionSide side, decimal quantity, decimal leverage);

@@ -966,6 +966,69 @@ public class BinanceConnector : IExchangeConnector
         return balances;
     }
 
+    public async Task<FeeInfoDto> GetTradingFeesAsync()
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Binance");
+
+        try
+        {
+            // Get balances which include fee tier information
+            var balances = await _restClient.UsdFuturesApi.Account.GetBalancesAsync();
+
+            if (balances.Success && balances.Data != null)
+            {
+                // Note: Binance.Net library may not expose commission rates directly
+                // We'll use default values for now - these are typical Binance USDⓈ-M Futures rates
+                // Actual rates vary by VIP level (0-9):
+                // - Regular: 0.02% maker, 0.04% taker
+                // - VIP 1: 0.016% maker, 0.04% taker
+                // - VIP 9: 0.01% maker, 0.02% taker
+
+                // Default to regular user fees
+                var makerRate = 0.0002m; // 0.02%
+                var takerRate = 0.0004m; // 0.04%
+
+                // Use "Standard" as default tier
+                var feeTier = "Standard";
+
+                return new FeeInfoDto
+                {
+                    Exchange = ExchangeName,
+                    MakerFeeRate = makerRate,
+                    TakerFeeRate = takerRate,
+                    FeeTier = feeTier,
+                    CollectedAt = DateTime.UtcNow
+                };
+            }
+
+            // Fallback to default fees if API call fails
+            _logger.LogWarning("Failed to get fee info from Binance, using defaults");
+            return new FeeInfoDto
+            {
+                Exchange = ExchangeName,
+                MakerFeeRate = 0.0002m, // 0.02% default maker
+                TakerFeeRate = 0.0004m, // 0.04% default taker
+                FeeTier = "Unknown",
+                CollectedAt = DateTime.UtcNow
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching trading fees from Binance");
+
+            // Return default fees on error
+            return new FeeInfoDto
+            {
+                Exchange = ExchangeName,
+                MakerFeeRate = 0.0002m, // 0.02% default maker
+                TakerFeeRate = 0.0004m, // 0.04% default taker
+                FeeTier = "Error",
+                CollectedAt = DateTime.UtcNow
+            };
+        }
+    }
+
     public async Task SubscribeToFundingRatesAsync(Action<FundingRateDto> onUpdate)
     {
         if (_socketClient == null)

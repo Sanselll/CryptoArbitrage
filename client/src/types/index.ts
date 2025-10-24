@@ -126,6 +126,11 @@ export interface ArbitrageOpportunity {
   priceSpread24hAvg?: number;         // 24-hour average price spread %
   priceSpread3dAvg?: number;          // 3-day average price spread %
 
+  // Spread history metrics (30 samples) - for Cross-Exchange only
+  spread30SampleAvg?: number;         // Average spread based on last 30 price samples
+  spreadVolatilityStdDev?: number;    // Standard deviation of spread samples
+  spreadVolatilityCv?: number;        // Coefficient of variation (StdDev/Mean)
+
   // Per-exchange volumes for cross-exchange arbitrage
   longVolume24h?: number;
   shortVolume24h?: number;

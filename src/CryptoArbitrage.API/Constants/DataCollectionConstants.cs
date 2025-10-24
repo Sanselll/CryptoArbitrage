@@ -28,6 +28,12 @@ public static class DataCollectionConstants
         public const string LiquidityMetricPrefix = "liquidity";
 
         /// <summary>
+        /// Prefix for price history cache keys: "price_history:"
+        /// Full pattern: price_history:{exchangeName}:{symbol}
+        /// </summary>
+        public const string PriceHistoryPrefix = "price_history";
+
+        /// <summary>
         /// Builds a funding rate cache key
         /// </summary>
         public static string BuildFundingRateKey(string exchangeName, string symbol)
@@ -38,6 +44,12 @@ public static class DataCollectionConstants
         /// </summary>
         public static string BuildLiquidityMetricKey(string exchangeName, string symbol)
             => $"{LiquidityMetricPrefix}:{exchangeName}:{symbol}";
+
+        /// <summary>
+        /// Builds a price history cache key
+        /// </summary>
+        public static string BuildPriceHistoryKey(string exchangeName, string symbol)
+            => $"{PriceHistoryPrefix}:{exchangeName}:{symbol}";
 
         /// <summary>
         /// Builds a general cache key (for historical prices, etc.)
@@ -54,6 +66,11 @@ public static class DataCollectionConstants
         /// Pattern to match all liquidity metric keys
         /// </summary>
         public static string LiquidityMetricPattern => $"{LiquidityMetricPrefix}:*";
+
+        /// <summary>
+        /// Pattern to match all price history keys
+        /// </summary>
+        public static string PriceHistoryPattern => $"{PriceHistoryPrefix}:*";
     }
 
     /// <summary>

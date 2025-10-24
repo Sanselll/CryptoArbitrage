@@ -56,7 +56,8 @@
       "Bash(npm run build)",
       "Bash(curl:*)",
       "Bash(npm run dev:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
