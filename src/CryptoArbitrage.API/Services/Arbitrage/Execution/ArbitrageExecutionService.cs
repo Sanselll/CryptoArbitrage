@@ -576,7 +576,16 @@ public class ArbitrageExecutionService
                 UnrealizedPnL = 0,
                 OrderId = perpOrderId,
                 ExchangePositionId = request.Symbol, // For perpetual positions, the symbol IS the position identifier on the exchange
-                OpenedAt = DateTime.UtcNow
+                OpenedAt = DateTime.UtcNow,
+                // Entry snapshot for exit monitoring
+                EntryFundingRate = request.FundingRate,
+                EntrySpread = null, // Spot-perpetual doesn't use cross-exchange spread
+                EntrySpotPrice = spotPrice,
+                EntryPerpPrice = perpPrice,
+                ProfitTargetPercent = request.Suggestion?.ProfitTargetPercent,
+                MaxHoldingHours = request.Suggestion?.MaxHoldingHours,
+                EntryConfidenceScore = request.Suggestion?.ConfidenceScore,
+                RecommendedStrategy = request.Suggestion?.RecommendedStrategy.ToString()
             };
 
             var spotPosition = new Position
@@ -595,7 +604,16 @@ public class ArbitrageExecutionService
                 RealizedPnL = 0,
                 UnrealizedPnL = 0,
                 OrderId = spotOrderId,
-                OpenedAt = DateTime.UtcNow
+                OpenedAt = DateTime.UtcNow,
+                // Entry snapshot for exit monitoring
+                EntryFundingRate = request.FundingRate,
+                EntrySpread = null,
+                EntrySpotPrice = spotPrice,
+                EntryPerpPrice = perpPrice,
+                ProfitTargetPercent = request.Suggestion?.ProfitTargetPercent,
+                MaxHoldingHours = request.Suggestion?.MaxHoldingHours,
+                EntryConfidenceScore = request.Suggestion?.ConfidenceScore,
+                RecommendedStrategy = request.Suggestion?.RecommendedStrategy.ToString()
             };
 
             _dbContext.Positions.Add(perpPosition);
@@ -977,7 +995,16 @@ public class ArbitrageExecutionService
                 UnrealizedPnL = 0,
                 OrderId = longOrderId,
                 ExchangePositionId = isSpotFutures ? null : request.Symbol, // Only perpetual positions have exchange position IDs
-                OpenedAt = DateTime.UtcNow
+                OpenedAt = DateTime.UtcNow,
+                // Entry snapshot for exit monitoring
+                EntryFundingRate = request.LongFundingRate,
+                EntrySpread = request.SpreadRate,
+                EntrySpotPrice = isSpotFutures ? longPrice : null,
+                EntryPerpPrice = !isSpotFutures ? longPrice : null,
+                ProfitTargetPercent = request.Suggestion?.ProfitTargetPercent,
+                MaxHoldingHours = request.Suggestion?.MaxHoldingHours,
+                EntryConfidenceScore = request.Suggestion?.ConfidenceScore,
+                RecommendedStrategy = request.Suggestion?.RecommendedStrategy.ToString()
             };
 
             var shortPosition = new Position
@@ -997,7 +1024,16 @@ public class ArbitrageExecutionService
                 UnrealizedPnL = 0,
                 OrderId = shortOrderId,
                 ExchangePositionId = request.Symbol, // For perpetual positions, the symbol IS the position identifier
-                OpenedAt = DateTime.UtcNow
+                OpenedAt = DateTime.UtcNow,
+                // Entry snapshot for exit monitoring
+                EntryFundingRate = request.ShortFundingRate,
+                EntrySpread = request.SpreadRate,
+                EntrySpotPrice = null,
+                EntryPerpPrice = shortPrice,
+                ProfitTargetPercent = request.Suggestion?.ProfitTargetPercent,
+                MaxHoldingHours = request.Suggestion?.MaxHoldingHours,
+                EntryConfidenceScore = request.Suggestion?.ConfidenceScore,
+                RecommendedStrategy = request.Suggestion?.RecommendedStrategy.ToString()
             };
 
             _dbContext.Positions.Add(longPosition);

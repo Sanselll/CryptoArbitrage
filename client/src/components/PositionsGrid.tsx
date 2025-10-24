@@ -1,11 +1,12 @@
-import { Layers, StopCircle, TrendingUp, TrendingDown } from 'lucide-react';
+import { Layers, StopCircle, TrendingUp, TrendingDown, ArrowUpDown } from 'lucide-react';
 import { useArbitrageStore } from '../stores/arbitrageStore';
-import { PositionSide, PositionStatus, PositionType, StrategySubType } from '../types/index';
+import { PositionSide, PositionStatus, PositionType, StrategySubType, OpportunitySuggestion, RecommendedStrategyType } from '../types/index';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { EmptyState } from './ui/EmptyState';
 import { LoadingOverlay } from './ui/LoadingOverlay';
 import { ExchangeBadge } from './ui/ExchangeBadge';
+import { SuggestionBadge } from './ui/SuggestionBadge';
 import { AlertDialog, ConfirmDialog } from './ui/Dialog';
 import {
   Table,
@@ -67,12 +68,26 @@ const formatExecutionTime = (openedAt: string) => {
   return `${hours}h ${minutes}m ${seconds}s`;
 };
 
+type SortField = 'ai' | 'symbol' | 'pnl' | 'time';
+type SortDirection = 'asc' | 'desc';
+
 export const PositionsGrid = () => {
   const { positions, opportunities, fundingRates } = useArbitrageStore();
   const [isClosing, setIsClosing] = useState(false);
   const [executionTimes, setExecutionTimes] = useState<{ [key: number]: string }>({});
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<SortField>('time');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const { alertState, showSuccess, showError, closeAlert, confirmState, showConfirm, closeConfirm } = useDialog();
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -147,6 +162,41 @@ export const PositionsGrid = () => {
       longPerp: pair.longPerp,
       shortPerp: pair.shortPerp
     });
+  });
+
+  // Sort position pairs
+  positionPairs.sort((a, b) => {
+    let aValue: number, bValue: number;
+
+    switch (sortField) {
+      case 'ai':
+        aValue = a.perp?.entryConfidenceScore || a.spot?.entryConfidenceScore || -Infinity;
+        bValue = b.perp?.entryConfidenceScore || b.spot?.entryConfidenceScore || -Infinity;
+        break;
+      case 'symbol':
+        return sortDirection === 'asc'
+          ? a.symbol.localeCompare(b.symbol)
+          : b.symbol.localeCompare(a.symbol);
+      case 'pnl':
+        const aTotalPnL = (a.perp?.unrealizedPnL || 0) + (a.spot?.unrealizedPnL || 0) +
+                          (a.longPerp?.unrealizedPnL || 0) + (a.shortPerp?.unrealizedPnL || 0);
+        const bTotalPnL = (b.perp?.unrealizedPnL || 0) + (b.spot?.unrealizedPnL || 0) +
+                          (b.longPerp?.unrealizedPnL || 0) + (b.shortPerp?.unrealizedPnL || 0);
+        aValue = aTotalPnL;
+        bValue = bTotalPnL;
+        break;
+      case 'time':
+        const aTime = a.perp?.openedAt || a.spot?.openedAt || a.longPerp?.openedAt || a.shortPerp?.openedAt || '';
+        const bTime = b.perp?.openedAt || b.spot?.openedAt || b.longPerp?.openedAt || b.shortPerp?.openedAt || '';
+        return sortDirection === 'desc'
+          ? new Date(bTime).getTime() - new Date(aTime).getTime()
+          : new Date(aTime).getTime() - new Date(bTime).getTime();
+      default:
+        aValue = 0;
+        bValue = 0;
+    }
+
+    return sortDirection === 'desc' ? bValue - aValue : aValue - bValue;
   });
 
   const totalPnL = openPositions.reduce((sum, p) => sum + p.unrealizedPnL, 0);
@@ -231,6 +281,24 @@ export const PositionsGrid = () => {
                 <TableHead className="text-right">Fund P&L</TableHead>
                 <TableHead className="text-right">Total P&L</TableHead>
                 <TableHead className="text-right">Time</TableHead>
+                <TableHead
+                  className="sticky right-[180px] z-40 bg-binance-bg-secondary border-l border-binance-border text-center cursor-pointer hover:bg-binance-bg-tertiary"
+                  title="AI confidence score at entry"
+                  onClick={() => handleSort('ai')}
+                >
+                  <div className="flex items-center justify-center gap-1">
+                    Entry AI
+                    {sortField === 'ai' && (
+                      <ArrowUpDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="sticky right-[100px] z-40 bg-binance-bg-secondary border-l border-binance-border text-center"
+                  title="Exit signals and recommendations"
+                >
+                  Exit AI
+                </TableHead>
                 <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -433,6 +501,82 @@ export const PositionsGrid = () => {
                         <span className="font-mono text-[11px] text-binance-text-secondary">
                           {pair.executionId ? executionTimes[pair.executionId] || '--' : '--'}
                         </span>
+                      </TableCell>
+                      <TableCell className={`sticky right-[180px] z-20 border-l border-binance-border text-center ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                        {(() => {
+                          // Get entry confidence from either position
+                          const entryScore = pair.perp?.entryConfidenceScore || pair.spot?.entryConfidenceScore || pair.longPerp?.entryConfidenceScore;
+                          const recommendedStrategy = pair.perp?.recommendedStrategy || pair.spot?.recommendedStrategy || pair.longPerp?.recommendedStrategy;
+
+                          if (!entryScore) {
+                            return <span className="text-xs text-binance-text-secondary">--</span>;
+                          }
+
+                          // Create a minimal suggestion object for the badge
+                          const mockSuggestion: OpportunitySuggestion = {
+                            confidenceScore: entryScore,
+                            recommendedStrategy: RecommendedStrategyType.Hybrid,
+                            entryRecommendation: entryScore >= 80 ? 3 : entryScore >= 60 ? 2 : entryScore >= 40 ? 1 : 0,
+                            suggestedPositionSizeUsd: 0,
+                            suggestedLeverage: 0,
+                            suggestedHoldingPeriodHours: 0,
+                            profitTargetPercent: pair.perp?.profitTargetPercent || pair.spot?.profitTargetPercent || 0,
+                            maxHoldingHours: pair.perp?.maxHoldingHours || pair.spot?.maxHoldingHours || 0,
+                            scoreBreakdown: {
+                              fundingQuality: 0,
+                              profitPotential: 0,
+                              spreadEfficiency: 0,
+                              marketQuality: 0
+                            },
+                            reasoning: "Entry snapshot from position execution",
+                            scoringFactors: [],
+                            warnings: []
+                          };
+
+                          return <SuggestionBadge suggestion={mockSuggestion} entryScore={entryScore} recommendedStrategy={recommendedStrategy} />;
+                        })()}
+                      </TableCell>
+                      <TableCell className={`sticky right-[100px] z-20 border-l border-binance-border text-center ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                        {(() => {
+                          // Get exit signals from either position
+                          const exitSignals = pair.perp?.exitSignals || pair.spot?.exitSignals || pair.longPerp?.exitSignals || pair.shortPerp?.exitSignals;
+
+                          if (!exitSignals || exitSignals.length === 0) {
+                            return <span className="text-xs text-binance-text-secondary">--</span>;
+                          }
+
+                          // Filter for triggered signals
+                          const triggeredSignals = exitSignals.filter((s: any) => s.isTriggered);
+
+                          if (triggeredSignals.length === 0) {
+                            return <span className="text-xs text-green-400">✓ Hold</span>;
+                          }
+
+                          // Get highest urgency signal
+                          const criticalSignal = triggeredSignals.find((s: any) => s.urgency === 3); // Critical
+                          const highSignal = triggeredSignals.find((s: any) => s.urgency === 2); // High
+                          const mediumSignal = triggeredSignals.find((s: any) => s.urgency === 1); // Medium
+                          const topSignal = criticalSignal || highSignal || mediumSignal || triggeredSignals[0];
+
+                          const urgencyColor = topSignal.urgency === 3 ? 'text-red-400' :
+                                               topSignal.urgency === 2 ? 'text-orange-400' :
+                                               topSignal.urgency === 1 ? 'text-yellow-400' : 'text-blue-400';
+
+                          const urgencyLabel = topSignal.urgency === 3 ? 'EXIT NOW' :
+                                               topSignal.urgency === 2 ? 'Exit Soon' :
+                                               topSignal.urgency === 1 ? 'Consider Exit' : 'Monitor';
+
+                          return (
+                            <div className="flex flex-col items-center gap-0.5">
+                              <span className={`text-[10px] font-bold ${urgencyColor}`}>
+                                {urgencyLabel}
+                              </span>
+                              <span className="text-[9px] text-binance-text-secondary">
+                                {triggeredSignals.length} signal{triggeredSignals.length > 1 ? 's' : ''}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                         {pair.executionId ? (
@@ -679,6 +823,82 @@ export const PositionsGrid = () => {
                         <span className="font-mono text-[11px] text-binance-text-secondary">
                           {pair.executionId ? executionTimes[pair.executionId] || '--' : '--'}
                         </span>
+                      </TableCell>
+                      <TableCell className={`sticky right-[180px] z-20 border-l border-binance-border text-center ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                        {(() => {
+                          // Get entry confidence from either position
+                          const entryScore = pair.perp?.entryConfidenceScore || pair.spot?.entryConfidenceScore || pair.longPerp?.entryConfidenceScore;
+                          const recommendedStrategy = pair.perp?.recommendedStrategy || pair.spot?.recommendedStrategy || pair.longPerp?.recommendedStrategy;
+
+                          if (!entryScore) {
+                            return <span className="text-xs text-binance-text-secondary">--</span>;
+                          }
+
+                          // Create a minimal suggestion object for the badge
+                          const mockSuggestion: OpportunitySuggestion = {
+                            confidenceScore: entryScore,
+                            recommendedStrategy: RecommendedStrategyType.Hybrid,
+                            entryRecommendation: entryScore >= 80 ? 3 : entryScore >= 60 ? 2 : entryScore >= 40 ? 1 : 0,
+                            suggestedPositionSizeUsd: 0,
+                            suggestedLeverage: 0,
+                            suggestedHoldingPeriodHours: 0,
+                            profitTargetPercent: pair.perp?.profitTargetPercent || pair.spot?.profitTargetPercent || 0,
+                            maxHoldingHours: pair.perp?.maxHoldingHours || pair.spot?.maxHoldingHours || 0,
+                            scoreBreakdown: {
+                              fundingQuality: 0,
+                              profitPotential: 0,
+                              spreadEfficiency: 0,
+                              marketQuality: 0
+                            },
+                            reasoning: "Entry snapshot from position execution",
+                            scoringFactors: [],
+                            warnings: []
+                          };
+
+                          return <SuggestionBadge suggestion={mockSuggestion} entryScore={entryScore} recommendedStrategy={recommendedStrategy} />;
+                        })()}
+                      </TableCell>
+                      <TableCell className={`sticky right-[100px] z-20 border-l border-binance-border text-center ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                        {(() => {
+                          // Get exit signals from either position
+                          const exitSignals = pair.perp?.exitSignals || pair.spot?.exitSignals || pair.longPerp?.exitSignals || pair.shortPerp?.exitSignals;
+
+                          if (!exitSignals || exitSignals.length === 0) {
+                            return <span className="text-xs text-binance-text-secondary">--</span>;
+                          }
+
+                          // Filter for triggered signals
+                          const triggeredSignals = exitSignals.filter((s: any) => s.isTriggered);
+
+                          if (triggeredSignals.length === 0) {
+                            return <span className="text-xs text-green-400">✓ Hold</span>;
+                          }
+
+                          // Get highest urgency signal
+                          const criticalSignal = triggeredSignals.find((s: any) => s.urgency === 3); // Critical
+                          const highSignal = triggeredSignals.find((s: any) => s.urgency === 2); // High
+                          const mediumSignal = triggeredSignals.find((s: any) => s.urgency === 1); // Medium
+                          const topSignal = criticalSignal || highSignal || mediumSignal || triggeredSignals[0];
+
+                          const urgencyColor = topSignal.urgency === 3 ? 'text-red-400' :
+                                               topSignal.urgency === 2 ? 'text-orange-400' :
+                                               topSignal.urgency === 1 ? 'text-yellow-400' : 'text-blue-400';
+
+                          const urgencyLabel = topSignal.urgency === 3 ? 'EXIT NOW' :
+                                               topSignal.urgency === 2 ? 'Exit Soon' :
+                                               topSignal.urgency === 1 ? 'Consider Exit' : 'Monitor';
+
+                          return (
+                            <div className="flex flex-col items-center gap-0.5">
+                              <span className={`text-[10px] font-bold ${urgencyColor}`}>
+                                {urgencyLabel}
+                              </span>
+                              <span className="text-[9px] text-binance-text-secondary">
+                                {triggeredSignals.length} signal{triggeredSignals.length > 1 ? 's' : ''}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                         {pair.executionId ? (

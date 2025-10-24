@@ -48,4 +48,45 @@ public class Position
 
     // Optional notes
     public string? Notes { get; set; }
+
+    // Entry snapshot for algorithmic suggester (exit strategy monitoring)
+    /// <summary>
+    /// Funding rate at position entry (for monitoring reversals)
+    /// </summary>
+    public decimal? EntryFundingRate { get; set; }
+
+    /// <summary>
+    /// Price spread at entry (for cross-exchange strategies)
+    /// </summary>
+    public decimal? EntrySpread { get; set; }
+
+    /// <summary>
+    /// Spot price at entry (for spot-perpetual strategies)
+    /// </summary>
+    public decimal? EntrySpotPrice { get; set; }
+
+    /// <summary>
+    /// Perpetual price at entry
+    /// </summary>
+    public decimal? EntryPerpPrice { get; set; }
+
+    /// <summary>
+    /// Profit target percentage for exit signal (e.g., 0.4 = 0.4%)
+    /// </summary>
+    public decimal? ProfitTargetPercent { get; set; }
+
+    /// <summary>
+    /// Maximum holding hours before suggesting exit
+    /// </summary>
+    public decimal? MaxHoldingHours { get; set; }
+
+    /// <summary>
+    /// Confidence score from suggestion engine (0-100)
+    /// </summary>
+    public decimal? EntryConfidenceScore { get; set; }
+
+    /// <summary>
+    /// Recommended strategy at entry (FundingOnly, SpreadOnly, Hybrid)
+    /// </summary>
+    public string? RecommendedStrategy { get; set; }
 }

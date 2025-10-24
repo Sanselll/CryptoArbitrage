@@ -4,12 +4,13 @@ using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.DataCollection.Events;
+using CryptoArbitrage.API.Services.Suggestions;
 using Microsoft.Extensions.Options;
 
 namespace CryptoArbitrage.API.Services.Arbitrage.Detection;
 
 /// <summary>
-/// Enriches detected opportunities with supplementary data (volume, liquidity metrics).
+/// Enriches detected opportunities with supplementary data (volume, liquidity metrics, AI suggestions).
 /// PURE enricher: Receives opportunities, adds data, publishes enriched version.
 /// </summary>
 public class OpportunityEnricher : IHostedService
@@ -19,6 +20,8 @@ public class OpportunityEnricher : IHostedService
     private readonly IDataRepository<MarketDataSnapshot> _marketDataRepository;
     private readonly IDataRepository<LiquidityMetricsDto> _liquidityRepository;
     private readonly IDataRepository<ArbitrageOpportunityDto> _opportunityRepository;
+    private readonly IDataRepository<UserDataSnapshot> _userDataRepository;
+    private readonly OpportunitySuggestionService _suggestionService;
     private readonly ArbitrageConfig _config;
 
     public OpportunityEnricher(
@@ -27,6 +30,8 @@ public class OpportunityEnricher : IHostedService
         IDataRepository<MarketDataSnapshot> marketDataRepository,
         IDataRepository<LiquidityMetricsDto> liquidityRepository,
         IDataRepository<ArbitrageOpportunityDto> opportunityRepository,
+        IDataRepository<UserDataSnapshot> userDataRepository,
+        OpportunitySuggestionService suggestionService,
         IOptions<ArbitrageConfig> config)
     {
         _logger = logger;
@@ -34,6 +39,8 @@ public class OpportunityEnricher : IHostedService
         _marketDataRepository = marketDataRepository;
         _liquidityRepository = liquidityRepository;
         _opportunityRepository = opportunityRepository;
+        _userDataRepository = userDataRepository;
+        _suggestionService = suggestionService;
         _config = config.Value;
     }
 
@@ -127,7 +134,7 @@ public class OpportunityEnricher : IHostedService
     }
 
     /// <summary>
-    /// Enriches a single opportunity with volume and liquidity data
+    /// Enriches a single opportunity with volume, liquidity data, and AI suggestion
     /// </summary>
     private async Task EnrichSingleOpportunityAsync(
         ArbitrageOpportunityDto opportunity,
@@ -141,6 +148,9 @@ public class OpportunityEnricher : IHostedService
 
             // Phase 2: Apply liquidity metrics
             await EnrichLiquidityAsync(opportunity, liquidityMetricsDict);
+
+            // Phase 3: Generate AI-driven trading suggestion
+            await EnrichSuggestionAsync(opportunity);
         }
         catch (Exception ex)
         {
@@ -335,6 +345,106 @@ public class OpportunityEnricher : IHostedService
 
         // Otherwise, it's Medium liquidity
         return LiquidityStatus.Medium;
+    }
+
+    /// <summary>
+    /// Enriches opportunity with AI-driven trading suggestion
+    /// </summary>
+    private async Task EnrichSuggestionAsync(ArbitrageOpportunityDto opportunity)
+    {
+        try
+        {
+            // Fetch available balances from all users (aggregate for suggestions)
+            var availableBalances = await GetAggregatedAvailableBalancesAsync();
+
+            _logger.LogInformation(
+                "Fetched balances for {Symbol}: {BalanceCount} exchanges, Total: ${Total:N2}",
+                opportunity.Symbol,
+                availableBalances.Count,
+                availableBalances.Values.Sum());
+
+            // Generate suggestion using the suggestion service (with balance awareness)
+            var suggestion = _suggestionService.GenerateSuggestion(opportunity, availableBalances);
+            opportunity.Suggestion = suggestion;
+
+            _logger.LogInformation(
+                "Generated suggestion for {Symbol}: Strategy={Strategy}, Confidence={Confidence:F1}, Recommendation={Recommendation}, Size=${Size:N0}, Leverage={Leverage:F1}x, FundingQuality={FQ:F1}, ProfitPotential={PP:F1}, SpreadEfficiency={SE:F1}, MarketQuality={MQ:F1}",
+                opportunity.Symbol,
+                suggestion.RecommendedStrategy,
+                suggestion.ConfidenceScore,
+                suggestion.EntryRecommendation,
+                suggestion.SuggestedPositionSizeUsd,
+                suggestion.SuggestedLeverage,
+                suggestion.ScoreBreakdown.FundingQualityScore,
+                suggestion.ScoreBreakdown.ProfitPotentialScore,
+                suggestion.ScoreBreakdown.SpreadEfficiencyScore,
+                suggestion.ScoreBreakdown.MarketQualityScore);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error generating suggestion for {Symbol}", opportunity.Symbol);
+            // Don't fail enrichment if suggestion generation fails
+            opportunity.Suggestion = null;
+        }
+    }
+
+    /// <summary>
+    /// Gets aggregated available balances across all users by exchange
+    /// This provides total buying power for position sizing
+    /// </summary>
+    private async Task<IDictionary<string, decimal>> GetAggregatedAvailableBalancesAsync()
+    {
+        try
+        {
+            // Fetch all user data snapshots (pattern: "userdata:*")
+            var userDataSnapshots = await _userDataRepository.GetByPatternAsync("userdata:*");
+
+            if (userDataSnapshots == null || !userDataSnapshots.Any())
+            {
+                _logger.LogWarning("No user balance data available for suggestions - position sizing will use defaults");
+                return new Dictionary<string, decimal>();
+            }
+
+            _logger.LogInformation("Found {Count} user data snapshots for balance aggregation", userDataSnapshots.Count);
+
+            // Aggregate balances by exchange
+            var balancesByExchange = new Dictionary<string, decimal>();
+
+            foreach (var snapshot in userDataSnapshots.Values)
+            {
+                if (snapshot?.Balance != null)
+                {
+                    var exchange = snapshot.Exchange;
+                    var availableBalance = snapshot.Balance.FuturesAvailableUsd;
+
+                    if (!balancesByExchange.ContainsKey(exchange))
+                    {
+                        balancesByExchange[exchange] = 0m;
+                    }
+
+                    balancesByExchange[exchange] += availableBalance;
+
+                    _logger.LogDebug(
+                        "Added balance from user snapshot: Exchange={Exchange}, Available=${Available:N2}",
+                        exchange, availableBalance);
+                }
+                else
+                {
+                    _logger.LogWarning("User snapshot found but Balance is null: {Snapshot}", snapshot);
+                }
+            }
+
+            _logger.LogInformation(
+                "Aggregated balances for suggestions: {Balances}",
+                string.Join(", ", balancesByExchange.Select(kvp => $"{kvp.Key}: ${kvp.Value:N2}")));
+
+            return balancesByExchange;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error fetching user balances for suggestions");
+            return new Dictionary<string, decimal>();
+        }
     }
 
     /// <summary>

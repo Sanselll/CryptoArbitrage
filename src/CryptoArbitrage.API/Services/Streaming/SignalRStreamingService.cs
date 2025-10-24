@@ -1,5 +1,6 @@
 using CryptoArbitrage.API.Hubs;
 using CryptoArbitrage.API.Models;
+using CryptoArbitrage.API.Models.Suggestions;
 using Microsoft.AspNetCore.SignalR;
 
 namespace CryptoArbitrage.API.Services.Streaming;
@@ -204,6 +205,31 @@ public class SignalRStreamingService : ISignalRStreamingService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error broadcasting transaction history to user {UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// Broadcast exit signal to a specific user for a position
+    /// </summary>
+    public async Task BroadcastExitSignalToUserAsync(string userId, int positionId, ExitSignal signal, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveExitSignal", new
+            {
+                PositionId = positionId,
+                Signal = signal
+            }, cancellationToken);
+
+            _logger.LogDebug(
+                "Broadcasted {ConditionType} exit signal for Position {PositionId} to user {UserId}",
+                signal.ConditionType,
+                positionId,
+                userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting exit signal to user {UserId}", userId);
         }
     }
 }

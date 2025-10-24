@@ -18,6 +18,8 @@ using CryptoArbitrage.API.Services.DataCollection;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.DataCollection.Configuration;
 using CryptoArbitrage.API.Services.DataCollection.Collectors;
+using CryptoArbitrage.API.Services.Suggestions;
+using CryptoArbitrage.API.Services.Suggestions.Analyzers;
 using CryptoArbitrage.API.Services.DataCollection.Repositories;
 using CryptoArbitrage.API.Services.DataCollection.Events;
 using CryptoArbitrage.API.Services.Exchanges;
@@ -294,7 +296,8 @@ builder.Services.AddHostedService<OpportunityAggregator>();
 builder.Services.AddHostedService<OpportunityEnricher>();
 
 // Background Services - Broadcasting (Layer 5: Broadcasters)
-builder.Services.AddHostedService<SignalRBroadcaster>();
+builder.Services.AddSingleton<SignalRBroadcaster>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SignalRBroadcaster>());
 
 // Symbol Discovery Service - manages symbol auto-discovery
 builder.Services.AddSingleton<SymbolDiscoveryService>();
@@ -302,6 +305,26 @@ builder.Services.AddSingleton<SymbolDiscoveryService>();
 // Consumer Services - clean APIs for reading data
 builder.Services.AddSingleton<IMarketDataService, MarketDataService>();
 builder.Services.AddSingleton<IFundingRateService, FundingRateService>();
+
+// ============================================================================
+// ALGORITHMIC SUGGESTION SYSTEM
+// ============================================================================
+
+// Suggestion Analyzers
+builder.Services.AddSingleton<MarketQualityAnalyzer>();
+builder.Services.AddSingleton<FundingStrategyAnalyzer>();
+builder.Services.AddSingleton<SpreadStrategyAnalyzer>();
+builder.Services.AddSingleton<HybridStrategyAnalyzer>();
+builder.Services.AddSingleton<ExecutionCostAnalyzer>();
+builder.Services.AddSingleton<RiskAnalyzer>();
+builder.Services.AddSingleton<StrategySelector>();
+
+// Suggestion Services
+builder.Services.AddSingleton<OpportunitySuggestionService>();
+builder.Services.AddSingleton<ExitStrategyMonitor>();
+
+// Suggestion Background Services
+builder.Services.AddHostedService<ExitMonitorBackgroundService>();
 
 // ============================================================================
 

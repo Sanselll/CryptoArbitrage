@@ -56,7 +56,11 @@
       "Bash(npm run build)",
       "Bash(curl:*)",
       "Bash(npm run dev:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(dotnet ef migrations:*)",
+      "Bash(dotnet build:*)",
+      "Bash(journalctl:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

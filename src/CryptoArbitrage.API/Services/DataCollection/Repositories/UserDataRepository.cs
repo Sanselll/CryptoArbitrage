@@ -9,13 +9,14 @@ namespace CryptoArbitrage.API.Services.DataCollection.Repositories;
 /// Repository for user data (balances and positions) with memory-only storage
 /// Note: Position persistence is handled separately by ArbitrageExecutionService
 /// This repository is primarily for caching current state for SignalR broadcasting
+/// Pattern matching enabled to support balance aggregation for AI suggestions
 /// </summary>
 public class UserDataRepository : BaseMemoryCacheRepository<UserDataSnapshot>
 {
     public UserDataRepository(
         IMemoryCache cache,
         ILogger<UserDataRepository> logger)
-        : base(cache, logger, enablePatternMatching: false)
+        : base(cache, logger, enablePatternMatching: true)
     {
     }
 

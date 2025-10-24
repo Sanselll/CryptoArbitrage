@@ -3,9 +3,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using CryptoArbitrage.API.Data;
 using CryptoArbitrage.API.Models;
+using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Services;
 using CryptoArbitrage.API.Services.Authentication;
+using CryptoArbitrage.API.Services.Suggestions;
+using CryptoArbitrage.API.Services.DataCollection.Abstractions;
+using CryptoArbitrage.API.Constants;
 
 namespace CryptoArbitrage.API.Controllers;
 
@@ -22,15 +26,21 @@ public class PositionController : BaseController
 {
     private readonly ArbitrageDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly ExitStrategyMonitor _exitMonitor;
+    private readonly IDataRepository<MarketDataSnapshot> _marketDataRepository;
 
     public PositionController(
         ArbitrageDbContext context,
         ILogger<PositionController> logger,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ExitStrategyMonitor exitMonitor,
+        IDataRepository<MarketDataSnapshot> marketDataRepository)
         : base(logger)
     {
         _context = context;
         _currentUser = currentUser;
+        _exitMonitor = exitMonitor;
+        _marketDataRepository = marketDataRepository;
     }
 
     /// <summary>
@@ -43,6 +53,7 @@ public class PositionController : BaseController
         return await ExecuteAuthenticatedAsync(_currentUser.UserId, async () =>
         {
             var query = _context.Positions
+                .Include(p => p.Execution) // Include execution for exit signal calculation
                 .Where(p => p.UserId == _currentUser.UserId); // CRITICAL: Filter by authenticated user
 
             // Filter by status if provided
@@ -51,9 +62,24 @@ public class PositionController : BaseController
                 query = query.Where(p => p.Status == positionStatus);
             }
 
-            var positions = await query
+            var positionEntities = await query
                 .OrderByDescending(p => p.OpenedAt)
-                .Select(p => new PositionDto
+                .ToListAsync();
+
+            // Get market data snapshot for exit signal calculation
+            MarketDataSnapshot? marketSnapshot = null;
+            try
+            {
+                marketSnapshot = await _marketDataRepository.GetAsync(DataCollectionConstants.CacheKeys.MarketDataSnapshot);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to get market data snapshot for exit signals");
+            }
+
+            var positions = positionEntities.Select(p =>
+            {
+                var dto = new PositionDto
                 {
                     Id = p.Id,
                     ExecutionId = p.ExecutionId,
@@ -74,8 +100,24 @@ public class PositionController : BaseController
                     OpenedAt = p.OpenedAt,
                     ClosedAt = p.ClosedAt,
                     ActiveOpportunityId = p.ExecutionId
-                })
-                .ToListAsync();
+                };
+
+                // Calculate exit signals for open positions
+                if (p.Status == PositionStatus.Open && marketSnapshot != null)
+                {
+                    try
+                    {
+                        dto.ExitSignals = _exitMonitor.EvaluateExitConditions(p, p.Execution, marketSnapshot);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "Failed to evaluate exit signals for position {PositionId}", p.Id);
+                        dto.ExitSignals = new List<CryptoArbitrage.API.Models.Suggestions.ExitSignal>();
+                    }
+                }
+
+                return dto;
+            }).ToList();
 
             Logger.LogDebug("User {UserId} retrieved {Count} positions", _currentUser.UserId, positions.Count);
             return positions;
@@ -96,6 +138,7 @@ public class PositionController : BaseController
                 return authResult;
 
             var position = await _context.Positions
+                .Include(p => p.Execution) // Include execution for exit signal calculation
                 .Where(p => p.Id == id && p.UserId == _currentUser.UserId) // CRITICAL: Filter by user
                 .FirstOrDefaultAsync();
 
@@ -128,6 +171,24 @@ public class PositionController : BaseController
                 ClosedAt = position.ClosedAt,
                 ActiveOpportunityId = position.ExecutionId
             };
+
+            // Calculate exit signals for open positions
+            if (position.Status == PositionStatus.Open)
+            {
+                try
+                {
+                    var marketSnapshot = await _marketDataRepository.GetAsync(DataCollectionConstants.CacheKeys.MarketDataSnapshot);
+                    if (marketSnapshot != null)
+                    {
+                        positionDto.ExitSignals = _exitMonitor.EvaluateExitConditions(position, position.Execution, marketSnapshot);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to evaluate exit signals for position {PositionId}", position.Id);
+                    positionDto.ExitSignals = new List<CryptoArbitrage.API.Models.Suggestions.ExitSignal>();
+                }
+            }
 
             Logger.LogDebug("User {UserId} retrieved position {Id}", _currentUser.UserId, id);
             return Ok(positionDto);

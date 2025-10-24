@@ -1,8 +1,14 @@
 using System.Text.Json;
 using CryptoArbitrage.API.Constants;
+using CryptoArbitrage.API.Data;
+using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
+using CryptoArbitrage.API.Models.Suggestions;
+using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.DataCollection.Events;
+using CryptoArbitrage.API.Services.Suggestions;
+using Microsoft.EntityFrameworkCore;
 
 namespace CryptoArbitrage.API.Services.Streaming;
 
@@ -16,6 +22,9 @@ public class SignalRBroadcaster : IHostedService
     private readonly ILogger<SignalRBroadcaster> _logger;
     private readonly IDataCollectionEventBus _eventBus;
     private readonly ISignalRStreamingService _signalRStreamingService;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ExitStrategyMonitor _exitMonitor;
+    private readonly IDataRepository<MarketDataSnapshot> _marketDataRepository;
 
     // Hash tracking for change detection
     private int _lastFundingRatesHash = 0;
@@ -32,11 +41,17 @@ public class SignalRBroadcaster : IHostedService
     public SignalRBroadcaster(
         ILogger<SignalRBroadcaster> logger,
         IDataCollectionEventBus eventBus,
-        ISignalRStreamingService signalRStreamingService)
+        ISignalRStreamingService signalRStreamingService,
+        IServiceProvider serviceProvider,
+        ExitStrategyMonitor exitMonitor,
+        IDataRepository<MarketDataSnapshot> marketDataRepository)
     {
         _logger = logger;
         _eventBus = eventBus;
         _signalRStreamingService = signalRStreamingService;
+        _serviceProvider = serviceProvider;
+        _exitMonitor = exitMonitor;
+        _marketDataRepository = marketDataRepository;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -218,6 +233,9 @@ public class SignalRBroadcaster : IHostedService
                 // Broadcast positions if changed
                 if (positions.Any())
                 {
+                    // Calculate exit signals for open positions before broadcasting
+                    await EnrichPositionsWithExitSignalsAsync(positions);
+
                     var positionsHash = ComputeHash(positions);
                     bool shouldBroadcastPositions = false;
 
@@ -466,6 +484,117 @@ public class SignalRBroadcaster : IHostedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error broadcasting transaction history");
+        }
+    }
+
+    /// <summary>
+    /// Broadcasts exit signal to a specific user for a position
+    /// </summary>
+    public async Task BroadcastExitSignal(string userId, int positionId, ExitSignal signal)
+    {
+        try
+        {
+            await _signalRStreamingService.BroadcastExitSignalToUserAsync(userId, positionId, signal);
+
+            _logger.LogInformation(
+                "Broadcasted {ConditionType} exit signal (Urgency: {Urgency}) for Position {PositionId} to user {UserId}",
+                signal.ConditionType,
+                signal.Urgency,
+                positionId,
+                userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Error broadcasting exit signal for Position {PositionId} to user {UserId}",
+                positionId,
+                userId);
+        }
+    }
+
+    /// <summary>
+    /// Enriches positions with exit signals for open positions
+    /// </summary>
+    private async Task EnrichPositionsWithExitSignalsAsync(List<PositionDto> positions)
+    {
+        try
+        {
+            _logger.LogDebug("EnrichPositionsWithExitSignals called with {Count} positions", positions.Count);
+
+            // Get market data snapshot for exit signal calculation
+            var marketSnapshot = await _marketDataRepository.GetAsync(DataCollectionConstants.CacheKeys.MarketDataSnapshot);
+            if (marketSnapshot == null)
+            {
+                _logger.LogWarning("No market data snapshot available for exit signals");
+                return;
+            }
+
+            // Create a scope to access database
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+
+            // Get position IDs for ALL positions (don't filter by status in DTO, as it may not be set correctly)
+            var positionIds = positions
+                .Where(p => p.Id > 0) // Only positions with database IDs
+                .Select(p => p.Id)
+                .ToList();
+
+            _logger.LogDebug("Found {Count} positions with database IDs: {Ids}", positionIds.Count, string.Join(", ", positionIds));
+
+            if (!positionIds.Any())
+            {
+                _logger.LogWarning("No positions with database IDs found");
+                return;
+            }
+
+            // Load position entities with executions (filter by Open status in DATABASE query)
+            var positionEntities = await dbContext.Positions
+                .Include(p => p.Execution)
+                .Where(p => positionIds.Contains(p.Id) && p.Status == PositionStatus.Open)
+                .ToDictionaryAsync(p => p.Id);
+
+            _logger.LogDebug("Loaded {Count} open position entities from database", positionEntities.Count);
+
+            // Calculate exit signals for each position
+            int signalsCalculated = 0;
+            foreach (var positionDto in positions.Where(p => p.Id > 0))
+            {
+                if (positionEntities.TryGetValue(positionDto.Id, out var positionEntity))
+                {
+                    try
+                    {
+                        var exitSignals = _exitMonitor.EvaluateExitConditions(
+                            positionEntity,
+                            positionEntity.Execution,
+                            marketSnapshot);
+
+                        positionDto.ExitSignals = exitSignals;
+                        signalsCalculated++;
+
+                        _logger.LogDebug(
+                            "Calculated {SignalCount} exit signals for position {PositionId} ({Symbol})",
+                            exitSignals?.Count ?? 0,
+                            positionDto.Id,
+                            positionDto.Symbol);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to calculate exit signals for position {PositionId}", positionDto.Id);
+                        positionDto.ExitSignals = new List<ExitSignal>();
+                    }
+                }
+                else
+                {
+                    _logger.LogDebug("No database entity found for position ID {PositionId}", positionDto.Id);
+                }
+            }
+
+            _logger.LogInformation("Enriched {Count} positions with exit signals", signalsCalculated);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error enriching positions with exit signals");
         }
     }
 

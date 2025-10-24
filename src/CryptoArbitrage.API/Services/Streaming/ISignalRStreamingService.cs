@@ -1,4 +1,5 @@
 using CryptoArbitrage.API.Models;
+using CryptoArbitrage.API.Models.Suggestions;
 
 namespace CryptoArbitrage.API.Services.Streaming;
 
@@ -61,4 +62,9 @@ public interface ISignalRStreamingService
     /// Broadcast transaction history to a specific user
     /// </summary>
     Task BroadcastTransactionHistoryToUserAsync(string userId, List<TransactionDto> transactions, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcast exit signal to a specific user for a position
+    /// </summary>
+    Task BroadcastExitSignalToUserAsync(string userId, int positionId, ExitSignal signal, CancellationToken cancellationToken = default);
 }

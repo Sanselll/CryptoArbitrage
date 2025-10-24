@@ -50,6 +50,17 @@ export interface Position {
   openedAt: string;
   closedAt?: string;
   activeOpportunityId?: number;
+  // Entry snapshot fields for algorithmic suggester
+  entryFundingRate?: number;
+  entrySpread?: number;
+  entrySpotPrice?: number;
+  entryPerpPrice?: number;
+  profitTargetPercent?: number;
+  maxHoldingHours?: number;
+  entryConfidenceScore?: number;
+  recommendedStrategy?: string;
+  // Exit signals for this position (only for open positions)
+  exitSignals?: ExitSignal[];
 }
 
 export enum OpportunityStatus {
@@ -76,6 +87,75 @@ export enum LiquidityStatus {
   Good = 0,
   Medium = 1,
   Low = 2
+}
+
+// Algorithmic Suggestion Types
+export enum EntryRecommendation {
+  Skip = 0,
+  Hold = 1,
+  Buy = 2,
+  StrongBuy = 3
+}
+
+export enum RecommendedStrategyType {
+  FundingOnly = 0,
+  SpreadOnly = 1,
+  Hybrid = 2
+}
+
+export enum ExitConditionType {
+  ProfitTarget = 0,
+  FundingReversal = 1,
+  TimeLimit = 2,
+  MarketDegradation = 3
+}
+
+export enum ExitUrgency {
+  Low = 0,
+  Medium = 1,
+  High = 2,
+  Critical = 3
+}
+
+export interface ScoreBreakdown {
+  fundingQuality: number;
+  profitPotential: number;
+  spreadEfficiency: number;
+  marketQuality: number;
+  timeEfficiency: number;
+  riskScore: number;
+  executionSafety: number;
+  executionCostPercent: number;
+  profitAfterCosts: number;
+  overallConfidence?: number;
+  scoringFactors?: string[];
+}
+
+export interface OpportunitySuggestion {
+  confidenceScore: number;
+  recommendedStrategy: RecommendedStrategyType;
+  entryRecommendation: EntryRecommendation;
+  suggestedPositionSizeUsd: number;
+  suggestedLeverage: number;
+  suggestedHoldingPeriodHours: number;
+  profitTargetPercent: number;
+  maxHoldingHours: number;
+  scoreBreakdown: ScoreBreakdown;
+  reasoning: string;
+  scoringFactors: string[];
+  warnings: string[];
+}
+
+export interface ExitSignal {
+  conditionType: ExitConditionType;
+  isTriggered: boolean;
+  confidence: number;
+  urgency: ExitUrgency;
+  recommendedAction: string;
+  message: string;
+  currentValue?: number;
+  thresholdValue?: number;
+  generatedAt: string;
 }
 
 export interface ArbitrageOpportunity {
@@ -135,6 +215,9 @@ export interface ArbitrageOpportunity {
   orderbookDepthUsd?: number;
   liquidityStatus?: LiquidityStatus;
   liquidityWarning?: string;
+
+  // AI Suggestion
+  suggestion?: OpportunitySuggestion;
 
   status: OpportunityStatus;
   detectedAt: string;

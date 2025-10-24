@@ -1,4 +1,5 @@
 using CryptoArbitrage.API.Data.Entities;
+using CryptoArbitrage.API.Models.Suggestions;
 
 namespace CryptoArbitrage.API.Models;
 
@@ -84,6 +85,9 @@ public class ArbitrageOpportunityDto
     public ExecutionState? ExecutionState { get; set; }
     public DateTime? ExecutionStartedAt { get; set; }
     public decimal? ExecutionFundingEarned { get; set; }
+
+    // AI-driven trading suggestion (generated on-the-fly)
+    public OpportunitySuggestion? Suggestion { get; set; }
 
     // Computed unique key for frontend tracking (not stored in DB)
     public string UniqueKey => Strategy == ArbitrageStrategy.SpotPerpetual

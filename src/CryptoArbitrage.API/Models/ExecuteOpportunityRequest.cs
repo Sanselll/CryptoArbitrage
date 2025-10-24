@@ -1,4 +1,5 @@
 using CryptoArbitrage.API.Data.Entities;
+using CryptoArbitrage.API.Models.Suggestions;
 
 namespace CryptoArbitrage.API.Models;
 
@@ -22,4 +23,7 @@ public class ExecuteOpportunityRequest
     public decimal SpreadRate { get; set; } // The actual spread/difference
     public decimal AnnualizedSpread { get; set; } // Annualized spread percentage
     public decimal EstimatedProfitPercentage { get; set; } // Estimated profit %
+
+    // Optional AI-generated suggestion for exit monitoring
+    public OpportunitySuggestion? Suggestion { get; set; }
 }

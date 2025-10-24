@@ -7,6 +7,7 @@ import { Button } from './ui/Button';
 import { EmptyState } from './ui/EmptyState';
 import { LoadingOverlay } from './ui/LoadingOverlay';
 import { ExchangeBadge } from './ui/ExchangeBadge';
+import { SuggestionBadge } from './ui/SuggestionBadge';
 import { AlertDialog, ConfirmDialog } from './ui/Dialog';
 import {
   Table,
@@ -106,7 +107,7 @@ const formatExecutionTime = (openedAt: string) => {
 };
 
 type SortField = 'spread' | 'priceSpread24h' | 'priceSpread3d' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
-  | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d';
+  | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d' | 'ai';
 type SortDirection = 'asc' | 'desc';
 
 export const OpportunitiesList = () => {
@@ -265,6 +266,10 @@ export const OpportunitiesList = () => {
         case 'fundBreakEven3d':
           aValue = a.fundBreakEvenTime3dProj ?? Infinity;
           bValue = b.fundBreakEvenTime3dProj ?? Infinity;
+          break;
+        case 'ai':
+          aValue = a.suggestion?.confidenceScore ?? -Infinity;
+          bValue = b.suggestion?.confidenceScore ?? -Infinity;
           break;
         default:
           aValue = a.fundApr;
@@ -657,6 +662,18 @@ export const OpportunitiesList = () => {
                           <ArrowUpDown className="w-3 h-3" />
                         )}
                       </div></TableHead>
+                <TableHead
+                  className="sticky right-[100px] z-40 bg-binance-bg-secondary border-l border-binance-border text-center cursor-pointer hover:bg-binance-bg-tertiary"
+                  title="AI confidence score and recommendation"
+                  onClick={() => handleSort('ai')}
+                >
+                  <div className="flex items-center justify-center gap-1">
+                    AI
+                    {sortField === 'ai' && (
+                      <ArrowUpDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right" title="execute or view opportunity details">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -922,6 +939,13 @@ export const OpportunitiesList = () => {
                         </Badge>
                       ) : (
                         <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
+                      )}
+                    </TableCell>
+                    <TableCell className={`sticky right-[100px] z-20 border-l border-binance-border text-center ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                      {opp.suggestion ? (
+                        <SuggestionBadge suggestion={opp.suggestion} />
+                      ) : (
+                        <span className="text-xs text-binance-text-secondary">--</span>
                       )}
                     </TableCell>
                     <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>

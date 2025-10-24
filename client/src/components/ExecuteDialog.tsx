@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { X, DollarSign, TrendingUp, Wallet, AlertCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, DollarSign, TrendingUp, Wallet, AlertCircle, Brain, Target, Clock, BarChart3, AlertTriangle } from 'lucide-react';
 import { Button } from './ui/Button';
 import { LoadingOverlay } from './ui/LoadingOverlay';
 import { ExchangeBadge } from './ui/ExchangeBadge';
 import { useArbitrageStore } from '../stores/arbitrageStore';
+import { OpportunitySuggestion, EntryRecommendation, RecommendedStrategyType } from '../types/index';
 
 interface ExecuteDialogProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ interface ExecuteDialogProps {
     shortFundingRate?: number;
     annualizedSpread?: number;
     estimatedProfitPercentage?: number;
+    suggestion?: OpportunitySuggestion;
   };
 }
 
@@ -33,11 +35,59 @@ export interface ExecutionParams {
   takeProfitPercentage?: number;
 }
 
+// Helper function to get recommendation label
+const getRecommendationLabel = (recommendation: EntryRecommendation): string => {
+  switch (recommendation) {
+    case EntryRecommendation.StrongBuy: return 'Strong Buy';
+    case EntryRecommendation.Buy: return 'Buy';
+    case EntryRecommendation.Hold: return 'Hold';
+    case EntryRecommendation.Skip: return 'Skip';
+    default: return 'Unknown';
+  }
+};
+
+// Helper function to get strategy label
+const getStrategyLabel = (strategy: RecommendedStrategyType): { label: string; icon: string } => {
+  switch (strategy) {
+    case RecommendedStrategyType.FundingOnly:
+      return { label: 'Funding Rate Arbitrage', icon: '💰' };
+    case RecommendedStrategyType.SpreadOnly:
+      return { label: 'Price Spread Arbitrage', icon: '📊' };
+    case RecommendedStrategyType.Hybrid:
+      return { label: 'Hybrid Strategy', icon: '🔄' };
+    default:
+      return { label: 'Unknown', icon: '❓' };
+  }
+};
+
+// Helper to get recommendation color class
+const getRecommendationColor = (recommendation: EntryRecommendation): string => {
+  switch (recommendation) {
+    case EntryRecommendation.StrongBuy: return 'text-green-400';
+    case EntryRecommendation.Buy: return 'text-blue-400';
+    case EntryRecommendation.Hold: return 'text-yellow-400';
+    case EntryRecommendation.Skip: return 'text-red-400';
+    default: return 'text-gray-400';
+  }
+};
+
 export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecuting = false }: ExecuteDialogProps) => {
-  const [positionSize, setPositionSize] = useState<number>(10);
-  const [positionSizeInput, setPositionSizeInput] = useState<string>('10');
-  const [leverage, setLeverage] = useState<number>(1);
+  const suggestion = opportunity.suggestion;
+
+  // Initialize with AI suggestions if available, otherwise use defaults
+  const [positionSize, setPositionSize] = useState<number>(suggestion?.suggestedPositionSizeUsd || 10);
+  const [positionSizeInput, setPositionSizeInput] = useState<string>((suggestion?.suggestedPositionSizeUsd || 10).toString());
+  const [leverage, setLeverage] = useState<number>(suggestion?.suggestedLeverage || 1);
   const { balances } = useArbitrageStore();
+
+  // Update form when suggestion changes
+  useEffect(() => {
+    if (suggestion) {
+      setPositionSize(suggestion.suggestedPositionSizeUsd);
+      setPositionSizeInput(suggestion.suggestedPositionSizeUsd.toString());
+      setLeverage(suggestion.suggestedLeverage);
+    }
+  }, [suggestion]);
 
   if (!isOpen) return null;
 
@@ -141,6 +191,89 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
           </button>
         </div>
 
+        {/* AI Recommendation Section */}
+        {suggestion && (
+          <div className="border-b border-binance-border bg-gradient-to-br from-blue-500/10 to-purple-500/10">
+            <div className="p-2">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Brain className="w-3 h-3 text-blue-400" />
+                  <h3 className="text-[10px] font-bold text-binance-text">AI Suggestion</h3>
+                  <span className="text-lg">{getStrategyLabel(suggestion.recommendedStrategy).icon}</span>
+                </div>
+                <div className="text-right">
+                  <div className={`text-[11px] font-bold ${getRecommendationColor(suggestion.entryRecommendation)}`}>
+                    {getRecommendationLabel(suggestion.entryRecommendation)}
+                  </div>
+                  <div className="text-[8px] text-binance-text-secondary">
+                    Score: {Math.round(suggestion.confidenceScore)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Score Breakdown - 2 columns */}
+              <div className="grid grid-cols-2 gap-1 mb-1.5">
+                {Object.entries(suggestion.scoreBreakdown)
+                  .filter(([key]) => ['fundingQuality', 'profitPotential', 'spreadEfficiency', 'marketQuality'].includes(key))
+                  .map(([key, value]) => {
+                    const label = key
+                      .replace(/([A-Z])/g, ' $1')
+                      .replace(/^./, (str) => str.toUpperCase())
+                      .replace('Spread Efficiency', 'Spread')
+                      .replace('Market Quality', 'Market');
+                    const percentage = Math.round(value as number);
+                    return (
+                      <div key={key} className="flex items-center gap-1">
+                        <div className="text-[8px] text-binance-text-secondary w-12">{label}</div>
+                        <div className="flex-1 h-0.5 bg-binance-bg-secondary rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${
+                              percentage >= 80 ? 'bg-green-500' :
+                              percentage >= 60 ? 'bg-blue-500' :
+                              percentage >= 40 ? 'bg-yellow-500' : 'bg-red-500'
+                            }`}
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                        <div className="text-[8px] font-mono text-binance-text w-5 text-right">{percentage}</div>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              {/* AI Suggested Parameters - inline */}
+              <div className="flex items-center gap-2 text-[9px]">
+                <div className="flex items-center gap-0.5">
+                  <DollarSign className="w-2.5 h-2.5 text-binance-yellow" />
+                  <span className="text-binance-text-secondary">Size:</span>
+                  <span className="font-bold text-binance-text">${suggestion.suggestedPositionSizeUsd}</span>
+                </div>
+                <div className="flex items-center gap-0.5">
+                  <TrendingUp className="w-2.5 h-2.5 text-binance-yellow" />
+                  <span className="text-binance-text-secondary">Lev:</span>
+                  <span className="font-bold text-binance-text">{suggestion.suggestedLeverage}x</span>
+                </div>
+                <div className="flex items-center gap-0.5">
+                  <Target className="w-2.5 h-2.5 text-binance-yellow" />
+                  <span className="text-binance-text-secondary">Target:</span>
+                  <span className="font-bold text-green-400">{suggestion.profitTargetPercent.toFixed(1)}%</span>
+                </div>
+              </div>
+
+              {/* Warnings */}
+              {suggestion.warnings && suggestion.warnings.length > 0 && (
+                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-1 mt-1.5">
+                  <div className="flex items-center gap-0.5">
+                    <AlertTriangle className="w-2 h-2 text-yellow-400" />
+                    <span className="text-[8px] text-yellow-400/90">{suggestion.warnings[0]}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Compact Opportunity Info */}
         <div className="p-3 bg-binance-bg border-b border-binance-border">
           <div className="grid grid-cols-3 gap-2 text-[10px]">
@@ -236,9 +369,17 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
         <form onSubmit={handleSubmit} className="p-3 space-y-3">
           {/* Compact Position Size */}
           <div>
-            <label className="flex items-center gap-1 text-[11px] font-semibold text-binance-text mb-1">
-              <DollarSign className="w-3 h-3 text-binance-yellow" />
-              Position Size (USD)
+            <label className="flex items-center justify-between text-[11px] font-semibold text-binance-text mb-1">
+              <div className="flex items-center gap-1">
+                <DollarSign className="w-3 h-3 text-binance-yellow" />
+                Position Size (USD)
+              </div>
+              {suggestion && (
+                <div className="flex items-center gap-0.5 text-[9px] text-blue-400">
+                  <Brain className="w-2.5 h-2.5" />
+                  <span>AI suggested</span>
+                </div>
+              )}
             </label>
             <input
               type="text"
@@ -287,6 +428,12 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
               <div className="flex items-center gap-1">
                 <TrendingUp className="w-3 h-3 text-binance-yellow" />
                 Leverage
+                {suggestion && (
+                  <div className="flex items-center gap-0.5 text-[9px] text-blue-400 ml-1">
+                    <Brain className="w-2.5 h-2.5" />
+                    <span>AI</span>
+                  </div>
+                )}
               </div>
               <span className="text-base font-bold text-binance-yellow">
                 {leverage}x

@@ -1,4 +1,5 @@
 using CryptoArbitrage.API.Data.Entities;
+using CryptoArbitrage.API.Models.Suggestions;
 
 namespace CryptoArbitrage.API.Models;
 
@@ -24,4 +25,9 @@ public class PositionDto
     public DateTime OpenedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
     public int? ActiveOpportunityId { get; set; }
+
+    /// <summary>
+    /// Exit signals for this position (only populated for open positions)
+    /// </summary>
+    public List<ExitSignal>? ExitSignals { get; set; }
 }
