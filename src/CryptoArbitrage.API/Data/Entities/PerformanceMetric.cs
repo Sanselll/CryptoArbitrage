@@ -1,8 +1,16 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace CryptoArbitrage.API.Data.Entities;
 
 public class PerformanceMetric
 {
     public int Id { get; set; }
+
+    // Multi-user support
+    [Required]
+    public string UserId { get; set; } = string.Empty;
+    public ApplicationUser User { get; set; } = null!;
+
     public DateTime Date { get; set; }
     public decimal TotalPnL { get; set; }
     public decimal RealizedPnL { get; set; }

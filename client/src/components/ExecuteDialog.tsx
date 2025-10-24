@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { X, DollarSign, TrendingUp, Wallet, AlertCircle } from 'lucide-react';
 import { Button } from './ui/Button';
 import { LoadingOverlay } from './ui/LoadingOverlay';
-import { apiService, type ExecutionBalances } from '../services/apiService';
+import { ExchangeBadge } from './ui/ExchangeBadge';
+import { useArbitrageStore } from '../stores/arbitrageStore';
 
 interface ExecuteDialogProps {
   isOpen: boolean;
@@ -11,13 +12,15 @@ interface ExecuteDialogProps {
   isExecuting?: boolean;
   opportunity: {
     symbol: string;
-    strategy: number; // 1 = SpotPerpetual, 2 = CrossExchange
+    strategy: number; // 0 = SpotPerpetual, 1 = CrossExchange
     exchange?: string;
     longExchange?: string;
     shortExchange?: string;
     spotPrice?: number;
     perpetualPrice?: number;
     fundingRate?: number;
+    longFundingRate?: number;
+    shortFundingRate?: number;
     annualizedSpread?: number;
     estimatedProfitPercentage?: number;
   };
@@ -31,38 +34,15 @@ export interface ExecutionParams {
 }
 
 export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecuting = false }: ExecuteDialogProps) => {
-  const [positionSize, setPositionSize] = useState<number>(100);
-  const [positionSizeInput, setPositionSizeInput] = useState<string>('100');
+  const [positionSize, setPositionSize] = useState<number>(10);
+  const [positionSizeInput, setPositionSizeInput] = useState<string>('10');
   const [leverage, setLeverage] = useState<number>(1);
-  const [balances, setBalances] = useState<ExecutionBalances | null>(null);
-  const [loadingBalances, setLoadingBalances] = useState(false);
-  const [balanceError, setBalanceError] = useState<string | null>(null);
-
-  // Fetch balances when dialog opens
-  useEffect(() => {
-    // Determine the exchange to use (SpotPerp uses 'exchange', CrossExchange uses 'longExchange')
-    const exchangeName = opportunity.exchange || opportunity.longExchange;
-
-    if (isOpen && exchangeName) {
-      const fetchBalances = async () => {
-        setLoadingBalances(true);
-        setBalanceError(null);
-        try {
-          const data = await apiService.getExecutionBalances(exchangeName, leverage);
-          setBalances(data);
-        } catch (error: any) {
-          setBalanceError(error.message || 'Failed to fetch balances');
-        } finally {
-          setLoadingBalances(false);
-        }
-      };
-      fetchBalances();
-    }
-  }, [isOpen, opportunity.exchange, opportunity.longExchange, leverage]);
+  const { balances } = useArbitrageStore();
 
   if (!isOpen) return null;
 
-  const isSpotPerp = opportunity.strategy === 1;
+  const isSpotPerp = opportunity.strategy === 1; // 1 = SpotPerpetual
+  const isCrossFutures = opportunity.strategy === 0; // 0 = CrossExchange
 
   // Calculate the effective funding rate based on strategy
   const effectiveFundingRate = isSpotPerp
@@ -83,24 +63,51 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
     });
   };
 
-  // Calculate requirements
-  const requiredSpot = positionSize;
-  const requiredMargin = positionSize / leverage;
-  const totalRequired = balances?.isUnifiedAccount
-    ? requiredSpot + requiredMargin
-    : requiredSpot; // For Binance, spot and margin are separate
+  // Get balance for the relevant exchange(s)
+  const getExchangeBalance = (exchangeName: string) => {
+    return balances.find((b) => b.exchange === exchangeName);
+  };
 
-  // Check if we have sufficient balance
-  const spotSufficient = balances ? balances.spotUsdtAvailable >= requiredSpot : false;
-  const marginSufficient = balances ? balances.futuresAvailable >= requiredMargin : false;
-  const totalSufficient = balances?.isUnifiedAccount
-    ? balances.totalAvailable >= totalRequired
-    : spotSufficient && marginSufficient;
+  const primaryExchange = opportunity.exchange || opportunity.longExchange || '';
+  const primaryBalance = getExchangeBalance(primaryExchange);
+
+  // For cross-futures, also get short exchange balance
+  const secondaryExchange = isCrossFutures ? (opportunity.shortExchange || '') : '';
+  const secondaryBalance = isCrossFutures ? getExchangeBalance(secondaryExchange) : null;
+
+  // Calculate requirements based on strategy
+  const requiredSpot = isSpotPerp ? positionSize : 0;
+  const requiredMargin = positionSize / leverage;
+
+  // For spot-perp: need both spot and futures margin
+  // For cross-futures: only need futures margin on both exchanges
+  let canExecute = false;
+  let balanceMessage = '';
+
+  if (isSpotPerp && primaryBalance) {
+    const spotSufficient = primaryBalance.spotAvailableUsd >= requiredSpot;
+    const marginSufficient = primaryBalance.futuresAvailableUsd >= requiredMargin;
+    canExecute = spotSufficient && marginSufficient;
+    if (!canExecute) {
+      balanceMessage = !spotSufficient
+        ? `Insufficient spot USDT (need $${requiredSpot.toFixed(2)})`
+        : `Insufficient futures margin (need $${requiredMargin.toFixed(2)})`;
+    }
+  } else if (isCrossFutures && primaryBalance && secondaryBalance) {
+    const longSufficient = primaryBalance.futuresAvailableUsd >= requiredMargin;
+    const shortSufficient = secondaryBalance.futuresAvailableUsd >= requiredMargin;
+    canExecute = longSufficient && shortSufficient;
+    if (!canExecute) {
+      balanceMessage = !longSufficient
+        ? `Insufficient ${primaryExchange} futures (need $${requiredMargin.toFixed(2)})`
+        : `Insufficient ${secondaryExchange} futures (need $${requiredMargin.toFixed(2)})`;
+    }
+  }
 
   // Validate input is not empty and is a valid number
   const isValidInput = positionSizeInput !== '' && !isNaN(parseFloat(positionSizeInput)) && parseFloat(positionSizeInput) > 0;
 
-  const canExecute = !loadingBalances && !balanceError && totalSufficient && isValidInput && positionSize >= 100 && positionSize <= 10000;
+  canExecute = canExecute && isValidInput && positionSize >= 10 && positionSize <= 10000;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm">
@@ -110,10 +117,21 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
         <div className="flex items-center justify-between p-3 border-b border-binance-border">
           <div>
             <h2 className="text-base font-bold text-binance-text">Execute {opportunity.symbol}</h2>
-            <p className="text-[10px] text-binance-text-secondary">
-              {isSpotPerp ? 'Spot-Perpetual' : 'Cross-Exchange'} •
-              {isSpotPerp ? opportunity.exchange : `${opportunity.longExchange} / ${opportunity.shortExchange}`}
-            </p>
+            <div className="flex items-center gap-1.5 mt-1">
+              <span className="text-[10px] text-binance-text-secondary">
+                {isSpotPerp ? 'Spot-Perpetual' : 'Cross-Exchange'}
+              </span>
+              <span className="text-binance-text-secondary">•</span>
+              {isSpotPerp ? (
+                <ExchangeBadge exchange={opportunity.exchange || ''} />
+              ) : (
+                <div className="flex items-center gap-1">
+                  <ExchangeBadge exchange={opportunity.longExchange || ''} />
+                  <span className="text-[10px] text-binance-text-secondary">/</span>
+                  <ExchangeBadge exchange={opportunity.shortExchange || ''} />
+                </div>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -150,64 +168,69 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
         </div>
 
         {/* Balance Display */}
-        {loadingBalances ? (
-          <div className="p-3 bg-binance-bg-secondary border-b border-binance-border">
-            <p className="text-[10px] text-binance-text-secondary">Loading balances...</p>
-          </div>
-        ) : balanceError ? (
-          <div className="p-3 bg-binance-bg-secondary border-b border-binance-border">
-            <div className="flex items-center gap-1 text-binance-red">
-              <AlertCircle className="w-3 h-3" />
-              <p className="text-[10px]">{balanceError}</p>
-            </div>
-          </div>
-        ) : balances ? (
+        {balances.length > 0 && (
           <div className="p-3 bg-binance-bg-secondary border-b border-binance-border">
             <div className="flex items-center gap-1 mb-2">
               <Wallet className="w-3 h-3 text-binance-yellow" />
               <h3 className="text-[10px] font-semibold text-binance-text">Available Balance</h3>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-[10px]">
-              {balances.isUnifiedAccount ? (
-                <>
-                  <div>
-                    <p className="text-binance-text-secondary">Total Available</p>
-                    <p className={`font-mono font-bold ${totalSufficient ? 'text-binance-green' : 'text-binance-red'}`}>
-                      ${balances.totalAvailable.toFixed(2)}
-                    </p>
+
+            {/* Spot-Perpetual: Show Spot USDT and Futures Margin */}
+            {isSpotPerp && primaryBalance && (
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div>
+                  <div className="flex items-center gap-1 mb-0.5">
+                    <ExchangeBadge exchange={primaryExchange} size="small" />
+                    <span className="text-[8px] text-binance-text-secondary">Spot</span>
                   </div>
-                  <div>
-                    <p className="text-binance-text-secondary">Required</p>
-                    <p className="font-mono font-bold text-binance-text">
-                      ${totalRequired.toFixed(2)}
-                    </p>
+                  <p className={`font-mono font-bold ${primaryBalance.spotAvailableUsd >= requiredSpot ? 'text-binance-green' : 'text-binance-red'}`}>
+                    ${primaryBalance.spotAvailableUsd.toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <div className="flex items-center gap-1 mb-0.5">
+                    <ExchangeBadge exchange={primaryExchange} size="small" />
+                    <span className="text-[8px] text-binance-text-secondary">Futures</span>
                   </div>
-                </>
-              ) : (
-                <>
-                  <div>
-                    <p className="text-binance-text-secondary">Spot USDT</p>
-                    <p className={`font-mono font-bold ${spotSufficient ? 'text-binance-green' : 'text-binance-red'}`}>
-                      ${balances.spotUsdtAvailable.toFixed(2)}
-                    </p>
+                  <p className={`font-mono font-bold ${primaryBalance.futuresAvailableUsd >= requiredMargin ? 'text-binance-green' : 'text-binance-red'}`}>
+                    ${primaryBalance.futuresAvailableUsd.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Cross-Futures: Show both exchanges' futures balances */}
+            {isCrossFutures && primaryBalance && secondaryBalance && (
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div>
+                  <div className="flex items-center gap-1 mb-0.5">
+                    <ExchangeBadge exchange={primaryExchange} size="small" />
+                    <span className="text-[8px] text-binance-text-secondary">Futures</span>
                   </div>
-                  <div>
-                    <p className="text-binance-text-secondary">Futures Margin</p>
-                    <p className={`font-mono font-bold ${marginSufficient ? 'text-binance-green' : 'text-binance-red'}`}>
-                      ${balances.futuresAvailable.toFixed(2)}
-                    </p>
+                  <p className={`font-mono font-bold ${primaryBalance.futuresAvailableUsd >= requiredMargin ? 'text-binance-green' : 'text-binance-red'}`}>
+                    ${primaryBalance.futuresAvailableUsd.toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <div className="flex items-center gap-1 mb-0.5">
+                    <ExchangeBadge exchange={secondaryExchange} size="small" />
+                    <span className="text-[8px] text-binance-text-secondary">Futures</span>
                   </div>
-                </>
-              )}
-            </div>
-            {!totalSufficient && (
+                  <p className={`font-mono font-bold ${secondaryBalance.futuresAvailableUsd >= requiredMargin ? 'text-binance-green' : 'text-binance-red'}`}>
+                    ${secondaryBalance.futuresAvailableUsd.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {balanceMessage && (
               <div className="mt-2 flex items-start gap-1 text-binance-red">
                 <AlertCircle className="w-3 h-3 mt-0.5" />
-                <p className="text-[10px]">Insufficient balance for this position size</p>
+                <p className="text-[10px]">{balanceMessage}</p>
               </div>
             )}
           </div>
-        ) : null}
+        )}
 
         {/* Compact Execution Form */}
         <form onSubmit={handleSubmit} className="p-3 space-y-3">
@@ -230,16 +253,16 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
                   if (!isNaN(parsed) && parsed > 0) {
                     setPositionSize(parsed);
                   } else if (value === '') {
-                    setPositionSize(100); // Default when empty
+                    setPositionSize(10); // Default when empty
                   }
                 }
               }}
               onBlur={() => {
                 // Ensure valid number on blur
                 const parsed = parseFloat(positionSizeInput);
-                if (isNaN(parsed) || parsed < 100) {
-                  setPositionSize(100);
-                  setPositionSizeInput('100');
+                if (isNaN(parsed) || parsed < 10) {
+                  setPositionSize(10);
+                  setPositionSizeInput('10');
                 } else if (parsed > 10000) {
                   setPositionSize(10000);
                   setPositionSizeInput('10000');
@@ -249,12 +272,12 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
                 }
               }}
               className="w-full px-2 py-1.5 bg-binance-bg border border-binance-border rounded text-binance-text font-mono text-sm focus:outline-none focus:ring-1 focus:ring-binance-yellow disabled:opacity-50"
-              placeholder="100"
+              placeholder="10"
               required
               disabled={isExecuting}
             />
             <p className="text-[10px] text-binance-text-secondary mt-0.5">
-              Min: $100 • Max: ${balances?.maxPositionSize.toFixed(0) || '10,000'}
+              Min: $10 • Max: $10,000
             </p>
           </div>
 
@@ -288,18 +311,37 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
 
           {/* Compact Summary */}
           <div className="bg-binance-bg border border-binance-border rounded p-2 space-y-1 text-[10px]">
-            <div className="flex justify-between">
-              <span className="text-binance-text-secondary">Spot Purchase:</span>
-              <span className="font-mono font-bold text-binance-text">${requiredSpot.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-binance-text-secondary">Perp Margin:</span>
-              <span className="font-mono font-bold text-binance-text">${requiredMargin.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between border-t border-binance-border pt-1">
-              <span className="text-binance-text">Total Required:</span>
-              <span className="font-mono font-bold text-binance-text">${totalRequired.toFixed(2)}</span>
-            </div>
+            {isSpotPerp ? (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-binance-text-secondary">Spot Purchase:</span>
+                  <span className="font-mono font-bold text-binance-text">${requiredSpot.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-binance-text-secondary">Perp Margin:</span>
+                  <span className="font-mono font-bold text-binance-text">${requiredMargin.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between border-t border-binance-border pt-1">
+                  <span className="text-binance-text">Total Required:</span>
+                  <span className="font-mono font-bold text-binance-text">${(requiredSpot + requiredMargin).toFixed(2)}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-binance-text-secondary">{primaryExchange} Margin:</span>
+                  <span className="font-mono font-bold text-binance-text">${requiredMargin.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-binance-text-secondary">{secondaryExchange} Margin:</span>
+                  <span className="font-mono font-bold text-binance-text">${requiredMargin.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between border-t border-binance-border pt-1">
+                  <span className="text-binance-text">Total Margin:</span>
+                  <span className="font-mono font-bold text-binance-text">${(requiredMargin * 2).toFixed(2)}</span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Compact Actions */}
@@ -320,7 +362,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
               size="sm"
               className="flex-1 h-8 text-[11px]"
               disabled={isExecuting || !canExecute}
-              title={!canExecute && !isExecuting ? 'Insufficient balance or invalid parameters' : ''}
+              title={!canExecute && !isExecuting ? balanceMessage || 'Invalid parameters' : ''}
             >
               {isExecuting ? 'Executing...' : 'Execute'}
             </Button>

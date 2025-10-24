@@ -1,37 +1,81 @@
 import * as signalR from '@microsoft/signalr';
-import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance } from '../types/index';
+import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Notification, Order, Trade, Transaction } from '../types/index';
+import { notificationService } from './notificationService.tsx';
+
+type TradingMode = 'Demo' | 'Real';
+
+// Get Hub URL based on trading mode from sessionStorage
+const getHubUrl = (): string => {
+  const mode = sessionStorage.getItem('trading_mode') as TradingMode | null;
+
+  const apiBaseUrl = mode === 'Real'
+    ? import.meta.env.VITE_API_BASE_URL_REAL || 'http://localhost:5053/api'
+    : import.meta.env.VITE_API_BASE_URL_DEMO || 'http://localhost:5052/api';
+
+  return apiBaseUrl.replace('/api', '/hubs/arbitrage');
+};
 
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
+  private connecting: boolean = false;
   private callbacks = {
     onFundingRates: [] as ((data: FundingRate[]) => void)[],
     onPositions: [] as ((data: Position[]) => void)[],
     onOpportunities: [] as ((data: ArbitrageOpportunity[]) => void)[],
     onBalances: [] as ((data: AccountBalance[]) => void)[],
+    onOpenOrders: [] as ((data: Order[]) => void)[],
+    onOrderHistory: [] as ((data: Order[]) => void)[],
+    onTradeHistory: [] as ((data: Trade[]) => void)[],
+    onTransactionHistory: [] as ((data: Transaction[]) => void)[],
     onPnLUpdate: [] as ((data: { totalPnL: number; todayPnL: number }) => void)[],
     onAlert: [] as ((data: { message: string; severity: string; timestamp: string }) => void)[],
+    onNotification: [] as ((data: Notification) => void)[],
   };
 
-  async connect(url: string = 'http://localhost:5052/arbitragehub') {
+  async connect() {
+    // Prevent concurrent connection attempts
+    if (this.connecting) {
+      console.log('Connection already in progress');
+      return;
+    }
+
     if (this.connection?.state === signalR.HubConnectionState.Connected) {
       console.log('Already connected');
       return;
     }
 
-    this.connection = new signalR.HubConnectionBuilder()
-      .withUrl(url)
-      .withAutomaticReconnect()
-      .configureLogging(signalR.LogLevel.Information)
-      .build();
-
-    this.setupEventHandlers();
+    this.connecting = true;
 
     try {
+      // Use single jwt_token key for all modes
+      const token = localStorage.getItem('jwt_token');
+      if (!token) {
+        console.error('No authentication token available');
+        this.connecting = false;
+        throw new Error('Not authenticated');
+      }
+
+      const url = getHubUrl();
+      console.log('Connecting to SignalR hub:', url);
+
+      this.connection = new signalR.HubConnectionBuilder()
+        .withUrl(url, {
+          // CRITICAL: Send JWT token with connection
+          accessTokenFactory: () => token
+        })
+        .withAutomaticReconnect()
+        .configureLogging(signalR.LogLevel.Information)
+        .build();
+
+      this.setupEventHandlers();
+
       await this.connection.start();
-      console.log('SignalR Connected');
+      this.connecting = false;
+      console.log('SignalR Connected to:', url);
     } catch (err) {
+      this.connecting = false;
       console.error('SignalR Connection Error: ', err);
-      setTimeout(() => this.connect(url), 5000);
+      setTimeout(() => this.connect(), 5000);
     }
 
     this.connection.onreconnecting(() => {
@@ -44,7 +88,7 @@ class SignalRService {
 
     this.connection.onclose(() => {
       console.log('SignalR Disconnected');
-      setTimeout(() => this.connect(url), 5000);
+      setTimeout(() => this.connect(), 5000);
     });
   }
 
@@ -73,6 +117,34 @@ class SignalRService {
 
     this.connection.on('ReceiveAlert', (data: { message: string; severity: string; timestamp: string }) => {
       this.callbacks.onAlert.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveNotification', (data: Notification) => {
+      console.log('[SignalR] ReceiveNotification event:', {
+        id: data.id,
+        type: data.type,
+        severity: data.severity,
+        title: data.title,
+        timestamp: new Date().toISOString()
+      });
+      notificationService.showNotification(data);
+      this.callbacks.onNotification.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveOpenOrders', (data: Order[]) => {
+      this.callbacks.onOpenOrders.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveOrderHistory', (data: Order[]) => {
+      this.callbacks.onOrderHistory.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveTradeHistory', (data: Trade[]) => {
+      this.callbacks.onTradeHistory.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveTransactionHistory', (data: Transaction[]) => {
+      this.callbacks.onTransactionHistory.forEach(cb => cb(data));
     });
   }
 
@@ -115,6 +187,41 @@ class SignalRService {
     this.callbacks.onAlert.push(callback);
     return () => {
       this.callbacks.onAlert = this.callbacks.onAlert.filter(cb => cb !== callback);
+    };
+  }
+
+  onNotification(callback: (data: Notification) => void) {
+    this.callbacks.onNotification.push(callback);
+    return () => {
+      this.callbacks.onNotification = this.callbacks.onNotification.filter(cb => cb !== callback);
+    };
+  }
+
+  onOpenOrders(callback: (data: Order[]) => void) {
+    this.callbacks.onOpenOrders.push(callback);
+    return () => {
+      this.callbacks.onOpenOrders = this.callbacks.onOpenOrders.filter(cb => cb !== callback);
+    };
+  }
+
+  onOrderHistory(callback: (data: Order[]) => void) {
+    this.callbacks.onOrderHistory.push(callback);
+    return () => {
+      this.callbacks.onOrderHistory = this.callbacks.onOrderHistory.filter(cb => cb !== callback);
+    };
+  }
+
+  onTradeHistory(callback: (data: Trade[]) => void) {
+    this.callbacks.onTradeHistory.push(callback);
+    return () => {
+      this.callbacks.onTradeHistory = this.callbacks.onTradeHistory.filter(cb => cb !== callback);
+    };
+  }
+
+  onTransactionHistory(callback: (data: Transaction[]) => void) {
+    this.callbacks.onTransactionHistory.push(callback);
+    return () => {
+      this.callbacks.onTransactionHistory = this.callbacks.onTransactionHistory.filter(cb => cb !== callback);
     };
   }
 
