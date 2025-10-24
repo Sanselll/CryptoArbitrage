@@ -15,7 +15,7 @@ public class UserDataRepository : BaseMemoryCacheRepository<UserDataSnapshot>
     public UserDataRepository(
         IMemoryCache cache,
         ILogger<UserDataRepository> logger)
-        : base(cache, logger, enablePatternMatching: false)
+        : base(cache, logger, enablePatternMatching: true)
     {
     }
 

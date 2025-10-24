@@ -105,7 +105,7 @@ const formatExecutionTime = (openedAt: string) => {
   return `${hours}h ${minutes}m ${seconds}s`;
 };
 
-type SortField = 'spread' | 'priceSpread24h' | 'priceSpread3d' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
+type SortField = 'spread' | 'priceSpread24h' | 'priceSpread3d' | 'spread30Sample' | 'spreadVolStdDev' | 'spreadVolCv' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
   | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d';
 type SortDirection = 'asc' | 'desc';
 
@@ -217,6 +217,18 @@ export const OpportunitiesList = () => {
         case 'priceSpread3d':
           aValue = a.priceSpread3dAvg ?? -Infinity;
           bValue = b.priceSpread3dAvg ?? -Infinity;
+          break;
+        case 'spread30Sample':
+          aValue = a.spread30SampleAvg ?? -Infinity;
+          bValue = b.spread30SampleAvg ?? -Infinity;
+          break;
+        case 'spreadVolStdDev':
+          aValue = a.spreadVolatilityStdDev ?? -Infinity;
+          bValue = b.spreadVolatilityStdDev ?? -Infinity;
+          break;
+        case 'spreadVolCv':
+          aValue = a.spreadVolatilityCv ?? -Infinity;
+          bValue = b.spreadVolatilityCv ?? -Infinity;
           break;
         case 'fundProfit8h':
           aValue = a.fundProfit8h;
@@ -588,6 +600,27 @@ export const OpportunitiesList = () => {
                         )}
                       </div></TableHead>
                 <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('spread30Sample')} title="30-sample average spread (%)"><div className="flex items-center justify-end gap-1">
+                        Spread (30 Avg)
+                        {sortField === 'spread30Sample' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('spreadVolStdDev')} title="spread volatility - standard deviation"><div className="flex items-center justify-end gap-1">
+                        Spread Vol (σ)
+                        {sortField === 'spreadVolStdDev' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
+                  onClick={() => handleSort('spreadVolCv')} title="spread volatility - coefficient of variation (relative volatility)"><div className="flex items-center justify-end gap-1">
+                        Spread Vol (CV)
+                        {sortField === 'spreadVolCv' && (
+                          <ArrowUpDown className="w-3 h-3" />
+                        )}
+                      </div></TableHead>
+                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
                   onClick={() => handleSort('posCost')} title="cost to open + close position (trading fees %)"><div className="flex items-center justify-end gap-1">
                         Pos Cost
                         {sortField === 'posCost' && (
@@ -837,6 +870,31 @@ export const OpportunitiesList = () => {
                       }`}>
                         {opp.priceSpread3dAvg !== null && opp.priceSpread3dAvg !== undefined
                           ? `${opp.priceSpread3dAvg >= 0 ? '+' : ''}${opp.priceSpread3dAvg.toFixed(4)}%`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className={`font-mono text-[11px] ${
+                        opp.spread30SampleAvg !== null && opp.spread30SampleAvg !== undefined
+                          ? opp.spread30SampleAvg >= 0 ? 'text-binance-green' : 'text-binance-red'
+                          : 'text-binance-text-secondary'
+                      }`}>
+                        {opp.spread30SampleAvg !== null && opp.spread30SampleAvg !== undefined
+                          ? `${opp.spread30SampleAvg >= 0 ? '+' : ''}${(opp.spread30SampleAvg * 100).toFixed(4)}%`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {opp.spreadVolatilityStdDev !== null && opp.spreadVolatilityStdDev !== undefined
+                          ? `${(opp.spreadVolatilityStdDev * 100).toFixed(4)}%`
+                          : '--'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right" rowSpan={2}>
+                      <span className="font-mono text-[11px] text-binance-text-secondary">
+                        {opp.spreadVolatilityCv !== null && opp.spreadVolatilityCv !== undefined
+                          ? `${opp.spreadVolatilityCv.toFixed(4)}`
                           : '--'}
                       </span>
                     </TableCell>

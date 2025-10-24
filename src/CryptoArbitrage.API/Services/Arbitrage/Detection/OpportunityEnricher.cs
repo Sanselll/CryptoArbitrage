@@ -141,6 +141,9 @@ public class OpportunityEnricher : IHostedService
 
             // Phase 2: Apply liquidity metrics
             await EnrichLiquidityAsync(opportunity, liquidityMetricsDict);
+
+            // Phase 3: Calculate spread metrics from price history (Cross-Exchange only)
+            await EnrichSpreadMetricsAsync(opportunity, marketDataSnapshot);
         }
         catch (Exception ex)
         {
@@ -335,6 +338,110 @@ public class OpportunityEnricher : IHostedService
 
         // Otherwise, it's Medium liquidity
         return LiquidityStatus.Medium;
+    }
+
+    /// <summary>
+    /// Enriches opportunity with spread metrics from price history (Cross-Exchange only)
+    /// </summary>
+    private Task EnrichSpreadMetricsAsync(
+        ArbitrageOpportunityDto opportunity,
+        MarketDataSnapshot? marketDataSnapshot)
+    {
+        try
+        {
+            // Only process Cross-Exchange opportunities
+            if (opportunity.Strategy != ArbitrageStrategy.CrossExchange)
+            {
+                return Task.CompletedTask;
+            }
+
+            if (marketDataSnapshot?.PerpPriceHistory == null)
+            {
+                _logger.LogDebug("No price history available for spread metrics enrichment");
+                return Task.CompletedTask;
+            }
+
+            // Get price histories for long and short exchanges
+            PriceHistoryDto? longHistory = null;
+            PriceHistoryDto? shortHistory = null;
+
+            if (marketDataSnapshot.PerpPriceHistory.TryGetValue(opportunity.LongExchange, out var longExchangeHistory))
+            {
+                longExchangeHistory.TryGetValue(opportunity.Symbol, out longHistory);
+            }
+
+            if (marketDataSnapshot.PerpPriceHistory.TryGetValue(opportunity.ShortExchange, out var shortExchangeHistory))
+            {
+                shortExchangeHistory.TryGetValue(opportunity.Symbol, out shortHistory);
+            }
+
+            // Both histories must exist and have matching sample counts
+            if (longHistory == null || shortHistory == null)
+            {
+                _logger.LogDebug("Price history not available for {Symbol} on {LongExchange} or {ShortExchange}",
+                    opportunity.Symbol, opportunity.LongExchange, opportunity.ShortExchange);
+                return Task.CompletedTask;
+            }
+
+            if (longHistory.SampleCount == 0 || shortHistory.SampleCount == 0)
+            {
+                _logger.LogDebug("Insufficient price history samples for {Symbol}", opportunity.Symbol);
+                return Task.CompletedTask;
+            }
+
+            // Calculate spreads for each sample pair
+            // Use the minimum count to ensure we have matching pairs
+            int sampleCount = Math.Min(longHistory.SampleCount, shortHistory.SampleCount);
+            var spreads = new List<decimal>();
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                var longPrice = longHistory.PriceHistory[i];
+                var shortPrice = shortHistory.PriceHistory[i];
+
+                // Spread = (ShortPrice - LongPrice) / LongPrice
+                if (longPrice > 0)
+                {
+                    var spread = (shortPrice - longPrice) / longPrice;
+                    spreads.Add(spread);
+                }
+            }
+
+            if (spreads.Count == 0)
+            {
+                return Task.CompletedTask;
+            }
+
+            // Calculate average spread
+            var avgSpread = spreads.Average();
+            opportunity.Spread30SampleAvg = avgSpread;
+
+            // Calculate standard deviation
+            var variance = spreads.Sum(s => (s - avgSpread) * (s - avgSpread)) / spreads.Count;
+            var stdDev = (decimal)Math.Sqrt((double)variance);
+            opportunity.SpreadVolatilityStdDev = stdDev;
+
+            // Calculate coefficient of variation (CV = StdDev / Mean)
+            // Avoid division by zero
+            if (Math.Abs(avgSpread) > 0.0000001m)
+            {
+                opportunity.SpreadVolatilityCv = stdDev / Math.Abs(avgSpread);
+            }
+
+            _logger.LogDebug(
+                "Enriched {Symbol} with spread metrics: Avg={Avg:P4}, StdDev={StdDev:P4}, CV={CV:F2} ({Samples} samples)",
+                opportunity.Symbol,
+                avgSpread,
+                stdDev,
+                opportunity.SpreadVolatilityCv,
+                spreads.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error enriching spread metrics for {Symbol}", opportunity.Symbol);
+        }
+
+        return Task.CompletedTask;
     }
 
     /// <summary>

@@ -949,6 +949,59 @@ public class BybitConnector : IExchangeConnector
         return balances;
     }
 
+    public async Task<FeeInfoDto> GetTradingFeesAsync()
+    {
+        if (_restClient == null)
+            throw new InvalidOperationException("Not connected to Bybit");
+
+        try
+        {
+            // Bybit API: GET /v5/account/fee-rate with category=linear
+            // Note: This returns fee rates for a specific symbol, so we'll use a common one like BTCUSDT
+            var feeRateResult = await _restClient.V5Api.Account.GetFeeRateAsync(Category.Linear, symbol: "BTCUSDT");
+
+            if (feeRateResult.Success && feeRateResult.Data != null && feeRateResult.Data.List.Any())
+            {
+                var feeData = feeRateResult.Data.List.First();
+
+                // Bybit returns fee rates as decimals (e.g., 0.0006 for 0.06%)
+                return new FeeInfoDto
+                {
+                    Exchange = ExchangeName,
+                    MakerFeeRate = feeData.MakerFeeRate,
+                    TakerFeeRate = feeData.TakerFeeRate,
+                    FeeTier = feeData.Symbol, // Use symbol as tier indicator
+                    CollectedAt = DateTime.UtcNow
+                };
+            }
+
+            // Fallback to default fees if API call fails
+            _logger.LogWarning("Failed to get fee info from Bybit, using defaults");
+            return new FeeInfoDto
+            {
+                Exchange = ExchangeName,
+                MakerFeeRate = 0.0002m, // 0.02% default maker
+                TakerFeeRate = 0.0006m, // 0.06% default taker (Bybit default)
+                FeeTier = "Unknown",
+                CollectedAt = DateTime.UtcNow
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching trading fees from Bybit");
+
+            // Return default fees on error
+            return new FeeInfoDto
+            {
+                Exchange = ExchangeName,
+                MakerFeeRate = 0.0002m, // 0.02% default maker
+                TakerFeeRate = 0.0006m, // 0.06% default taker
+                FeeTier = "Error",
+                CollectedAt = DateTime.UtcNow
+            };
+        }
+    }
+
     public async Task SubscribeToFundingRatesAsync(Action<FundingRateDto> onUpdate)
     {
         if (_socketClient == null)

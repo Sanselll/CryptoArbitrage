@@ -252,6 +252,7 @@ builder.Services.AddSingleton(sp =>
 // Repositories
 builder.Services.AddSingleton<IDataRepository<FundingRateDto>, FundingRateRepository>();
 builder.Services.AddSingleton<IDataRepository<MarketDataSnapshot>, MarketDataRepository>();
+builder.Services.AddSingleton<IDataRepository<PriceHistoryDto>, MemoryDataRepository<PriceHistoryDto>>();
 builder.Services.AddSingleton<IDataRepository<UserDataSnapshot>, UserDataRepository>();
 builder.Services.AddSingleton<IDataRepository<LiquidityMetricsDto>, LiquidityMetricsRepository>();
 builder.Services.AddSingleton<IDataRepository<ArbitrageOpportunityDto>, OpportunityRepository>();

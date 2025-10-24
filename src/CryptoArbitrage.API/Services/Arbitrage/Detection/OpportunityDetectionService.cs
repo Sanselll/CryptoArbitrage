@@ -14,18 +14,104 @@ public class OpportunityDetectionService : IOpportunityDetectionService
     private readonly ArbitrageConfig _config;
     private readonly ILogger<OpportunityDetectionService> _logger;
     private readonly IDataRepository<Dictionary<string, List<HistoricalPriceDto>>> _historicalPriceRepository;
+    private readonly IDataRepository<UserDataSnapshot> _userDataRepository;
 
-    // Trading fees: 0.05% taker fee per trade × 4 trades (open long, open short, close long, close short) = 0.2%
-    private const decimal POSITION_COST_PERCENT = 0.2m;
+    // Default trading fees fallback: 0.05% taker fee per trade × 4 trades (open long, open short, close long, close short) = 0.2%
+    private const decimal DEFAULT_POSITION_COST_PERCENT = 0.2m;
 
     public OpportunityDetectionService(
         ArbitrageConfig config,
         ILogger<OpportunityDetectionService> logger,
-        IDataRepository<Dictionary<string, List<HistoricalPriceDto>>> historicalPriceRepository)
+        IDataRepository<Dictionary<string, List<HistoricalPriceDto>>> historicalPriceRepository,
+        IDataRepository<UserDataSnapshot> userDataRepository)
     {
         _config = config;
         _logger = logger;
         _historicalPriceRepository = historicalPriceRepository;
+        _userDataRepository = userDataRepository;
+    }
+
+    /// <summary>
+    /// Calculate position cost percentage based on collected fee data
+    /// Formula: (TakerFee × 2) per exchange (open + close)
+    /// </summary>
+    private async Task<decimal> CalculatePositionCostPercentAsync(bool isCrossExchange, string? exchange1 = null, string? exchange2 = null)
+    {
+        try
+        {
+            // Fetch all user data from repository
+            var allUserData = await _userDataRepository.GetByPatternAsync("userdata:*");
+
+            if (allUserData == null || !allUserData.Any())
+            {
+                _logger.LogWarning("No user data available for fee calculation, using default {DefaultFee}%", DEFAULT_POSITION_COST_PERCENT);
+                return DEFAULT_POSITION_COST_PERCENT;
+            }
+
+            // Get first available user's fee info (temporary solution)
+            UserDataSnapshot? userData = null;
+            FeeInfoDto? feeInfo1 = null;
+            FeeInfoDto? feeInfo2 = null;
+
+            if (isCrossExchange && exchange1 != null && exchange2 != null)
+            {
+                // Try to find fee info for both specific exchanges
+                foreach (var kvp in allUserData)
+                {
+                    if (kvp.Value.FeeInfo != null)
+                    {
+                        if (kvp.Value.Exchange == exchange1 && feeInfo1 == null)
+                            feeInfo1 = kvp.Value.FeeInfo;
+                        if (kvp.Value.Exchange == exchange2 && feeInfo2 == null)
+                            feeInfo2 = kvp.Value.FeeInfo;
+                    }
+                }
+
+                // If we found both, calculate cross-exchange cost
+                if (feeInfo1 != null && feeInfo2 != null)
+                {
+                    // Cross-exchange: (open + close) on exchange1 + (open + close) on exchange2
+                    decimal cost = (feeInfo1.TakerFeeRate * 2 + feeInfo2.TakerFeeRate * 2) * 100m;
+                    _logger.LogDebug("Calculated cross-exchange position cost: {Cost}% (Ex1: {Ex1}%, Ex2: {Ex2}%)",
+                        cost, feeInfo1.TakerFeeRate * 100, feeInfo2.TakerFeeRate * 100);
+                    return cost;
+                }
+            }
+
+            // Fallback: use first available fee info
+            userData = allUserData.Values.FirstOrDefault(ud => ud.FeeInfo != null);
+
+            if (userData?.FeeInfo == null)
+            {
+                _logger.LogWarning("No fee info available in user data, using default {DefaultFee}%", DEFAULT_POSITION_COST_PERCENT);
+                return DEFAULT_POSITION_COST_PERCENT;
+            }
+
+            var feeInfo = userData.FeeInfo;
+            decimal positionCost;
+
+            if (isCrossExchange)
+            {
+                // Cross-exchange: assume same fees on both exchanges (temporary solution)
+                positionCost = (feeInfo.TakerFeeRate * 2 + feeInfo.TakerFeeRate * 2) * 100m;
+                _logger.LogDebug("Calculated cross-exchange position cost (using same fees): {Cost}% (Taker: {Taker}%)",
+                    positionCost, feeInfo.TakerFeeRate * 100);
+            }
+            else
+            {
+                // Same-exchange: (open + close) on one exchange
+                positionCost = (feeInfo.TakerFeeRate * 2) * 100m;
+                _logger.LogDebug("Calculated same-exchange position cost: {Cost}% (Taker: {Taker}%)",
+                    positionCost, feeInfo.TakerFeeRate * 100);
+            }
+
+            return positionCost;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calculating position cost from fee data, using default {DefaultFee}%", DEFAULT_POSITION_COST_PERCENT);
+            return DEFAULT_POSITION_COST_PERCENT;
+        }
     }
 
     /// <summary>
@@ -81,7 +167,8 @@ public class OpportunityDetectionService : IOpportunityDetectionService
     private void CalculateOpportunityMetrics(
         ArbitrageOpportunityDto opportunity,
         FundingRateDto? longFundingData,
-        FundingRateDto? shortFundingData)
+        FundingRateDto? shortFundingData,
+        decimal positionCostPercent)
     {
         bool isSpotPerp = opportunity.SubType == StrategySubType.SpotPerpetualSameExchange;
         bool isCrossFut = opportunity.SubType == StrategySubType.CrossExchangeFuturesFutures;
@@ -101,7 +188,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
             // Calculate current break-even time
             opportunity.BreakEvenTimeHours = opportunity.FundProfit8h > 0
-                ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h) * 8m, fundingIntervalHours)
+                ? Math.Max((positionCostPercent / opportunity.FundProfit8h) * 8m, fundingIntervalHours)
                 : null;
         }
         else if (isCrossFut || isPriceSpread)
@@ -122,7 +209,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
             {
                 int maxInterval = Math.Max(longInterval, shortInterval);
                 opportunity.BreakEvenTimeHours = opportunity.FundProfit8h > 0
-                    ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h) * 8m, maxInterval)
+                    ? Math.Max((positionCostPercent / opportunity.FundProfit8h) * 8m, maxInterval)
                     : null;
             }
             else // isPriceSpread
@@ -142,7 +229,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
             // Calculate current break-even time
             opportunity.BreakEvenTimeHours = opportunity.FundProfit8h > 0
-                ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h) * 8m, shortInterval)
+                ? Math.Max((positionCostPercent / opportunity.FundProfit8h) * 8m, shortInterval)
                 : null;
         }
 
@@ -161,7 +248,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
                 // Calculate break even
                 opportunity.FundBreakEvenTime24hProj = opportunity.FundProfit8h24hProj.Value > 0
-                    ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h24hProj.Value) * 8m, fundingIntervalHours)
+                    ? Math.Max((positionCostPercent / opportunity.FundProfit8h24hProj.Value) * 8m, fundingIntervalHours)
                     : null;
             }
             else if ((isCrossFut || isPriceSpread) && shortFundingData?.Average24hRate != null)
@@ -179,7 +266,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                 // Calculate break even
                 int maxInterval = Math.Max(longInterval, shortInterval);
                 opportunity.FundBreakEvenTime24hProj = opportunity.FundProfit8h24hProj.Value > 0
-                    ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h24hProj.Value) * 8m, maxInterval)
+                    ? Math.Max((positionCostPercent / opportunity.FundProfit8h24hProj.Value) * 8m, maxInterval)
                     : null;
             }
             else if (isCrossSpotFut && shortFundingData?.Average24hRate != null)
@@ -193,7 +280,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
                 // Calculate break even
                 opportunity.FundBreakEvenTime24hProj = opportunity.FundProfit8h24hProj.Value > 0
-                    ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h24hProj.Value) * 8m, shortInterval)
+                    ? Math.Max((positionCostPercent / opportunity.FundProfit8h24hProj.Value) * 8m, shortInterval)
                     : null;
             }
         }
@@ -213,7 +300,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
                 // Calculate break even
                 opportunity.FundBreakEvenTime3dProj = opportunity.FundProfit8h3dProj.Value > 0
-                    ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h3dProj.Value) * 8m, fundingIntervalHours)
+                    ? Math.Max((positionCostPercent / opportunity.FundProfit8h3dProj.Value) * 8m, fundingIntervalHours)
                     : null;
             }
             else if ((isCrossFut || isPriceSpread) && shortFundingData?.Average3DayRate != null)
@@ -231,7 +318,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                 // Calculate break even
                 int maxInterval = Math.Max(longInterval, shortInterval);
                 opportunity.FundBreakEvenTime3dProj = opportunity.FundProfit8h3dProj.Value > 0
-                    ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h3dProj.Value) * 8m, maxInterval)
+                    ? Math.Max((positionCostPercent / opportunity.FundProfit8h3dProj.Value) * 8m, maxInterval)
                     : null;
             }
             else if (isCrossSpotFut && shortFundingData?.Average3DayRate != null)
@@ -245,7 +332,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
                 // Calculate break even
                 opportunity.FundBreakEvenTime3dProj = opportunity.FundProfit8h3dProj.Value > 0
-                    ? Math.Max((POSITION_COST_PERCENT / opportunity.FundProfit8h3dProj.Value) * 8m, shortInterval)
+                    ? Math.Max((positionCostPercent / opportunity.FundProfit8h3dProj.Value) * 8m, shortInterval)
                     : null;
             }
         }
@@ -263,6 +350,9 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
         if (fundingRates.Count < 2)
             return opportunities;
+
+        // Calculate position cost once for all opportunities (cross-exchange, no specific exchanges yet)
+        var positionCostPercent = CalculatePositionCostPercentAsync(isCrossExchange: true).Result;
 
         var exchangeNames = fundingRates.Keys.ToList();
 
@@ -321,11 +411,11 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                         LongVolume24h = volume1,
                         ShortVolume24h = volume2,
                         Volume24h = volume1.HasValue && volume2.HasValue ? Math.Min(volume1.Value, volume2.Value) : (volume1 ?? volume2 ?? 0),
-                        PositionCostPercent = POSITION_COST_PERCENT,
+                        PositionCostPercent = positionCostPercent,
                         Status = OpportunityStatus.Detected,
                         DetectedAt = DateTime.UtcNow
                     };
-                    CalculateOpportunityMetrics(opp1, rate1, rate2);
+                    CalculateOpportunityMetrics(opp1, rate1, rate2, positionCostPercent);
                     opportunities.Add(opp1);
 
                     // Combination 2: Exchange2 = LONG, Exchange1 = SHORT
@@ -345,11 +435,11 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                         LongVolume24h = volume2,
                         ShortVolume24h = volume1,
                         Volume24h = volume1.HasValue && volume2.HasValue ? Math.Min(volume1.Value, volume2.Value) : (volume1 ?? volume2 ?? 0),
-                        PositionCostPercent = POSITION_COST_PERCENT,
+                        PositionCostPercent = positionCostPercent,
                         Status = OpportunityStatus.Detected,
                         DetectedAt = DateTime.UtcNow
                     };
-                    CalculateOpportunityMetrics(opp2, rate2, rate1);
+                    CalculateOpportunityMetrics(opp2, rate2, rate1, positionCostPercent);
                     opportunities.Add(opp2);
                 }
             }
