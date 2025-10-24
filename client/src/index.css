@@ -73,6 +73,37 @@ body {
   background-color: rgba(43, 49, 57, 0.4);
 }
 
+/* Table row group styles for merged rows */
+.table-row-group {
+  transition: background-color 0.15s ease-in-out;
+}
+
+/* When hovering first row in pair */
+.table-row-group.border-b-0:hover,
+.table-row-group.border-b-0:hover + .table-row-group {
+  background-color: rgba(43, 49, 57, 0.4);
+}
+
+/* When hovering second row in pair */
+.table-row-group:not(.border-b-0):has(+ *):hover,
+.table-row-group.border-b-0:has(+ .table-row-group:hover) {
+  background-color: rgba(43, 49, 57, 0.4);
+}
+
+/* Fallback: When second row is hovered, also highlight the previous row if it has border-b-0 */
+tbody .table-row-group:hover ~ tbody .table-row-group {
+  background-color: transparent;
+}
+
+tbody .table-row-group:hover {
+  background-color: rgba(43, 49, 57, 0.4);
+}
+
+tbody .table-row-group.border-b-0:has(+ .table-row-group:hover),
+tbody .table-row-group:hover + tbody .table-row-group {
+  background-color: rgba(43, 49, 57, 0.4);
+}
+
 /* Animations */
 @keyframes fadeIn {
   from {

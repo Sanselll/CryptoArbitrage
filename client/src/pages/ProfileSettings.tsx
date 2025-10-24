@@ -1,0 +1,537 @@
+import { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Plus, Trash2, TestTube, AlertCircle, CheckCircle, Shield, X, Copy, Check } from 'lucide-react';
+import apiClient from '../services/apiClient';
+import { useAuthStore } from '../stores/authStore';
+import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
+import { ConfirmDialog, AlertDialog } from '../components/ui/Dialog';
+
+interface ApiKey {
+  id: number;
+  exchangeName: string;
+  apiKey: string;
+  isEnabled: boolean;
+  createdAt: string;
+  lastTestedAt?: string;
+  lastTestResult?: string;
+}
+
+export const ProfileSettings = () => {
+  const user = useAuthStore((state) => state.user);
+  const navigate = useNavigate();
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [supportedExchanges, setSupportedExchanges] = useState<string[]>([]);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isTesting, setIsTesting] = useState<number | null>(null);
+  const [newKey, setNewKey] = useState({
+    exchangeName: 'Binance',
+    apiKey: '',
+    apiSecret: ''
+  });
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: number | null }>({ isOpen: false, id: null });
+  const [alertDialog, setAlertDialog] = useState<{ isOpen: boolean; title: string; message: string; variant: 'success' | 'danger' | 'warning' | 'info'; serverIp?: string; missingPermissions?: string[] }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info'
+  });
+  const [copiedIp, setCopiedIp] = useState(false);
+  const [serverIp, setServerIp] = useState<string | null>(null);
+
+  // Calculate which exchanges are still available (not yet configured)
+  const availableExchanges = useMemo(() => {
+    const configuredExchanges = apiKeys.map(key => key.exchangeName);
+    return supportedExchanges.filter(exchange => !configuredExchanges.includes(exchange));
+  }, [apiKeys, supportedExchanges]);
+
+  useEffect(() => {
+    loadApiKeys();
+    fetchServerIp();
+    fetchSupportedExchanges();
+  }, []);
+
+  const fetchSupportedExchanges = async () => {
+    try {
+      const response = await apiClient.get('/environment/exchanges');
+      setSupportedExchanges(response.data.exchanges || []);
+    } catch (error) {
+      console.error('Error loading supported exchanges:', error);
+      // Fallback to hardcoded list if API fails
+      setSupportedExchanges(['Binance', 'Bybit']);
+    }
+  };
+
+  const fetchServerIp = async () => {
+    try {
+      const response = await apiClient.get('/environment/server-ip');
+      setServerIp(response.data.ip);
+    } catch (error) {
+      console.error('Failed to fetch server IP:', error);
+    }
+  };
+
+  const loadApiKeys = async () => {
+    try {
+      const response = await apiClient.get('/user/apikeys');
+      setApiKeys(response.data);
+    } catch (error) {
+      console.error('Error loading API keys:', error);
+      setMessage({ type: 'error', text: 'Failed to load API keys' });
+    }
+  };
+
+  const addApiKey = async () => {
+    if (!newKey.apiKey || !newKey.apiSecret) {
+      setMessage({ type: 'error', text: 'API key and secret are required' });
+      return;
+    }
+
+    try {
+      setMessage({ type: 'success', text: 'Validating API credentials...' });
+
+      const response = await apiClient.post('/user/apikeys', newKey);
+
+      // If we reach here, validation succeeded and key was saved
+      setAlertDialog({
+        isOpen: true,
+        title: 'API Key Added Successfully',
+        message: `Successfully connected to ${newKey.exchangeName}! Your API credentials have been validated and saved.`,
+        variant: 'success'
+      });
+
+      // Reload keys to show the new key
+      await loadApiKeys();
+
+      // Reset form and close if no more exchanges available, otherwise reset to first available
+      const updatedAvailable = supportedExchanges.filter(
+        exchange => !([...apiKeys.map(k => k.exchangeName), newKey.exchangeName].includes(exchange))
+      );
+
+      if (updatedAvailable.length > 0) {
+        setNewKey({ exchangeName: updatedAvailable[0], apiKey: '', apiSecret: '' });
+      } else {
+        setIsAdding(false);
+      }
+
+      setMessage(null);
+    } catch (error: any) {
+      setMessage(null);
+
+      // Handle session expiration (401 Unauthorized)
+      if (error.response?.status === 401) {
+        const errorMsg = error.response?.data?.error || 'Session expired';
+        setAlertDialog({
+          isOpen: true,
+          title: 'Session Expired',
+          message: `${errorMsg} You will be logged out automatically.`,
+          variant: 'warning'
+        });
+
+        // Log out after showing the message
+        setTimeout(() => {
+          useAuthStore.getState().logout();
+          navigate('/login');
+        }, 3000);
+      } else {
+        // Extract detailed validation error information
+        const errorData = error.response?.data;
+        const detailedMessage = errorData?.detailedMessage;
+        const serverIp = errorData?.serverIp;
+        const isIpRestricted = errorData?.isIpRestricted;
+        const missingPermissions = errorData?.missingPermissions;
+        const fallbackError = errorData?.error || 'Failed to add API key';
+
+        // Build the error message with helpful context
+        let message = detailedMessage || fallbackError;
+
+        // If IP-restricted, emphasize the server IP
+        if (isIpRestricted && serverIp) {
+          message = `Your API key is IP-restricted. Please add this server's IP address to your exchange's API key whitelist:\n\n${serverIp}\n\nThen try adding the key again.`;
+        } else if (missingPermissions && missingPermissions.length > 0) {
+          message = `${message}\n\nRequired permissions:\n${missingPermissions.map((p: string) => `• ${p}`).join('\n')}`;
+        }
+
+        setAlertDialog({
+          isOpen: true,
+          title: isIpRestricted ? 'IP Restriction Detected' : 'Failed to Add API Key',
+          message,
+          variant: 'danger',
+          serverIp: isIpRestricted ? serverIp : undefined,
+          missingPermissions
+        });
+      }
+    }
+  };
+
+  const deleteApiKey = async (id: number) => {
+    try {
+      await apiClient.delete(`/user/apikeys/${id}`);
+      setMessage({ type: 'success', text: 'API key deleted successfully' });
+      setDeleteConfirm({ isOpen: false, id: null });
+      loadApiKeys();
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Failed to delete API key' });
+      setDeleteConfirm({ isOpen: false, id: null });
+    }
+  };
+
+  const testApiKey = async (id: number) => {
+    setIsTesting(id);
+    try {
+      const response = await apiClient.post(`/user/apikeys/${id}/test`);
+
+      // Handle IP restriction in test result
+      if (!response.data.success && response.data.isIpRestricted && response.data.serverIp) {
+        setAlertDialog({
+          isOpen: true,
+          title: 'IP Restriction Detected',
+          message: `Your API key is IP-restricted. Please add this server's IP address to your exchange's API key whitelist:\n\n${response.data.serverIp}\n\nThen test the key again.`,
+          variant: 'danger',
+          serverIp: response.data.serverIp,
+          missingPermissions: response.data.missingPermissions
+        });
+      } else {
+        setAlertDialog({
+          isOpen: true,
+          title: response.data.success ? 'Connection Successful' : 'Connection Failed',
+          message: response.data.message,
+          variant: response.data.success ? 'success' : 'danger'
+        });
+      }
+
+      loadApiKeys();
+    } catch (error: any) {
+      setAlertDialog({
+        isOpen: true,
+        title: 'Test Failed',
+        message: error.response?.data?.error || 'Failed to test API key',
+        variant: 'danger'
+      });
+    } finally {
+      setIsTesting(null);
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIp(true);
+      setTimeout(() => setCopiedIp(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-binance-bg">
+      {/* Header */}
+      <div className="h-10 bg-binance-bg-secondary border-b border-binance-border px-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/')}
+            className="text-binance-text-secondary hover:text-binance-text transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <h1 className="text-sm font-bold text-binance-text">Profile Settings</h1>
+        </div>
+        <div className="text-xs text-binance-text-secondary">{user?.email}</div>
+      </div>
+
+      {/* Content */}
+      <div className="p-4 max-w-5xl mx-auto">
+        {/* Messages */}
+        {message && (
+          <div
+            className={`p-3 rounded mb-3 border ${
+              message.type === 'success'
+                ? 'bg-binance-green/10 border-binance-green/20'
+                : 'bg-binance-red/10 border-binance-red/20'
+            }`}
+          >
+            <div className="flex items-start gap-2">
+              {message.type === 'success' ? (
+                <CheckCircle className="w-4 h-4 text-binance-green flex-shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-binance-red flex-shrink-0 mt-0.5" />
+              )}
+              <p className={`text-xs ${message.type === 'success' ? 'text-binance-green' : 'text-binance-red'}`}>
+                {message.text}
+              </p>
+              <button
+                onClick={() => setMessage(null)}
+                className="ml-auto text-binance-text-secondary hover:text-binance-text"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* API Keys Card */}
+        <Card>
+          <CardHeader className="p-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Shield className="w-4 h-4 text-binance-yellow" />
+                Exchange API Keys
+              </CardTitle>
+              {!isAdding && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    // Set the default exchange to the first available one
+                    if (availableExchanges.length > 0) {
+                      setNewKey({ exchangeName: availableExchanges[0], apiKey: '', apiSecret: '' });
+                      setIsAdding(true);
+                    }
+                  }}
+                  disabled={availableExchanges.length === 0}
+                  className="gap-1"
+                  title={availableExchanges.length === 0 ? 'All exchanges configured' : 'Add a new API key'}
+                >
+                  <Plus className="w-3 h-3" />
+                  Add Key
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-3 pt-0">
+            {/* Server IP Info */}
+            {serverIp && (
+              <div className="bg-binance-blue/10 border border-binance-blue/30 rounded p-3 mb-3">
+                <div className="flex items-start gap-2">
+                  <Shield className="w-4 h-4 text-binance-blue flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="text-xs font-semibold text-binance-blue mb-1">
+                      Server IP for API Whitelist
+                    </div>
+                    <div className="text-[10px] text-binance-text-secondary mb-2">
+                      Add this IP address to your exchange API key whitelist (required for live trading):
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-binance-bg border border-binance-border rounded px-2 py-1 text-xs font-mono text-binance-yellow">
+                        {serverIp}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(serverIp)}
+                        className="p-1.5 bg-binance-bg-secondary hover:bg-binance-bg-tertiary border border-binance-border rounded transition-colors"
+                        title="Copy IP address"
+                      >
+                        {copiedIp ? (
+                          <Check className="w-3 h-3 text-binance-green" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-binance-text-secondary" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Add Form */}
+            {isAdding && (
+              <div className="bg-binance-bg-tertiary p-3 rounded mb-3 border border-binance-border">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-binance-text">Add New API Key</h3>
+                  <button
+                    onClick={() => setIsAdding(false)}
+                    className="text-binance-text-secondary hover:text-binance-text"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[10px] text-binance-text-secondary block mb-1">Exchange</label>
+                    <select
+                      value={newKey.exchangeName}
+                      onChange={(e) => setNewKey({ ...newKey, exchangeName: e.target.value })}
+                      className="w-full bg-binance-bg border border-binance-border text-binance-text rounded text-xs px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-binance-yellow"
+                    >
+                      {availableExchanges.map((exchange) => (
+                        <option key={exchange}>{exchange}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-binance-text-secondary block mb-1">API Key</label>
+                    <input
+                      type="text"
+                      value={newKey.apiKey}
+                      onChange={(e) => setNewKey({ ...newKey, apiKey: e.target.value })}
+                      className="w-full bg-binance-bg border border-binance-border text-binance-text rounded text-xs px-2 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-binance-yellow"
+                      placeholder="Paste your API key"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-binance-text-secondary block mb-1">API Secret</label>
+                    <input
+                      type="password"
+                      value={newKey.apiSecret}
+                      onChange={(e) => setNewKey({ ...newKey, apiSecret: e.target.value })}
+                      className="w-full bg-binance-bg border border-binance-border text-binance-text rounded text-xs px-2 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-binance-yellow"
+                      placeholder="Paste your API secret"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      variant="success"
+                      size="sm"
+                      onClick={addApiKey}
+                      className="text-xs"
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setIsAdding(false)}
+                      className="text-xs"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* API Keys List */}
+            <div className="space-y-2">
+              {apiKeys.map((key) => (
+                <div key={key.id} className="bg-binance-bg-tertiary p-3 rounded border border-binance-border">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <h3 className="text-xs font-semibold text-binance-text">{key.exchangeName}</h3>
+                        <Badge
+                          variant={key.isEnabled ? 'success' : 'secondary'}
+                          size="sm"
+                          className="text-[10px]"
+                        >
+                          {key.isEnabled ? 'Enabled' : 'Disabled'}
+                        </Badge>
+                      </div>
+                      <div className="text-[10px] text-binance-text-muted font-mono truncate">
+                        {key.apiKey}
+                      </div>
+                      {key.lastTestResult && (
+                        <div className="text-[10px] text-binance-text-secondary mt-1.5">
+                          <span className="text-binance-text-muted">Last Test:</span> {key.lastTestResult}
+                          {key.lastTestedAt && (
+                            <span className="text-binance-text-muted">
+                              {' '}({new Date(key.lastTestedAt).toLocaleString()})
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-1.5 ml-3 flex-shrink-0">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => testApiKey(key.id)}
+                        disabled={isTesting === key.id}
+                        className="gap-1 text-xs"
+                      >
+                        <TestTube className="w-3 h-3" />
+                        {isTesting === key.id ? 'Testing...' : 'Test'}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setDeleteConfirm({ isOpen: true, id: key.id })}
+                        className="gap-1 text-xs"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {apiKeys.length === 0 && !isAdding && (
+                <div className="text-center py-8 text-binance-text-muted">
+                  <Shield className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-xs">No API keys configured</p>
+                  <p className="text-[10px] mt-1">Add one to start trading</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Info Box */}
+        <div className="bg-binance-blue/10 border border-binance-blue/20 rounded p-3 mt-3">
+          <div className="flex items-start gap-2">
+            <Shield className="w-4 h-4 text-binance-blue flex-shrink-0 mt-0.5" />
+            <p className="text-[10px] text-binance-blue">
+              API keys are encrypted and stored securely. Your keys are never logged or exposed in plaintext.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Confirm Delete Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        onClose={() => setDeleteConfirm({ isOpen: false, id: null })}
+        onConfirm={() => deleteConfirm.id && deleteApiKey(deleteConfirm.id)}
+        title="Delete API Key"
+        message="Are you sure you want to delete this API key? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+
+      {/* Alert Dialog */}
+      <AlertDialog
+        isOpen={alertDialog.isOpen}
+        onClose={() => {
+          setAlertDialog({ ...alertDialog, isOpen: false });
+          setCopiedIp(false);
+        }}
+        title={alertDialog.title}
+        message={alertDialog.message}
+        variant={alertDialog.variant}
+      >
+        {/* Copy IP Address Button for IP-restricted errors */}
+        {alertDialog.serverIp && (
+          <div className="mt-3 p-3 bg-binance-bg-tertiary border border-binance-border rounded">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex-1">
+                <div className="text-[10px] text-binance-text-muted mb-1">Server IP Address:</div>
+                <div className="text-xs font-mono text-binance-text font-semibold">{alertDialog.serverIp}</div>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => copyToClipboard(alertDialog.serverIp!)}
+                className="gap-1 text-xs flex-shrink-0"
+              >
+                {copiedIp ? (
+                  <>
+                    <Check className="w-3 h-3" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3" />
+                    Copy IP
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </AlertDialog>
+    </div>
+  );
+};

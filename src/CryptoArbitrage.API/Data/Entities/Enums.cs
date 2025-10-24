@@ -34,3 +34,9 @@ public enum PositionType
     Perpetual = 0,  // Futures/perpetual position
     Spot = 1        // Spot order/position
 }
+
+public enum FundingDirection
+{
+    LongPaysShort = 0,   // Positive funding rate - longs pay shorts
+    ShortPaysLong = 1    // Negative funding rate - shorts pay longs
+}

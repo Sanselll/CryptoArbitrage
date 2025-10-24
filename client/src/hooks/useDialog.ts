@@ -5,6 +5,8 @@ interface AlertDialogState {
   title: string;
   message: string;
   variant: 'default' | 'success' | 'danger' | 'warning' | 'info';
+  actionText?: string;
+  onAction?: () => void;
 }
 
 interface ConfirmDialogState {
@@ -39,24 +41,28 @@ export const useDialog = () => {
     (
       message: string,
       title: string = 'Alert',
-      variant: 'default' | 'success' | 'danger' | 'warning' | 'info' = 'info'
+      variant: 'default' | 'success' | 'danger' | 'warning' | 'info' = 'info',
+      actionText?: string,
+      onAction?: () => void
     ) => {
       setAlertState({
         isOpen: true,
         title,
         message,
         variant,
+        actionText,
+        onAction,
       });
     },
     []
   );
 
-  const showSuccess = useCallback((message: string, title: string = 'Success') => {
-    showAlert(message, title, 'success');
+  const showSuccess = useCallback((message: string, title: string = 'Success', actionText?: string, onAction?: () => void) => {
+    showAlert(message, title, 'success', actionText, onAction);
   }, [showAlert]);
 
-  const showError = useCallback((message: string, title: string = 'Error') => {
-    showAlert(message, title, 'danger');
+  const showError = useCallback((message: string, title: string = 'Error', actionText?: string, onAction?: () => void) => {
+    showAlert(message, title, 'danger', actionText, onAction);
   }, [showAlert]);
 
   const showWarning = useCallback((message: string, title: string = 'Warning') => {

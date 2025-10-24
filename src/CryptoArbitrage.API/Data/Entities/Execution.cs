@@ -1,8 +1,16 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace CryptoArbitrage.API.Data.Entities;
 
 public class Execution
 {
     public int Id { get; set; }
+
+    // Multi-user support
+    [Required]
+    public string UserId { get; set; } = string.Empty;
+    public ApplicationUser User { get; set; } = null!;
+
     public string Symbol { get; set; } = string.Empty;
     public string Exchange { get; set; } = string.Empty;
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;

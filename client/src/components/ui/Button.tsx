@@ -37,15 +37,15 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           },
           // Color variants - TradingAgent style
           {
-            'bg-binance-yellow text-gray-900 hover:bg-opacity-90 font-semibold':
+            'bg-binance-yellow text-gray-900 hover:bg-opacity-90 active:bg-opacity-75 hover:scale-[1.02] active:scale-[0.98] font-semibold':
               variant === 'primary',
-            'bg-binance-bg-secondary border border-binance-border text-binance-text hover:bg-binance-bg-hover':
+            'bg-binance-bg-secondary border border-binance-border text-binance-text hover:bg-binance-bg-hover active:bg-binance-border':
               variant === 'secondary',
-            'bg-binance-green text-white hover:bg-opacity-90 font-semibold':
+            'bg-binance-green text-white hover:bg-opacity-90 active:bg-opacity-75 hover:scale-[1.02] active:scale-[0.98] font-semibold':
               variant === 'success',
-            'bg-binance-red text-white hover:bg-opacity-80 font-semibold':
+            'bg-binance-red text-white hover:bg-opacity-80 active:bg-opacity-60 hover:scale-[1.02] active:scale-[0.98] font-semibold':
               variant === 'danger',
-            'bg-transparent text-binance-text hover:bg-binance-bg-hover':
+            'bg-transparent text-binance-text hover:bg-binance-bg-hover active:bg-binance-border':
               variant === 'ghost',
           },
           className

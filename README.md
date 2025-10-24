@@ -395,3 +395,4 @@ For questions and support, please open an issue on GitHub.
 ---
 
 **Built with**  by the crypto trading community
+# Deployment configured

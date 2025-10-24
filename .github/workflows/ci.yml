@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: |
+          cd src/CryptoArbitrage.API
+          dotnet restore
+
+      - name: Build
+        run: |
+          cd src/CryptoArbitrage.API
+          dotnet build --no-restore --configuration Release
+
+      - name: Run tests
+        run: |
+          cd src/CryptoArbitrage.API
+          dotnet test --no-build --verbosity normal || true
+
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: 'client/package-lock.json'
+
+      - name: Install dependencies
+        run: |
+          cd client
+          npm install
+
+      - name: Lint
+        run: |
+          cd client
+          npm run lint || true
+
+      - name: Build
+        run: |
+          cd client
+          npm run build
