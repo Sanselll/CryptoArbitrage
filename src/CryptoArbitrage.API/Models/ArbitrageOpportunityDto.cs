@@ -18,7 +18,6 @@ public enum StrategySubType
 
 public class ArbitrageOpportunityDto
 {
-    public int Id { get; set; }
     public string Symbol { get; set; } = string.Empty;
     public ArbitrageStrategy Strategy { get; set; } = ArbitrageStrategy.CrossExchange;
     public StrategySubType SubType { get; set; } = StrategySubType.CrossExchangeFuturesFutures;
@@ -30,14 +29,24 @@ public class ArbitrageOpportunityDto
     public decimal ShortFundingRate { get; set; }
     public int? LongFundingIntervalHours { get; set; }  // Funding interval for long exchange (1h, 4h, 8h, etc.)
     public int? ShortFundingIntervalHours { get; set; } // Funding interval for short exchange
+    public DateTime? LongNextFundingTime { get; set; }  // When long funding rate expires/renews
+    public DateTime? ShortNextFundingTime { get; set; } // When short funding rate expires/renews
+
+    // For cross-exchange arbitrage - Price fields
+    public decimal? LongExchangePrice { get; set; }   // Price on long exchange (perpetual)
+    public decimal? ShortExchangePrice { get; set; }  // Price on short exchange (perpetual)
+    public decimal? CurrentPriceSpreadPercent { get; set; }  // Current instant price spread: (Short - Long) / Long * 100
 
     // For spot-perpetual arbitrage
     public string Exchange { get; set; } = string.Empty;
+
+    // DEPRECATED: These fields have confusing names for cross-exchange arbitrage
+    // For cross-exchange: SpotPrice = LongExchangePrice, PerpetualPrice = ShortExchangePrice
+    // For spot-perp: SpotPrice = actual spot, PerpetualPrice = actual perpetual
+    // Use LongExchangePrice/ShortExchangePrice for cross-exchange instead
     public decimal SpotPrice { get; set; }
     public decimal PerpetualPrice { get; set; }
-    public decimal FundingRate { get; set; }
-    public decimal AnnualizedFundingRate { get; set; }
-    public decimal PricePremium { get; set; } // (Perp - Spot) / Spot
+
 
     // Common fields
     public decimal SpreadRate { get; set; }
@@ -82,14 +91,7 @@ public class ArbitrageOpportunityDto
 
     public OpportunityStatus Status { get; set; }
     public DateTime DetectedAt { get; set; }
-    public DateTime? ExecutedAt { get; set; }
-
-    // Execution fields (merged from Execution table)
-    public int? ExecutionId { get; set; }
-    public ExecutionState? ExecutionState { get; set; }
-    public DateTime? ExecutionStartedAt { get; set; }
-    public decimal? ExecutionFundingEarned { get; set; }
-
+    
     // Computed unique key for frontend tracking (not stored in DB)
     public string UniqueKey => Strategy == ArbitrageStrategy.SpotPerpetual
         ? $"{Symbol}-{Exchange}-{SubType}"

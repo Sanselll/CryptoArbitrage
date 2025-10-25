@@ -91,9 +91,19 @@ export interface ArbitrageOpportunity {
   shortFundingRate: number;
   longFundingIntervalHours?: number;   // Funding interval for long exchange (1h, 4h, 8h, etc.)
   shortFundingIntervalHours?: number;  // Funding interval for short exchange
+  longNextFundingTime?: string;        // When long funding rate expires/renews
+  shortNextFundingTime?: string;       // When short funding rate expires/renews
+
+  // Cross-exchange price fields - NEW properly-named fields
+  longExchangePrice?: number;          // Price on long exchange (perpetual)
+  shortExchangePrice?: number;         // Price on short exchange (perpetual)
+  currentPriceSpreadPercent?: number;  // Current instant price spread: (Short - Long) / Long * 100
 
   // Spot-perpetual fields
   exchange?: string;
+  // DEPRECATED: spotPrice/perpetualPrice are confusing for cross-exchange
+  // For cross-exchange: spotPrice = longExchangePrice, perpetualPrice = shortExchangePrice
+  // Use longExchangePrice/shortExchangePrice for cross-exchange instead
   spotPrice?: number;
   perpetualPrice?: number;
   fundingRate?: number;
