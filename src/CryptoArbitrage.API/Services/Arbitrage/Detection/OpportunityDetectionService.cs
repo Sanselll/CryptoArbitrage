@@ -406,6 +406,13 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                         ShortFundingRate = rate2.Rate,
                         LongFundingIntervalHours = rate1.FundingIntervalHours,
                         ShortFundingIntervalHours = rate2.FundingIntervalHours,
+                        LongNextFundingTime = rate1.NextFundingTime,
+                        ShortNextFundingTime = rate2.NextFundingTime,
+                        // New properly-named fields
+                        LongExchangePrice = price1,
+                        ShortExchangePrice = price2,
+                        CurrentPriceSpreadPercent = ((price2 - price1) / price1) * 100m,
+                        // Deprecated fields (keep for backwards compatibility)
                         SpotPrice = price1,      // Long exchange price
                         PerpetualPrice = price2, // Short exchange price
                         LongVolume24h = volume1,
@@ -430,6 +437,13 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                         ShortFundingRate = rate1.Rate,
                         LongFundingIntervalHours = rate2.FundingIntervalHours,
                         ShortFundingIntervalHours = rate1.FundingIntervalHours,
+                        LongNextFundingTime = rate2.NextFundingTime,
+                        ShortNextFundingTime = rate1.NextFundingTime,
+                        // New properly-named fields
+                        LongExchangePrice = price2,
+                        ShortExchangePrice = price1,
+                        CurrentPriceSpreadPercent = ((price1 - price2) / price2) * 100m,
+                        // Deprecated fields (keep for backwards compatibility)
                         SpotPrice = price2,      // Long exchange price
                         PerpetualPrice = price1, // Short exchange price
                         LongVolume24h = volume2,
@@ -831,6 +845,10 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                         decimal longExchangePrice = (longExchange == exchange1) ? price1 : price2;
                         decimal shortExchangePrice = (shortExchange == exchange1) ? price1 : price2;
 
+                        // Get NextFundingTime for each exchange
+                        var longNextFundingTime = (longExchange == exchange1) ? rate1.NextFundingTime : rate2.NextFundingTime;
+                        var shortNextFundingTime = (shortExchange == exchange1) ? rate1.NextFundingTime : rate2.NextFundingTime;
+
                         var opportunity = new ArbitrageOpportunityDto
                         {
                             Strategy = ArbitrageStrategy.CrossExchange,
@@ -842,7 +860,13 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                             ShortFundingRate = shortRate,
                             LongFundingIntervalHours = longFundingIntervalHours,
                             ShortFundingIntervalHours = shortFundingIntervalHours,
-                            // Use SpotPrice for longExchange perp price, PerpetualPrice for shortExchange perp price
+                            LongNextFundingTime = longNextFundingTime,
+                            ShortNextFundingTime = shortNextFundingTime,
+                            // New properly-named fields
+                            LongExchangePrice = longExchangePrice,
+                            ShortExchangePrice = shortExchangePrice,
+                            CurrentPriceSpreadPercent = ((shortExchangePrice - longExchangePrice) / longExchangePrice) * 100m,
+                            // Deprecated fields (keep for backwards compatibility)
                             SpotPrice = longExchangePrice,
                             PerpetualPrice = shortExchangePrice,
                             SpreadRate = netFundingRate,
@@ -941,6 +965,8 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                         decimal expensiveFundingRate = 0;
                         int? cheaperFundingIntervalHours = null;
                         int? expensiveFundingIntervalHours = null;
+                        DateTime? cheaperNextFundingTime = null;
+                        DateTime? expensiveNextFundingTime = null;
 
                         if (fundingRates.ContainsKey(cheaperExchange))
                         {
@@ -949,6 +975,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                             {
                                 cheaperFundingRate = rate.Rate;
                                 cheaperFundingIntervalHours = rate.FundingIntervalHours;
+                                cheaperNextFundingTime = rate.NextFundingTime;
                             }
                         }
 
@@ -959,6 +986,7 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                             {
                                 expensiveFundingRate = rate.Rate;
                                 expensiveFundingIntervalHours = rate.FundingIntervalHours;
+                                expensiveNextFundingTime = rate.NextFundingTime;
                             }
                         }
 
@@ -973,7 +1001,13 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                             ShortFundingRate = expensiveFundingRate,
                             LongFundingIntervalHours = cheaperFundingIntervalHours,
                             ShortFundingIntervalHours = expensiveFundingIntervalHours,
-                            // Use SpotPrice for cheaper exchange price, PerpetualPrice for expensive exchange price
+                            LongNextFundingTime = cheaperNextFundingTime,
+                            ShortNextFundingTime = expensiveNextFundingTime,
+                            // New properly-named fields
+                            LongExchangePrice = cheaperPrice,
+                            ShortExchangePrice = expensivePrice,
+                            CurrentPriceSpreadPercent = ((expensivePrice - cheaperPrice) / cheaperPrice) * 100m,
+                            // Deprecated fields (keep for backwards compatibility)
                             SpotPrice = cheaperPrice,
                             PerpetualPrice = expensivePrice,
                             SpreadRate = netProfit,

@@ -57,7 +57,17 @@
       "Bash(curl:*)",
       "Bash(npm run dev:*)",
       "Bash(cat:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(dotnet new:*)",
+      "Bash(cd:*)",
+      "Bash(dotnet sln add:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet run:*)",
+      "Bash(python3:*)",
+      "Bash(wait)",
+      "Bash(chmod:*)",
+      "Bash(time dotnet run:*)",
+      "Bash(./backup_and_fix.sh)"
     ],
     "deny": [],
     "ask": []

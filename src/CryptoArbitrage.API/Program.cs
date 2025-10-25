@@ -37,6 +37,10 @@ builder.Services.AddSingleton(arbitrageConfig);
 var environmentConfig = builder.Configuration.GetSection("Environment").Get<EnvironmentConfig>() ?? new EnvironmentConfig();
 builder.Services.AddSingleton(environmentConfig);
 
+// Add opportunity dump configuration
+var opportunityDumpConfig = builder.Configuration.GetSection("OpportunityDump").Get<OpportunityDumpConfig>() ?? new OpportunityDumpConfig();
+builder.Services.AddSingleton(opportunityDumpConfig);
+
 // Add notification configuration
 builder.Services.Configure<NotificationSettings>(builder.Configuration.GetSection("NotificationSettings"));
 
@@ -293,6 +297,9 @@ builder.Services.AddHostedService<OpportunityAggregator>();
 
 // Background Services - Enrichment (Layer 4: Enrichers)
 builder.Services.AddHostedService<OpportunityEnricher>();
+
+// Background Services - Dumping (Layer 4.5: Snapshot Dumpers)
+builder.Services.AddHostedService<OpportunitySnapshotDumper>();
 
 // Background Services - Broadcasting (Layer 5: Broadcasters)
 builder.Services.AddHostedService<SignalRBroadcaster>();
