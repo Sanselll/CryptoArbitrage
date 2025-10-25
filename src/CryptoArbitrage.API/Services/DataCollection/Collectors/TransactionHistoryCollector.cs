@@ -20,6 +20,7 @@ public class TransactionHistoryCollector : IDataCollector<List<TransactionDto>, 
     private readonly IDataRepository<List<TransactionDto>> _repository;
     private readonly TransactionHistoryCollectorConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
+    private readonly ConnectorManager _connectorManager;
 
     public TransactionHistoryCollectorConfiguration Configuration => _configuration;
     public CollectionResult<List<TransactionDto>>? LastResult { get; private set; }
@@ -29,12 +30,14 @@ public class TransactionHistoryCollector : IDataCollector<List<TransactionDto>, 
         ILogger<TransactionHistoryCollector> logger,
         IDataRepository<List<TransactionDto>> repository,
         TransactionHistoryCollectorConfiguration configuration,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ConnectorManager connectorManager)
     {
         _logger = logger;
         _repository = repository;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
+        _connectorManager = connectorManager;
     }
 
     public async Task<CollectionResult<List<TransactionDto>>> CollectAsync(CancellationToken cancellationToken = default)
@@ -87,39 +90,28 @@ public class TransactionHistoryCollector : IDataCollector<List<TransactionDto>, 
                 {
                     // Create a new scoped connector for this user
                     using var connectorScope = _serviceProvider.CreateScope();
-                    object? connector = null;
 
                     // Decrypt API credentials
                     var decryptedApiKey = encryptionService.Decrypt(apiKey.EncryptedApiKey);
                     var decryptedSecret = encryptionService.Decrypt(apiKey.EncryptedApiSecret);
 
-                    // Get connector based on exchange and connect it
-                    switch (apiKey.ExchangeName.ToLower())
-                    {
-                        case "binance":
-                            var binanceConnector = connectorScope.ServiceProvider.GetRequiredService<BinanceConnector>();
-                            await binanceConnector.ConnectAsync(decryptedApiKey, decryptedSecret);
-                            connector = binanceConnector;
-                            break;
-                        case "bybit":
-                            var bybitConnector = connectorScope.ServiceProvider.GetRequiredService<BybitConnector>();
-                            await bybitConnector.ConnectAsync(decryptedApiKey, decryptedSecret);
-                            connector = bybitConnector;
-                            break;
-                        default:
-                            _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
-                                apiKey.ExchangeName, apiKey.UserId);
-                            return ((string?)null, (List<TransactionDto>?)null);
-                    }
+                    // Get connector using ConnectorManager
+                    var connector = await _connectorManager.GetConnectorByNameAsync(
+                        connectorScope,
+                        apiKey.ExchangeName,
+                        decryptedApiKey,
+                        decryptedSecret,
+                        cancellationToken);
 
                     if (connector == null)
                     {
+                        _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
+                            apiKey.ExchangeName, apiKey.UserId);
                         return ((string?)null, (List<TransactionDto>?)null);
                     }
 
-                    // Fetch transaction history using dynamic
-                    dynamic dynamicConnector = connector;
-                    List<TransactionDto> transactions = await dynamicConnector.GetTransactionsAsync(startTime, endTime, 100);
+                    // Fetch transaction history
+                    List<TransactionDto> transactions = await connector.GetTransactionsAsync(startTime, endTime, 100);
 
                     var key = $"transactionhistory:{apiKey.UserId}:{apiKey.ExchangeName}";
 
