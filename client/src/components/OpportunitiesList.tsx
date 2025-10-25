@@ -169,16 +169,16 @@ export const OpportunitiesList = () => {
 
   // No need to calculate - all metrics come from backend now!
   const opportunitiesWithCalculations = opportunities.map(opp => {
-    // Calculate spread for display only (not used in backend)
-    const spotPrice = opp.spotPrice || 0;
-    const perpPrice = opp.perpetualPrice || 0;
-    const spread = (spotPrice > 0 && perpPrice > 0)
-      ? ((perpPrice - spotPrice) / spotPrice) * 100
-      : 0;
+    // Use backend-calculated spread if available, otherwise calculate as fallback
+    const spread = opp.currentPriceSpreadPercent ?? (
+      (opp.spotPrice && opp.perpetualPrice)
+        ? ((opp.perpetualPrice - opp.spotPrice) / opp.spotPrice) * 100
+        : 0
+    );
 
     return {
       ...opp,
-      _calculated: { spread }  // Only keep spread for UI display
+      _calculated: { spread }  // Keep spread for UI display
     };
   });
 
@@ -729,12 +729,12 @@ export const OpportunitiesList = () => {
                 const profit8h3d = opp.fundProfit8h3dProj;
                 const apr3d = opp.fundApr3dProj;
 
-                // Calculate spread for display only
-                const spotPrice = opp.spotPrice || 0;
-                const perpPrice = opp.perpetualPrice || 0;
-                const spread = (spotPrice > 0 && perpPrice > 0)
-                  ? ((perpPrice - spotPrice) / spotPrice) * 100
-                  : 0;
+                // Use backend-calculated spread if available, otherwise calculate as fallback
+                const spread = opp.currentPriceSpreadPercent ?? (
+                  (opp.spotPrice && opp.perpetualPrice)
+                    ? ((opp.perpetualPrice - opp.spotPrice) / opp.spotPrice) * 100
+                    : 0
+                );
 
                 const rows = [];
 
