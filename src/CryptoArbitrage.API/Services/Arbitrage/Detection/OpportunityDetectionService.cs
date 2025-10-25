@@ -391,6 +391,12 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                         volume2 = perpPrices[exchange2][symbol].Volume24h;
                     }
 
+                    // Skip if either price is zero or missing (can't calculate spreads)
+                    if (price1 <= 0 || price2 <= 0)
+                    {
+                        continue;
+                    }
+
                     // CREATE BOTH DIRECTIONAL COMBINATIONS
                     // This allows CFFF to pick based on funding rates, CFPS to pick based on prices
 

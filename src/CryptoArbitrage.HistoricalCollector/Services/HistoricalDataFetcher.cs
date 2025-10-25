@@ -368,19 +368,43 @@ public class HistoricalDataFetcher
             // Convert string interval to KlineInterval enum
             var klineInterval = ParseInterval(interval);
 
+            _logger.LogDebug("Fetching {Interval} klines for {Symbol} from {Exchange} ({Start} to {End})",
+                interval, symbol, connector.ExchangeName, startDate, endDate);
+
             // Use the connector's GetKlinesAsync method
             // Note: The connector methods use the Binance.Net and Bybit.Net libraries which handle
             // rate limiting, retries, and proper API formatting automatically
             var klines = await connector.GetKlinesAsync(symbol, startDate, endDate, klineInterval);
 
+            if (!klines.Any())
+            {
+                _logger.LogWarning("No klines returned for {Symbol} from {Exchange}", symbol, connector.ExchangeName);
+                return new List<PriceDto>();
+            }
+
+            // Log actual interval received
+            if (klines.Count > 1)
+            {
+                var actualInterval = (klines[1].OpenTime - klines[0].OpenTime).TotalMinutes;
+                if (actualInterval != GetIntervalMinutes(klineInterval))
+                {
+                    _logger.LogWarning("Kline interval mismatch for {Symbol} from {Exchange}: requested {Requested}min, got {Actual}min",
+                        symbol, connector.ExchangeName, GetIntervalMinutes(klineInterval), actualInterval);
+                }
+            }
+
             // Convert KlineDto to PriceDto format
             var prices = klines.Select(k => new PriceDto
             {
+                Exchange = connector.ExchangeName, // FIX: Set Exchange field
                 Symbol = symbol,
                 Price = k.Close,
                 Volume24h = k.Volume,
                 Timestamp = k.OpenTime
             }).ToList();
+
+            _logger.LogDebug("Converted {Count} klines to PriceDto for {Symbol} from {Exchange}",
+                prices.Count, symbol, connector.ExchangeName);
 
             return prices;
         }
@@ -407,6 +431,24 @@ public class HistoricalDataFetcher
             "4h" => KlineInterval.FourHours,
             "1d" => KlineInterval.OneDay,
             _ => KlineInterval.OneMinute // default
+        };
+    }
+
+    /// <summary>
+    /// Get interval duration in minutes
+    /// </summary>
+    private int GetIntervalMinutes(KlineInterval interval)
+    {
+        return interval switch
+        {
+            KlineInterval.OneMinute => 1,
+            KlineInterval.FiveMinutes => 5,
+            KlineInterval.FifteenMinutes => 15,
+            KlineInterval.ThirtyMinutes => 30,
+            KlineInterval.OneHour => 60,
+            KlineInterval.FourHours => 240,
+            KlineInterval.OneDay => 1440,
+            _ => 1
         };
     }
 }

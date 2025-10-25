@@ -67,7 +67,12 @@
       "Bash(wait)",
       "Bash(chmod:*)",
       "Bash(time dotnet run:*)",
-      "Bash(./backup_and_fix.sh)"
+      "Bash(./backup_and_fix.sh)",
+      "Bash(jobs)",
+      "Bash(tee:*)",
+      "Read(//private/tmp/**)",
+      "Bash(timeout 90 dotnet run:*)",
+      "Bash(gtimeout 90 dotnet run:*)"
     ],
     "deny": [],
     "ask": []

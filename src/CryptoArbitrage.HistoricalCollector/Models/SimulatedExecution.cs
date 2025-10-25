@@ -31,12 +31,31 @@ public class SimulatedExecution
     public string LongExchange { get; set; } = string.Empty;
     public string ShortExchange { get; set; } = string.Empty;
 
+    // Funding rate details
+    public decimal LongFundingRate { get; set; }
+    public decimal ShortFundingRate { get; set; }
+    public int? LongFundingIntervalHours { get; set; }
+    public int? ShortFundingIntervalHours { get; set; }
+    public decimal? LongNextFundingTimeMinutes { get; set; }  // Minutes until next funding (easier for ML)
+    public decimal? ShortNextFundingTimeMinutes { get; set; } // Minutes until next funding
+
+    // Price spread
+    public decimal? CurrentPriceSpreadPercent { get; set; }
+
     // Profitability metrics at entry
     public decimal FundProfit8h { get; set; }
     public decimal FundApr { get; set; }
     public decimal? FundProfit8h24hProj { get; set; }
+    public decimal? FundApr24hProj { get; set; }
+    public decimal? FundBreakEvenTime24hProj { get; set; }
     public decimal? FundProfit8h3dProj { get; set; }
+    public decimal? FundApr3dProj { get; set; }
+    public decimal? FundBreakEvenTime3dProj { get; set; }
     public decimal? BreakEvenTimeHours { get; set; }
+
+    // Price spread statistics
+    public decimal? PriceSpread24hAvg { get; set; }
+    public decimal? PriceSpread3dAvg { get; set; }
 
     // Risk metrics
     public decimal? SpreadVolatilityCv { get; set; }
@@ -108,28 +127,18 @@ public class SimulatedExecution
     // ===================================================================
 
     /// <summary>
-    /// Total slippage (entry + exit)
-    /// </summary>
-    public decimal TotalSlippagePercent { get; set; }
-
-    /// <summary>
-    /// Entry slippage
-    /// </summary>
-    public decimal EntrySlippagePercent { get; set; }
-
-    /// <summary>
-    /// Exit slippage
-    /// </summary>
-    public decimal ExitSlippagePercent { get; set; }
-
-    /// <summary>
-    /// Total fees in USD
+    /// Total fees in USD (trading fees for entry and exit)
     /// </summary>
     public decimal TotalFeesUsd { get; set; }
 
     // ===================================================================
     // PRICE DATA
     // ===================================================================
+    // NOTE: These prices already include slippage adjustments
+    // - Entry long: market price + slippage (paying ask)
+    // - Entry short: market price - slippage (receiving bid)
+    // - Exit long: market price - slippage (receiving bid)
+    // - Exit short: market price + slippage (paying ask)
 
     public decimal EntryLongPrice { get; set; }
     public decimal EntryShortPrice { get; set; }

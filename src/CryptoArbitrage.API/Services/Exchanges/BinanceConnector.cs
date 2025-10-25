@@ -1134,15 +1134,21 @@ public class BinanceConnector : IExchangeConnector
             var results = new List<FundingRateDto>();
 
             // Binance uses variable funding intervals: 1h, 4h, or 8h
-            // To cover 3 days (72 hours) for all intervals:
-            // - 1h interval: 72 records needed
-            // - 4h interval: 18 records needed
-            // - 8h interval: 9 records needed
-            // Using limit without startTime/endTime to avoid 403 errors on public API
-            const int limit = 75; // Fetch last 75 records to cover 3+ days for all interval types
+            // Calculate required limit based on time range and smallest interval (1h)
+            // Add buffer to account for varying intervals
+            var timeRangeHours = (endTime - startTime).TotalHours;
+            var maxRecordsNeeded = (int)Math.Ceiling(timeRangeHours) + 10; // +10 buffer
+            var limit = Math.Min(maxRecordsNeeded, 1000); // Binance max is 1000
 
+            _logger.LogDebug("Fetching funding rates for {Symbol} from {Start} to {End} (limit: {Limit})",
+                symbol, startTime, endTime, limit);
+
+            // Use startTime and endTime to get data for the specific date range
+            // Note: Binance expects millisecond timestamps
             var historicalRates = await _restClient.UsdFuturesApi.ExchangeData.GetFundingRatesAsync(
                 symbol,
+                startTime: startTime,
+                endTime: endTime,
                 limit: limit);
 
             if (!historicalRates.Success || historicalRates.Data == null || !historicalRates.Data.Any())
@@ -1164,17 +1170,20 @@ public class BinanceConnector : IExchangeConnector
                 return results;
             }
 
-            // Filter to only include rates from the last 3 days
-            var threeDaysAgo = DateTime.UtcNow.AddDays(-3);
+            // Filter to only include rates within the requested time range
+            // Keep rates where fundingTime is within [startTime, endTime]
             var filteredRates = historicalRates.Data
-                .Where(r => r.FundingTime >= threeDaysAgo)
+                .Where(r => r.FundingTime >= startTime && r.FundingTime <= endTime)
                 .OrderBy(r => r.FundingTime)
                 .ToList();
 
+            _logger.LogDebug("Received {Total} rates, {Filtered} within range [{Start}, {End}] for {Symbol}",
+                historicalRates.Data.Count(), filteredRates.Count, startTime, endTime, symbol);
+
             if (!filteredRates.Any())
             {
-                _logger.LogWarning("No funding rates found within last 3 days for {Symbol} on {Exchange}",
-                    symbol, ExchangeName);
+                _logger.LogWarning("No funding rates found within requested range [{Start}, {End}] for {Symbol} on {Exchange}",
+                    startTime, endTime, symbol, ExchangeName);
                 return results;
             }
 
@@ -1259,6 +1268,9 @@ public class BinanceConnector : IExchangeConnector
             };
 
             // Binance API limit is 1500 records per request
+            _logger.LogDebug("Requesting klines for {Symbol}: interval={Interval}, start={Start}, end={End}",
+                symbol, binanceInterval, startTime, endTime);
+
             var klines = await _restClient.UsdFuturesApi.ExchangeData.GetKlinesAsync(
                 symbol,
                 binanceInterval,
@@ -1289,7 +1301,20 @@ public class BinanceConnector : IExchangeConnector
                 Volume = k.Volume
             }).ToList();
 
-            _logger.LogDebug("Fetched {Count} klines for {Symbol} on {Exchange}", results.Count, symbol, ExchangeName);
+            // Log first and last kline timestamps to verify interval
+            if (results.Count > 1)
+            {
+                var firstKline = results.First();
+                var secondKline = results.Skip(1).First();
+                var intervalMinutes = (secondKline.OpenTime - firstKline.OpenTime).TotalMinutes;
+                _logger.LogDebug("Fetched {Count} klines for {Symbol} on {Exchange}, actual interval: {ActualInterval} minutes (requested: {RequestedInterval})",
+                    results.Count, symbol, ExchangeName, intervalMinutes, interval);
+            }
+            else
+            {
+                _logger.LogDebug("Fetched {Count} klines for {Symbol} on {Exchange}", results.Count, symbol, ExchangeName);
+            }
+
             return results;
         }
         catch (Exception ex)
