@@ -95,4 +95,70 @@ public class OpportunityPersister
 
         return snapshots;
     }
+
+    /// <summary>
+    /// Load ALL opportunities from all day folders in data/opportunities/
+    /// Scans for all opportunities.json files in subfolders and merges them
+    /// </summary>
+    public async Task<List<HistoricalMarketSnapshot>> LoadAllOpportunitiesAsync()
+    {
+        if (!Directory.Exists(BaseDataPath))
+        {
+            throw new DirectoryNotFoundException($"Opportunities directory not found: {BaseDataPath}. Run 'detect' command first.");
+        }
+
+        _logger.LogInformation("Loading all opportunities from {Path}...", BaseDataPath);
+
+        // Find all opportunities.json files in subfolders
+        var opportunityFiles = Directory.GetFiles(BaseDataPath, "opportunities.json", SearchOption.AllDirectories)
+            .OrderBy(f => f)
+            .ToList();
+
+        if (!opportunityFiles.Any())
+        {
+            throw new FileNotFoundException($"No opportunity files found in {BaseDataPath}. Run 'detect' command first.");
+        }
+
+        _logger.LogInformation("Found {Count} opportunity file(s) to load", opportunityFiles.Count);
+
+        var allSnapshots = new List<HistoricalMarketSnapshot>();
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
+        // Load each file and merge snapshots
+        foreach (var filePath in opportunityFiles)
+        {
+            try
+            {
+                var json = await File.ReadAllTextAsync(filePath);
+                var snapshots = JsonSerializer.Deserialize<List<HistoricalMarketSnapshot>>(json, options);
+
+                if (snapshots != null && snapshots.Any())
+                {
+                    var dayFolder = Path.GetFileName(Path.GetDirectoryName(filePath));
+                    var opportunityCount = snapshots.Sum(s => s.Opportunities.Count);
+
+                    _logger.LogInformation("  Loaded {Day}: {SnapshotCount} snapshots, {OpportunityCount} opportunities",
+                        dayFolder, snapshots.Count, opportunityCount);
+
+                    allSnapshots.AddRange(snapshots);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load opportunities from {Path}, skipping", filePath);
+            }
+        }
+
+        // Sort by timestamp to ensure chronological order
+        allSnapshots = allSnapshots.OrderBy(s => s.Timestamp).ToList();
+
+        var totalOpportunities = allSnapshots.Sum(s => s.Opportunities.Count);
+        _logger.LogInformation("Loaded total: {SnapshotCount} snapshots with {OpportunityCount} opportunities from {FileCount} file(s)",
+            allSnapshots.Count, totalOpportunities, opportunityFiles.Count);
+
+        return allSnapshots;
+    }
 }

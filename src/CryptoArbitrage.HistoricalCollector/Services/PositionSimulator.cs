@@ -40,10 +40,33 @@ public class PositionSimulator
         var simulations = new List<SimulatedExecution>();
         var maxHoldHours = holdDurations.Max();
 
-        // Calculate how many snapshots we can use (need to leave room for max hold duration)
-        var usableSnapshotCount = snapshots.Count - (int)(maxHoldHours * 60); // Convert hours to minutes
+        // Calculate how many snapshots we can use based on time coverage (not count)
+        // We need enough future data to exit at entryTime + maxHoldHours
+        if (!snapshots.Any())
+        {
+            _logger.LogWarning("No snapshots provided for simulation");
+            return simulations;
+        }
 
-        for (int i = 0; i < usableSnapshotCount; i++)
+        var firstSnapshotTime = snapshots.First().Timestamp;
+        var lastSnapshotTime = snapshots.Last().Timestamp;
+        var totalTimeCoverage = (lastSnapshotTime - firstSnapshotTime).TotalHours;
+
+        _logger.LogInformation(
+            "Time coverage: {TotalHours:F1}h ({Start} to {End})",
+            totalTimeCoverage, firstSnapshotTime.ToString("yyyy-MM-dd HH:mm"),
+            lastSnapshotTime.ToString("yyyy-MM-dd HH:mm"));
+
+        _logger.LogInformation(
+            "Hold durations: {Durations}",
+            string.Join(", ", holdDurations.Select(h => $"{h}h")));
+
+        // Track per-duration statistics
+        var durationStats = holdDurations.ToDictionary(d => d, d => 0);
+        var skippedByDuration = holdDurations.ToDictionary(d => d, d => 0);
+
+        // Process ALL snapshots - check data availability per snapshot per duration
+        for (int i = 0; i < snapshots.Count; i++)
         {
             var entrySnapshot = snapshots[i];
 
@@ -53,6 +76,15 @@ public class PositionSimulator
                 // Simulate each hold duration
                 foreach (var holdHours in holdDurations)
                 {
+                    // Check if we have enough future data for this specific hold duration
+                    var requiredExitTime = entrySnapshot.Timestamp.AddHours((double)holdHours);
+                    if (requiredExitTime > lastSnapshotTime)
+                    {
+                        // Not enough future data for this hold duration from this snapshot
+                        skippedByDuration[holdHours]++;
+                        continue;
+                    }
+
                     try
                     {
                         var simulation = SimulateSinglePosition(
@@ -62,7 +94,10 @@ public class PositionSimulator
                             holdHours);
 
                         if (simulation != null)
+                        {
                             simulations.Add(simulation);
+                            durationStats[holdHours]++;
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -73,15 +108,43 @@ public class PositionSimulator
                 }
             }
 
-            if ((i + 1) % 1000 == 0)
+            if ((i + 1) % 100 == 0 || i == snapshots.Count - 1)
             {
+                var percentComplete = ((i + 1) * 100.0) / snapshots.Count;
                 _logger.LogInformation(
-                    "Simulated {Count} snapshots ({Simulations} total simulations)...",
-                    i + 1, simulations.Count);
+                    "Progress: {Percent:F1}% - Processed {Current}/{Total} snapshots ({Simulations} simulations generated)",
+                    percentComplete, i + 1, snapshots.Count, simulations.Count);
             }
         }
 
-        _logger.LogInformation("Simulation complete: {Count} simulated positions generated", simulations.Count);
+        var profitableCount = simulations.Count(s => s.WasProfitable);
+        var profitablePercent = simulations.Any() ? (profitableCount * 100.0 / simulations.Count) : 0;
+
+        _logger.LogInformation(
+            "Simulation complete: {Total} simulations generated, {Profitable} profitable ({Percent:F1}%)",
+            simulations.Count, profitableCount, profitablePercent);
+
+        // Log per-duration statistics
+        _logger.LogInformation("Simulations by hold duration:");
+        foreach (var duration in holdDurations.OrderBy(d => d))
+        {
+            var count = durationStats[duration];
+            var skipped = skippedByDuration[duration];
+            _logger.LogInformation(
+                "  {Duration}h: {Count} simulations ({Skipped} skipped - insufficient future data)",
+                duration, count, skipped);
+        }
+
+        if (simulations.Any())
+        {
+            var avgProfit = simulations.Average(s => s.ActualProfitPercent);
+            _logger.LogInformation(
+                "Average profit: {AvgProfit:F3}%, Min: {Min:F3}%, Max: {Max:F3}%",
+                avgProfit,
+                simulations.Min(s => s.ActualProfitPercent),
+                simulations.Max(s => s.ActualProfitPercent));
+        }
+
         return simulations;
     }
 
@@ -132,6 +195,9 @@ public class PositionSimulator
             entryPrices,
             DEFAULT_POSITION_SIZE);
 
+        // Calculate total fees
+        var totalFeesUsd = DEFAULT_POSITION_SIZE * (opportunity.PositionCostPercent / 100);
+
         // Build simulation result
         return new SimulatedExecution
         {
@@ -152,12 +218,37 @@ public class PositionSimulator
             LongExchange = opportunity.LongExchange,
             ShortExchange = opportunity.ShortExchange,
 
+            // Funding rate details
+            LongFundingRate = opportunity.LongFundingRate,
+            ShortFundingRate = opportunity.ShortFundingRate,
+            LongFundingIntervalHours = opportunity.LongFundingIntervalHours,
+            ShortFundingIntervalHours = opportunity.ShortFundingIntervalHours,
+            LongNextFundingTimeMinutes = opportunity.LongNextFundingTime.HasValue
+                ? (decimal?)(opportunity.LongNextFundingTime.Value - entrySnapshot.Timestamp).TotalMinutes
+                : null,
+            ShortNextFundingTimeMinutes = opportunity.ShortNextFundingTime.HasValue
+                ? (decimal?)(opportunity.ShortNextFundingTime.Value - entrySnapshot.Timestamp).TotalMinutes
+                : null,
+
+            // Price spread
+            CurrentPriceSpreadPercent = opportunity.CurrentPriceSpreadPercent,
+
+            // Profitability metrics
             FundProfit8h = opportunity.FundProfit8h,
             FundApr = opportunity.FundApr,
             FundProfit8h24hProj = opportunity.FundProfit8h24hProj,
+            FundApr24hProj = opportunity.FundApr24hProj,
+            FundBreakEvenTime24hProj = opportunity.FundBreakEvenTime24hProj,
             FundProfit8h3dProj = opportunity.FundProfit8h3dProj,
+            FundApr3dProj = opportunity.FundApr3dProj,
+            FundBreakEvenTime3dProj = opportunity.FundBreakEvenTime3dProj,
             BreakEvenTimeHours = opportunity.BreakEvenTimeHours,
 
+            // Price spread statistics
+            PriceSpread24hAvg = opportunity.PriceSpread24hAvg,
+            PriceSpread3dAvg = opportunity.PriceSpread3dAvg,
+
+            // Risk metrics
             SpreadVolatilityCv = opportunity.SpreadVolatilityCv,
             SpreadVolatilityStdDev = opportunity.SpreadVolatilityStdDev,
             Spread30SampleAvg = opportunity.Spread30SampleAvg,
@@ -184,13 +275,10 @@ public class PositionSimulator
             FundingPaymentsCount = fundingPayments.Count,
             TotalFundingEarnedUsd = fundingPayments.Sum(f => f.Amount),
 
-            // Execution quality
-            TotalSlippagePercent = pnl.EntrySlippage + pnl.ExitSlippage,
-            EntrySlippagePercent = pnl.EntrySlippage,
-            ExitSlippagePercent = pnl.ExitSlippage,
-            TotalFeesUsd = pnl.TotalFees,
+            // Execution quality (slippage is already included in entry/exit prices)
+            TotalFeesUsd = totalFeesUsd,
 
-            // Prices
+            // Prices (already include slippage - long entry has +slippage, exit has -slippage, etc.)
             EntryLongPrice = entryPrices.LongPrice,
             EntryShortPrice = entryPrices.ShortPrice,
             ExitLongPrice = exitPrices.LongPrice,
@@ -418,43 +506,39 @@ public class PositionSimulator
         return (peakProfit, maxDrawdown);
     }
 
-    private (decimal TotalProfitPercent, decimal TotalProfitUsd, decimal EntrySlippage, decimal ExitSlippage, decimal TotalFees) CalculatePnL(
+    private (decimal TotalProfitPercent, decimal TotalProfitUsd) CalculatePnL(
         ArbitrageOpportunityDto opportunity,
         (decimal LongPrice, decimal ShortPrice, decimal LongSlippage, decimal ShortSlippage) entryPrices,
         (decimal LongPrice, decimal ShortPrice, decimal LongSlippage, decimal ShortSlippage) exitPrices,
         List<FundingPayment> fundingPayments,
         decimal positionSize)
     {
-        // Long position PnL
+        // Long position PnL (BUY low, SELL high)
+        // Entry: paid ask + slippage, Exit: received bid - slippage
         var longPnl = (exitPrices.LongPrice - entryPrices.LongPrice) / entryPrices.LongPrice;
 
-        // Short position PnL
+        // Short position PnL (SELL high, BUY low)
+        // Entry: received bid - slippage, Exit: paid ask + slippage
         var shortPnl = (entryPrices.ShortPrice - exitPrices.ShortPrice) / entryPrices.ShortPrice;
 
         // Price PnL (average of long and short)
+        // For neutral arbitrage, this should be near zero as price movements cancel out
+        // Any non-zero value is due to price spread changes + slippage impact
         var pricePnl = (longPnl + shortPnl) / 2;
 
-        // Funding PnL
+        // Funding PnL (net funding received from short minus funding paid on long)
         var fundingPnl = fundingPayments.Sum(f => f.Amount) / positionSize;
 
         // Total PnL before fees
         var totalPnlBeforeFees = pricePnl + fundingPnl;
 
-        // Calculate fees (use position cost percent from opportunity)
-        var feesPercent = opportunity.PositionCostPercent / 100;
-        var totalFees = positionSize * feesPercent;
-
-        // Total PnL after fees
+        // Total PnL after fees (position cost includes entry + exit trading fees)
+        // totalPnlBeforeFees is in decimal (0.03 = 3%), multiply by 100 to get percent
+        // Then subtract position cost percent (e.g., 0.2% for 0.1% entry + 0.1% exit)
         var totalPnlPercent = (totalPnlBeforeFees * 100) - opportunity.PositionCostPercent;
         var totalPnlUsd = (totalPnlPercent / 100) * positionSize;
 
-        return (
-            totalPnlPercent,
-            totalPnlUsd,
-            entryPrices.LongSlippage,
-            exitPrices.LongSlippage,
-            totalFees
-        );
+        return (totalPnlPercent, totalPnlUsd);
     }
 
     private decimal GetPrice(HistoricalMarketSnapshot snapshot, string exchange, string symbol)

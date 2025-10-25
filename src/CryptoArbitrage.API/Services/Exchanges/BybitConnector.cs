@@ -1158,16 +1158,22 @@ public class BybitConnector : IExchangeConnector
             var results = new List<FundingRateDto>();
 
             // Bybit uses variable funding intervals: 1h, 4h, or 8h
-            // To cover 3 days (72 hours) for all intervals:
-            // - 1h interval: 72 records needed
-            // - 4h interval: 18 records needed
-            // - 8h interval: 9 records needed
-            // Fetch last 75 records to cover 3+ days for all interval types
-            const int limit = 75;
+            // Calculate required limit based on time range and smallest interval (1h)
+            // Add buffer to account for varying intervals
+            var timeRangeHours = (endTime - startTime).TotalHours;
+            var maxRecordsNeeded = (int)Math.Ceiling(timeRangeHours) + 10; // +10 buffer
+            var limit = Math.Min(maxRecordsNeeded, 200); // Bybit max is 200
 
+            _logger.LogDebug("Fetching funding rates for {Symbol} from {Start} to {End} (limit: {Limit})",
+                symbol, startTime, endTime, limit);
+
+            // Use startTime and endTime to get data for the specific date range
+            // Note: Bybit expects millisecond timestamps
             var historicalRates = await _restClient.V5Api.ExchangeData.GetFundingRateHistoryAsync(
                 Category.Linear,
                 symbol,
+                startTime: startTime,
+                endTime: endTime,
                 limit: limit);
 
             if (!historicalRates.Success || historicalRates.Data?.List == null || !historicalRates.Data.List.Any())
@@ -1189,17 +1195,20 @@ public class BybitConnector : IExchangeConnector
                 return results;
             }
 
-            // Filter to only include rates from the last 3 days
-            var threeDaysAgo = DateTime.UtcNow.AddDays(-3);
+            // Filter to only include rates within the requested time range
+            // Keep rates where timestamp is within [startTime, endTime]
             var filteredRates = historicalRates.Data.List
-                .Where(r => r.Timestamp >= threeDaysAgo)
+                .Where(r => r.Timestamp >= startTime && r.Timestamp <= endTime)
                 .OrderBy(r => r.Timestamp)
                 .ToList();
 
+            _logger.LogDebug("Received {Total} rates, {Filtered} within range [{Start}, {End}] for {Symbol}",
+                historicalRates.Data.List.Count(), filteredRates.Count, startTime, endTime, symbol);
+
             if (!filteredRates.Any())
             {
-                _logger.LogWarning("No funding rates found within last 3 days for {Symbol} on {Exchange}",
-                    symbol, ExchangeName);
+                _logger.LogWarning("No funding rates found within requested range [{Start}, {End}] for {Symbol} on {Exchange}",
+                    startTime, endTime, symbol, ExchangeName);
                 return results;
             }
 

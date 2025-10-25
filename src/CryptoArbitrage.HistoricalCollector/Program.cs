@@ -368,12 +368,11 @@ detectCommand.SetHandler(async (startDate, endDate, interval, output, singleTime
     // === SINGLE TIMESTAMP MODE ===
     if (specificTimestamp.HasValue)
     {
-        Console.WriteLine($"Loading data from {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}...");
         Console.WriteLine($"Generating opportunity for single timestamp: {specificTimestamp:yyyy-MM-dd HH:mm:ss}");
         Console.WriteLine();
 
-        // Load ALL data from the entire date range
-        var (fundingRates, priceKlines, liquidityMetrics) = await loader.LoadRawDataAsync(startDate, endDate, exchanges);
+        // Load ALL available data from raw folder (for historical averages)
+        var (fundingRates, priceKlines, liquidityMetrics) = await loader.LoadAllAvailableDataAsync(exchanges);
 
         // Check if we have data
         var hasFundingData = fundingRates.Any(kvp => kvp.Value.Any());
@@ -423,53 +422,80 @@ detectCommand.SetHandler(async (startDate, endDate, interval, output, singleTime
 
     // === STANDARD DAY-BY-DAY MODE ===
     var totalDays = (int)(endDate.Date - startDate.Date).TotalDays + 1;
-    Console.WriteLine($"Processing {totalDays} day(s)...");
+    Console.WriteLine($"Generating opportunities for {totalDays} day(s): {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}");
     Console.WriteLine();
 
-    var currentDay = startDate.Date;
-    var dayNumber = 0;
+    // Step 2: Load ALL available data from raw folder (for historical averages)
+    var (allFundingRates, allPriceKlines, allLiquidityMetrics) = await loader.LoadAllAvailableDataAsync(exchanges);
 
-    // Process each day individually to minimize memory usage
-    while (currentDay <= endDate.Date)
+    // Check if we have any data for the range
+    var hasAnyFundingData = allFundingRates.Any(kvp => kvp.Value.Any());
+    var hasAnyPriceData = allPriceKlines.Any(kvp => kvp.Value.Any());
+
+    if (!hasAnyFundingData && !hasAnyPriceData)
     {
-        dayNumber++;
-        Console.WriteLine($"[Day {dayNumber}/{totalDays}] Processing {currentDay:yyyy-MM-dd}...");
+        Console.WriteLine($"⚠️  No data found for date range - ensure 'collect' command has been run for these dates");
+        return;
+    }
 
-        // Step 2: Load raw data for this day only
-        var dayEnd = currentDay.AddDays(1).AddTicks(-1); // End of day
-        var (fundingRates, priceKlines, liquidityMetrics) = await loader.LoadRawDataAsync(currentDay, currentDay, exchanges);
+    Console.WriteLine($"✓ Data loaded successfully");
+    Console.WriteLine();
 
-        // Check if we have data for this day
-        var hasFundingData = fundingRates.Any(kvp => kvp.Value.Any());
-        var hasPriceData = priceKlines.Any(kvp => kvp.Value.Any());
-
-        if (!hasFundingData && !hasPriceData)
-        {
-            Console.WriteLine($"  ⚠️  No data found for {currentDay:yyyy-MM-dd} - skipping");
-            currentDay = currentDay.AddDays(1);
-            continue;
-        }
-
-        // Step 3: Detect opportunities for this day
-        var daySnapshots = await reconstructor.BackfillHistoricalSnapshots(
-            currentDay, dayEnd, intervalTimeSpan,
-            fundingRates, priceKlines, liquidityMetrics ?? new Dictionary<string, Dictionary<string, LiquidityMetricsDto>>());
-
-        var dayOpportunities = daySnapshots.Sum(s => s.Opportunities.Count);
-        Console.WriteLine($"  ✓ {daySnapshots.Count} snapshots, {dayOpportunities} opportunities");
-
-        // Step 4: Save this day's opportunities immediately
-        if (daySnapshots.Any())
-        {
-            await opportunityPersister.SaveOpportunitiesAsync(daySnapshots, currentDay, currentDay, output);
-        }
-
-        // Add to total collection for final summary
-        allSnapshots.AddRange(daySnapshots);
-
-        // Move to next day
+    // Generate list of all days to process
+    var daysToProcess = new List<DateTime>();
+    var currentDay = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
+    while (currentDay <= DateTime.SpecifyKind(endDate.Date, DateTimeKind.Utc))
+    {
+        daysToProcess.Add(currentDay);
         currentDay = currentDay.AddDays(1);
     }
+
+    Console.WriteLine($"Processing {totalDays} day(s) in parallel...");
+    Console.WriteLine();
+
+    // Process all days in parallel
+    var snapshotsLock = new object();
+    var processedCount = 0;
+
+    var dayTasks = daysToProcess.Select(async day =>
+    {
+        try
+        {
+            // Step 3: Detect opportunities for this day
+            var dayEnd = day.AddDays(1).AddTicks(-1); // End of day
+            var daySnapshots = await reconstructor.BackfillHistoricalSnapshots(
+                day, dayEnd, intervalTimeSpan,
+                allFundingRates, allPriceKlines, allLiquidityMetrics ?? new Dictionary<string, Dictionary<string, LiquidityMetricsDto>>());
+
+            var dayOpportunities = daySnapshots.Sum(s => s.Opportunities.Count);
+
+            // Thread-safe logging and collection update
+            lock (snapshotsLock)
+            {
+                processedCount++;
+                Console.WriteLine($"[{processedCount}/{totalDays}] {day:yyyy-MM-dd}: {daySnapshots.Count} snapshots, {dayOpportunities} opportunities");
+                allSnapshots.AddRange(daySnapshots);
+            }
+
+            // Step 4: Save this day's opportunities immediately
+            if (daySnapshots.Any())
+            {
+                await opportunityPersister.SaveOpportunitiesAsync(daySnapshots, day, day, output);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            lock (snapshotsLock)
+            {
+                Console.WriteLine($"[ERROR] Failed to process {day:yyyy-MM-dd}: {ex.Message}");
+            }
+            return false;
+        }
+    });
+
+    await Task.WhenAll(dayTasks);
 
     // Final summary
     var totalOpportunities = allSnapshots.Sum(s => s.Opportunities.Count);
@@ -498,18 +524,18 @@ detectCommand.SetHandler(async (startDate, endDate, interval, output, singleTime
 // === COMMAND: SIMULATE (Phase 3 - from saved opportunities) ===
 var simulateCommand = new Command("simulate", "Simulate positions from persisted opportunities in data/opportunities/");
 
-var opportunitiesFileOption = new Option<string>(
+var opportunitiesFileOption = new Option<string?>(
     "--opportunities-file",
-    description: "Path to JSON file with detected opportunities (from detect command)") { IsRequired = true };
+    description: "Path to specific JSON file (optional - if not provided, loads all from data/opportunities/)") { IsRequired = false };
 
 var simulateOutputOption = new Option<string>(
     "--output",
-    description: "Output CSV file for training data",
-    getDefaultValue: () => "training_data.csv");
+    description: "Output CSV file for training data (saved in data/ directory)",
+    getDefaultValue: () => "data/training_data.csv");
 
 var holdDurationsOption = new Option<string>(
     "--durations",
-    description: "Comma-separated hold durations in hours (e.g., '0.5,1,2,4,6,8,12,24,32,48,72')",
+    description: "Comma-separated hold durations (e.g., '1h,4h,1d,3d,7d' or '0.5,1,2,4,6,8,12,24,32,48,72' in hours)",
     getDefaultValue: () => "0.5,1,2,4,6,8,12,24,32,48,72");
 
 simulateCommand.AddOption(opportunitiesFileOption);
@@ -519,7 +545,6 @@ simulateCommand.AddOption(holdDurationsOption);
 simulateCommand.SetHandler(async (opportunitiesFile, outputFile, durations) =>
 {
     Console.WriteLine("=== PHASE 3: SIMULATE POSITIONS FROM OPPORTUNITIES ===");
-    Console.WriteLine($"Opportunities file: {opportunitiesFile}");
     Console.WriteLine($"Output file: {outputFile}");
     Console.WriteLine($"Hold durations: {durations}");
     Console.WriteLine();
@@ -530,12 +555,24 @@ simulateCommand.SetHandler(async (opportunitiesFile, outputFile, durations) =>
 
     // Step 1: Load opportunities
     Console.WriteLine("Step 1: Loading opportunities...");
-    var snapshots = await opportunityPersister.LoadOpportunitiesAsync(opportunitiesFile);
+    List<HistoricalMarketSnapshot> snapshots;
+
+    if (string.IsNullOrEmpty(opportunitiesFile))
+    {
+        Console.WriteLine("  Loading ALL opportunities from data/opportunities/...");
+        snapshots = await opportunityPersister.LoadAllOpportunitiesAsync();
+    }
+    else
+    {
+        Console.WriteLine($"  Loading from file: {opportunitiesFile}");
+        snapshots = await opportunityPersister.LoadOpportunitiesAsync(opportunitiesFile);
+    }
+    Console.WriteLine();
 
     // Parse hold durations
     var durationArray = durations
         .Split(',', StringSplitOptions.RemoveEmptyEntries)
-        .Select(d => decimal.Parse(d.Trim(), CultureInfo.InvariantCulture))
+        .Select(d => ParseDurationToHours(d))
         .ToArray();
 
     // Step 2: Simulate positions
@@ -655,7 +692,7 @@ fullCommand.SetHandler(async (startDate, endDate, interval, exchanges, symbols, 
     Console.WriteLine("Simulating positions across all opportunities...");
     var durationArray = durations
         .Split(',', StringSplitOptions.RemoveEmptyEntries)
-        .Select(d => decimal.Parse(d.Trim(), CultureInfo.InvariantCulture))
+        .Select(d => ParseDurationToHours(d))
         .ToArray();
 
     var simulations = await simulator.SimulateAllPositions(snapshots, durationArray);
@@ -814,6 +851,30 @@ static TimeSpan ParseInterval(string interval)
         'h' => TimeSpan.FromHours(number),
         'd' => TimeSpan.FromDays(number),
         _ => throw new ArgumentException($"Invalid interval: {interval}")
+    };
+}
+
+static decimal ParseDurationToHours(string duration)
+{
+    duration = duration.Trim();
+
+    // If it's just a number (no unit suffix), treat it as hours
+    if (decimal.TryParse(duration, NumberStyles.Any, CultureInfo.InvariantCulture, out var numericValue))
+    {
+        return numericValue;
+    }
+
+    // Otherwise, parse with unit suffix
+    var numberPart = duration[..^1];
+    var unit = duration[^1];
+    var number = decimal.Parse(numberPart, CultureInfo.InvariantCulture);
+
+    return unit switch
+    {
+        'h' => number,
+        'd' => number * 24m,
+        'm' => number / 60m,
+        _ => throw new ArgumentException($"Invalid duration: {duration}. Expected format: number with optional unit (h/d/m), e.g., '1h', '2d', '30m', or just '1.5' for hours")
     };
 }
 
