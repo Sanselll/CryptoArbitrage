@@ -25,6 +25,13 @@ public class CsvExporter
     {
         _logger.LogInformation("Exporting {Count} simulations to {Path}...", simulations.Count, outputPath);
 
+        // Ensure directory exists
+        var directory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
         var config = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
             HasHeaderRecord = true,
@@ -50,75 +57,76 @@ public class CsvExporter
     {
         public SimulatedExecutionMap()
         {
-            // === TIMING FEATURES ===
+            // ========================================
+            // === INPUT FEATURES (X) - For ML Training ===
+            // ========================================
+
+            // Timing features
             Map(m => m.EntryTime).Name("entry_time");
-            Map(m => m.ExitTime).Name("exit_time");
             Map(m => m.HourOfDay).Name("hour_of_day");
             Map(m => m.DayOfWeek).Name("day_of_week");
 
-            // === MARKET CONTEXT ===
-            Map(m => m.BtcPriceAtEntry).Name("btc_price_at_entry");
-            Map(m => m.MarketRegimeAtEntry).Name("market_regime");
-
-            // === OPPORTUNITY IDENTIFIERS ===
+            // Market context
             Map(m => m.Symbol).Name("symbol");
             Map(m => m.Strategy).Name("strategy");
             Map(m => m.LongExchange).Name("long_exchange");
             Map(m => m.ShortExchange).Name("short_exchange");
 
-            // === PROFITABILITY FEATURES ===
+            // Funding rate details
+            Map(m => m.LongFundingRate).Name("long_funding_rate");
+            Map(m => m.ShortFundingRate).Name("short_funding_rate");
+            Map(m => m.LongFundingIntervalHours).Name("long_funding_interval_hours");
+            Map(m => m.ShortFundingIntervalHours).Name("short_funding_interval_hours");
+            Map(m => m.LongNextFundingTimeMinutes).Name("long_next_funding_minutes");
+            Map(m => m.ShortNextFundingTimeMinutes).Name("short_next_funding_minutes");
+
+            // Price spread
+            Map(m => m.CurrentPriceSpreadPercent).Name("current_price_spread_pct");
+
+            // Profitability projections
             Map(m => m.FundProfit8h).Name("fund_profit_8h");
             Map(m => m.FundApr).Name("fund_apr");
             Map(m => m.FundProfit8h24hProj).Name("fund_profit_8h_24h_proj");
+            Map(m => m.FundApr24hProj).Name("fund_apr_24h_proj");
+            Map(m => m.FundBreakEvenTime24hProj).Name("fund_break_even_24h_proj");
             Map(m => m.FundProfit8h3dProj).Name("fund_profit_8h_3d_proj");
+            Map(m => m.FundApr3dProj).Name("fund_apr_3d_proj");
+            Map(m => m.FundBreakEvenTime3dProj).Name("fund_break_even_3d_proj");
             Map(m => m.BreakEvenTimeHours).Name("break_even_hours");
 
-            // === RISK FEATURES ===
-            Map(m => m.SpreadVolatilityCv).Name("spread_volatility_cv");
-            Map(m => m.SpreadVolatilityStdDev).Name("spread_volatility_stddev");
+            // Price spread statistics
+            Map(m => m.PriceSpread24hAvg).Name("price_spread_24h_avg");
+            Map(m => m.PriceSpread3dAvg).Name("price_spread_3d_avg");
+
+            // Risk/volatility metrics
             Map(m => m.Spread30SampleAvg).Name("spread_30sample_avg");
+            Map(m => m.SpreadVolatilityStdDev).Name("spread_volatility_stddev");
+            Map(m => m.SpreadVolatilityCv).Name("spread_volatility_cv");
 
-            // === LIQUIDITY FEATURES ===
+            // Volume/liquidity
             Map(m => m.Volume24h).Name("volume_24h");
-            Map(m => m.LongVolume24h).Name("long_volume_24h");
-            Map(m => m.ShortVolume24h).Name("short_volume_24h");
-            Map(m => m.BidAskSpreadPercent).Name("bid_ask_spread_pct");
-            Map(m => m.OrderbookDepthUsd).Name("orderbook_depth_usd");
-            Map(m => m.LiquidityStatus).Name("liquidity_status");
-
-            // === POSITION DETAILS ===
-            Map(m => m.PositionCostPercent).Name("position_cost_pct");
-            Map(m => m.PositionSizeUsd).Name("position_size_usd");
-
-            // === PRICE DATA ===
-            Map(m => m.EntryLongPrice).Name("entry_long_price");
-            Map(m => m.EntryShortPrice).Name("entry_short_price");
-            Map(m => m.ExitLongPrice).Name("exit_long_price");
-            Map(m => m.ExitShortPrice).Name("exit_short_price");
 
             // ========================================
-            // === TARGET VARIABLES (y) ===
+            // === TARGET VARIABLES (y) - What We Predict ===
             // ========================================
 
-            Map(m => m.ActualHoldHours).Name("target_hold_hours");
-            Map(m => m.ActualProfitPercent).Name("target_profit_pct");
-            Map(m => m.ActualProfitUsd).Name("target_profit_usd");
-            Map(m => m.WasProfitable).Name("target_was_profitable");
+            Map(m => m.ActualHoldHours).Name("actual_hold_hours");
+            Map(m => m.ActualProfitPercent).Name("actual_profit_pct");
+            Map(m => m.WasProfitable).Name("was_profitable");
 
-            // === PERFORMANCE METRICS ===
+            // === OPTIONAL: Additional metrics for analysis ===
+            Map(m => m.ExitTime).Name("exit_time");
             Map(m => m.PeakUnrealizedProfitPercent).Name("peak_profit_pct");
             Map(m => m.MaxDrawdownPercent).Name("max_drawdown_pct");
-            Map(m => m.FundingPaymentsCount).Name("funding_payments_count");
-            Map(m => m.TotalFundingEarnedUsd).Name("total_funding_usd");
 
-            // === EXECUTION QUALITY ===
-            Map(m => m.TotalSlippagePercent).Name("total_slippage_pct");
-            Map(m => m.EntrySlippagePercent).Name("entry_slippage_pct");
-            Map(m => m.ExitSlippagePercent).Name("exit_slippage_pct");
-            Map(m => m.TotalFeesUsd).Name("total_fees_usd");
-
-            // Ignore OpportunitySnapshotJson (too large for CSV, store separately if needed)
-            // Can be used for detailed analysis later
+            // Note: Removed unnecessary columns:
+            // - MarketRegimeAtEntry, BtcPriceAtEntry (not in user's requested list)
+            // - Long/ShortVolume24h (user only requested combined Volume24h)
+            // - BidAskSpreadPercent, OrderbookDepthUsd, LiquidityStatus (not requested)
+            // - PositionCostPercent, PositionSizeUsd (constant values, not useful for ML)
+            // - Entry/ExitLongPrice, Entry/ExitShortPrice (internal calculation details)
+            // - FundingPaymentsCount, TotalFundingEarnedUsd, TotalFeesUsd (derivatives)
+            // - ActualProfitUsd (can be calculated from ActualProfitPercent if needed)
         }
     }
 }

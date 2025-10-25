@@ -282,6 +282,10 @@ public class SnapshotReconstructor
     {
         var result = new Dictionary<string, List<FundingRateDto>>();
 
+        // DEBUG: Log timestamp details
+        _logger.LogDebug("GetFundingRatesAt called with timestamp: {Timestamp}, Kind: {Kind}, UTC: {Utc}",
+            timestamp, timestamp.Kind, timestamp.ToUniversalTime());
+
         foreach (var (exchange, allRates) in fundingHistory)
         {
             // Group by symbol

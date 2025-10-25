@@ -46,6 +46,83 @@ public class RawDataLoader
     }
 
     /// <summary>
+    /// Load raw market data with sufficient history for calculating averages
+    /// Loads target date range + 3 days of history for 3-day averages
+    /// Much faster than LoadAllAvailableDataAsync when you only need recent data
+    /// </summary>
+    public async Task<(
+        Dictionary<string, List<FundingRateDto>> FundingRates,
+        Dictionary<string, Dictionary<string, List<PriceDto>>> PriceKlines,
+        Dictionary<string, Dictionary<string, LiquidityMetricsDto>>? LiquidityMetrics
+    )> LoadDataWithHistoryAsync(DateTime startDate, DateTime endDate, List<string> exchanges, int historyDays = 3)
+    {
+        // Calculate the earliest date we need (target start - history days)
+        var dataStartDate = startDate.AddDays(-historyDays);
+
+        _logger.LogInformation(
+            "Loading data from {DataStart} to {DataEnd} (target: {TargetStart} to {TargetEnd}, with {HistoryDays}d history)",
+            dataStartDate.ToString("yyyy-MM-dd"),
+            endDate.ToString("yyyy-MM-dd"),
+            startDate.ToString("yyyy-MM-dd"),
+            endDate.ToString("yyyy-MM-dd"),
+            historyDays);
+
+        // Use existing LoadRawDataAsync with expanded date range
+        return await LoadRawDataAsync(dataStartDate, endDate, exchanges);
+    }
+
+    /// <summary>
+    /// Load ALL available raw market data from all day folders in data/raw/
+    /// Scans the directory and loads everything, regardless of dates
+    /// WARNING: This can be slow if you have many days of data. Consider using LoadDataWithHistoryAsync instead.
+    /// </summary>
+    public async Task<(
+        Dictionary<string, List<FundingRateDto>> FundingRates,
+        Dictionary<string, Dictionary<string, List<PriceDto>>> PriceKlines,
+        Dictionary<string, Dictionary<string, LiquidityMetricsDto>>? LiquidityMetrics
+    )> LoadAllAvailableDataAsync(List<string> exchanges)
+    {
+        _logger.LogInformation("Loading ALL available raw data from {Path}", BaseDataPath);
+
+        if (!Directory.Exists(BaseDataPath))
+        {
+            throw new DirectoryNotFoundException($"Raw data directory not found: {BaseDataPath}. Run 'collect' command first.");
+        }
+
+        // Find all day folders (format: yyyy-MM-dd)
+        var dayFolders = Directory.GetDirectories(BaseDataPath)
+            .Where(dir => DateTime.TryParseExact(
+                Path.GetFileName(dir),
+                "yyyy-MM-dd",
+                null,
+                System.Globalization.DateTimeStyles.None,
+                out _))
+            .OrderBy(dir => dir)
+            .ToList();
+
+        if (!dayFolders.Any())
+        {
+            throw new FileNotFoundException($"No day folders found in {BaseDataPath}. Run 'collect' command first.");
+        }
+
+        _logger.LogInformation("Found {Count} day folders to load", dayFolders.Count);
+
+        // Parse dates from folder names to get min/max range
+        var dates = dayFolders
+            .Select(dir => DateTime.ParseExact(Path.GetFileName(dir), "yyyy-MM-dd", null))
+            .ToList();
+
+        var minDate = dates.Min();
+        var maxDate = dates.Max();
+
+        _logger.LogInformation("Loading data from {MinDate} to {MaxDate}",
+            minDate.ToString("yyyy-MM-dd"), maxDate.ToString("yyyy-MM-dd"));
+
+        // Use existing LoadRawDataAsync to load the entire range
+        return await LoadRawDataAsync(minDate, maxDate, exchanges);
+    }
+
+    /// <summary>
     /// Load all raw market data for a specific date range from day-by-day folders
     /// </summary>
     public async Task<(

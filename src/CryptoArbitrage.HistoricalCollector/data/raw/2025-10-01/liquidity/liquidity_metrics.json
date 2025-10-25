@@ -1,0 +1,2406 @@
+{
+  "Binance": {
+    "BTCUSDT": {
+      "bidAskSpreadPercent": 0.0000896057749129815918376300,
+      "orderbookDepthUsd": 2485978.22240,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ETHUSDT": {
+      "bidAskSpreadPercent": 0.000252525571370670922564300,
+      "orderbookDepthUsd": 3578341.83784,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GIGGLEUSDT": {
+      "bidAskSpreadPercent": 0.0211546191110829049522963300,
+      "orderbookDepthUsd": 123260.1614000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOLUSDT": {
+      "bidAskSpreadPercent": 0.0051460182683648526952270700,
+      "orderbookDepthUsd": 33930468.612600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XRPUSDT": {
+      "bidAskSpreadPercent": 0.0038190532566976646489335300,
+      "orderbookDepthUsd": 16374277.16084,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HUSDT": {
+      "bidAskSpreadPercent": 0.0056692556267362095356879600,
+      "orderbookDepthUsd": 97765.1057800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "COAIUSDT": {
+      "bidAskSpreadPercent": 0.0136901909781641453898281900,
+      "orderbookDepthUsd": 191852.3160000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "VIRTUALUSDT": {
+      "bidAskSpreadPercent": 0.007712776213798156646484900,
+      "orderbookDepthUsd": 754758.62676000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DOGEUSDT": {
+      "bidAskSpreadPercent": 0.0050670112234298598971396700,
+      "orderbookDepthUsd": 15033843.953030,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BNBUSDT": {
+      "bidAskSpreadPercent": 0.0008968006636324910880434100,
+      "orderbookDepthUsd": 1227286.76920,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EVAAUSDT": {
+      "bidAskSpreadPercent": 0.0052881234036477475238362200,
+      "orderbookDepthUsd": 33240.0744400,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FUSDT": {
+      "bidAskSpreadPercent": 0.0095721259691777543792476300,
+      "orderbookDepthUsd": 59588.8980770,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ASTERUSDT": {
+      "bidAskSpreadPercent": 0.0087646259695867478855339800,
+      "orderbookDepthUsd": 2676727.7669000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZECUSDT": {
+      "bidAskSpreadPercent": 0.0184301221917101310381687800,
+      "orderbookDepthUsd": 574176.08144,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BLESSUSDT": {
+      "bidAskSpreadPercent": 0.0180261378999549346552501100,
+      "orderbookDepthUsd": 106823.4972800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "4USDT": {
+      "bidAskSpreadPercent": 0.0230352823741697700310976300,
+      "orderbookDepthUsd": 164147.6365300,
+      "status": 0,
+      "warningMessage": null
+    },
+    "APRUSDT": {
+      "bidAskSpreadPercent": 0.0215796288303841173931808400,
+      "orderbookDepthUsd": 41102.6197000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SUIUSDT": {
+      "bidAskSpreadPercent": 0.0039250318908841134334216500,
+      "orderbookDepthUsd": 3373168.1974800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HYPEUSDT": {
+      "bidAskSpreadPercent": 0.0023294005287739200316798500,
+      "orderbookDepthUsd": 759577.3900400,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PIPPINUSDT": {
+      "bidAskSpreadPercent": 0.038535645472061657032755300,
+      "orderbookDepthUsd": 231088.5008900,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AVNTUSDT": {
+      "bidAskSpreadPercent": 0.0134870861150448445613325200,
+      "orderbookDepthUsd": 737903.1464500,
+      "status": 0,
+      "warningMessage": null
+    },
+    "KGENUSDT": {
+      "bidAskSpreadPercent": 0.0461133069828722002635046100,
+      "orderbookDepthUsd": 86444.8922200,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EDENUSDT": {
+      "bidAskSpreadPercent": 0.0507743082000507743082000500,
+      "orderbookDepthUsd": 262729.9039000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TRXUSDT": {
+      "bidAskSpreadPercent": 0.0033499154146357804465437200,
+      "orderbookDepthUsd": 2309068.19628,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ENAUSDT": {
+      "bidAskSpreadPercent": 0.0214201563671414801328049700,
+      "orderbookDepthUsd": 5457907.6813000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "1000PEPEUSDT": {
+      "bidAskSpreadPercent": 0.0013900182787403654358054800,
+      "orderbookDepthUsd": 1446582.1326170,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ADAUSDT": {
+      "bidAskSpreadPercent": 0.015219541891789057149379800,
+      "orderbookDepthUsd": 7552846.57330,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AVAXUSDT": {
+      "bidAskSpreadPercent": 0.0050483378347679026680465500,
+      "orderbookDepthUsd": 4295663.3470,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XPINUSDT": {
+      "bidAskSpreadPercent": 0.0170675509283528594243358900,
+      "orderbookDepthUsd": 26332.5963697,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AIXBTUSDT": {
+      "bidAskSpreadPercent": 0.0129693275403670319693923900,
+      "orderbookDepthUsd": 449532.6387000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LINKUSDT": {
+      "bidAskSpreadPercent": 0.0055058499655884377150722600,
+      "orderbookDepthUsd": 3744030.39911,
+      "status": 0,
+      "warningMessage": null
+    },
+    "RIVERUSDT": {
+      "bidAskSpreadPercent": 0.027766208524226016937387200,
+      "orderbookDepthUsd": 78561.1930000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PUMPUSDT": {
+      "bidAskSpreadPercent": 0.024405125076266015863331300,
+      "orderbookDepthUsd": 3360453.1116140,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WLDUSDT": {
+      "bidAskSpreadPercent": 0.0112302768263237688809029100,
+      "orderbookDepthUsd": 2293603.9142000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XPLUSDT": {
+      "bidAskSpreadPercent": 0.0265287173365167794137153500,
+      "orderbookDepthUsd": 2315546.4924000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AIAUSDT": {
+      "bidAskSpreadPercent": 0.0161511749979811031252523600,
+      "orderbookDepthUsd": 138143.4237000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "YBUSDT": {
+      "bidAskSpreadPercent": 0.0348007656168435705585522900,
+      "orderbookDepthUsd": 340438.0982000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TURTLEUSDT": {
+      "bidAskSpreadPercent": 0.0544810678289294470171615400,
+      "orderbookDepthUsd": 250805.4464000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BCHUSDT": {
+      "bidAskSpreadPercent": 0.0019719781899212194713126500,
+      "orderbookDepthUsd": 349367.13756,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TAOUSDT": {
+      "bidAskSpreadPercent": 0.0025711237096172882358234700,
+      "orderbookDepthUsd": 612795.20345,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SPKUSDT": {
+      "bidAskSpreadPercent": 0.0245851259987707437000614600,
+      "orderbookDepthUsd": 266008.4564900,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZKCUSDT": {
+      "bidAskSpreadPercent": 0.0360555255092842978186407100,
+      "orderbookDepthUsd": 238313.0768000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DOODUSDT": {
+      "bidAskSpreadPercent": 0.0373901663862404187698635300,
+      "orderbookDepthUsd": 92360.0908470,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LTCUSDT": {
+      "bidAskSpreadPercent": 0.0103172556100077379417075100,
+      "orderbookDepthUsd": 6727363.26574,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BLUAIUSDT": {
+      "bidAskSpreadPercent": 0.0371126368528483948784561100,
+      "orderbookDepthUsd": 96980.5640800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WLFIUSDT": {
+      "bidAskSpreadPercent": 0.073610599926389400073610600,
+      "orderbookDepthUsd": 1567121.9180000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PENGUUSDT": {
+      "bidAskSpreadPercent": 0.0046359611506455575902273900,
+      "orderbookDepthUsd": 910864.6273960,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FARTCOINUSDT": {
+      "bidAskSpreadPercent": 0.0255264837268666241225271200,
+      "orderbookDepthUsd": 2079204.47727000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "KAITOUSDT": {
+      "bidAskSpreadPercent": 0.0083671505668744509057440500,
+      "orderbookDepthUsd": 201347.0616600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BIOUSDT": {
+      "bidAskSpreadPercent": 0.0109295589922946609104322600,
+      "orderbookDepthUsd": 421869.3705100,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WIFUSDT": {
+      "bidAskSpreadPercent": 0.0182000182000182000182000200,
+      "orderbookDepthUsd": 2779353.94494000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "OPENUSDT": {
+      "bidAskSpreadPercent": 0.0255199693760367487559014900,
+      "orderbookDepthUsd": 268814.2258000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AAVEUSDT": {
+      "bidAskSpreadPercent": 0.0043935765910239230245381300,
+      "orderbookDepthUsd": 890177.9470,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PUMPBTCUSDT": {
+      "bidAskSpreadPercent": 0.0352174678640605740447261800,
+      "orderbookDepthUsd": 58862.6147800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ENSOUSDT": {
+      "bidAskSpreadPercent": 0.0553556601162468862441184600,
+      "orderbookDepthUsd": 270921.0475000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "METUSDT": {
+      "bidAskSpreadPercent": 0.0184314809694958989954842900,
+      "orderbookDepthUsd": 180808.9603000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "NEARUSDT": {
+      "bidAskSpreadPercent": 0.0436205016357688113413304300,
+      "orderbookDepthUsd": 3912768.6710,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LIGHTUSDT": {
+      "bidAskSpreadPercent": 0.0043479206069697167329724600,
+      "orderbookDepthUsd": 52618.5892000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SNXUSDT": {
+      "bidAskSpreadPercent": 0.0812677773262901259650548600,
+      "orderbookDepthUsd": 752906.2544,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ORDERUSDT": {
+      "bidAskSpreadPercent": 0.0183660350791270011325721600,
+      "orderbookDepthUsd": 80229.2264500,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FFUSDT": {
+      "bidAskSpreadPercent": 0.0061929091190586778139030800,
+      "orderbookDepthUsd": 264404.9638700,
+      "status": 0,
+      "warningMessage": null
+    },
+    "UNIUSDT": {
+      "bidAskSpreadPercent": 0.0159782695534073659822641200,
+      "orderbookDepthUsd": 2219885.6220,
+      "status": 0,
+      "warningMessage": null
+    },
+    "JUPUSDT": {
+      "bidAskSpreadPercent": 0.0232531101034763399604697100,
+      "orderbookDepthUsd": 994010.4392000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FILUSDT": {
+      "bidAskSpreadPercent": 0.0638365783593999361634216400,
+      "orderbookDepthUsd": 3727145.3841,
+      "status": 0,
+      "warningMessage": null
+    },
+    "APTUSDT": {
+      "bidAskSpreadPercent": 0.0030204636411689194291323700,
+      "orderbookDepthUsd": 865583.526520,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XLMUSDT": {
+      "bidAskSpreadPercent": 0.003060115978395581192527200,
+      "orderbookDepthUsd": 1038564.37220,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PAXGUSDT": {
+      "bidAskSpreadPercent": 0.0002433732506026530118048200,
+      "orderbookDepthUsd": 287247.2226800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "UBUSDT": {
+      "bidAskSpreadPercent": 0.0167136421305335450394669900,
+      "orderbookDepthUsd": 27747.0584450,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EIGENUSDT": {
+      "bidAskSpreadPercent": 0.0088900742321198382006489800,
+      "orderbookDepthUsd": 1106796.31327000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DOTUSDT": {
+      "bidAskSpreadPercent": 0.0323886639676113360323886600,
+      "orderbookDepthUsd": 4659534.3369,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XANUSDT": {
+      "bidAskSpreadPercent": 0.0371195248700816629547141800,
+      "orderbookDepthUsd": 94425.8201500,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZBTUSDT": {
+      "bidAskSpreadPercent": 0.0365563882288429903125571200,
+      "orderbookDepthUsd": 288270.8662000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "1000BONKUSDT": {
+      "bidAskSpreadPercent": 0.0067048845083643434241845200,
+      "orderbookDepthUsd": 1746233.8585170,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ONDOUSDT": {
+      "bidAskSpreadPercent": 0.0135437123315500778763459100,
+      "orderbookDepthUsd": 2157384.36285000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MERLUSDT": {
+      "bidAskSpreadPercent": 0.017912662973246158373530200,
+      "orderbookDepthUsd": 196804.6168600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "RECALLUSDT": {
+      "bidAskSpreadPercent": 0.0025451445005790203738817300,
+      "orderbookDepthUsd": 24768.4233200,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ARBUSDT": {
+      "bidAskSpreadPercent": 0.0311187179088221565271510800,
+      "orderbookDepthUsd": 2705395.7178100,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PROVEUSDT": {
+      "bidAskSpreadPercent": 0.0110089723124346342268949200,
+      "orderbookDepthUsd": 559252.4418600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LAUSDT": {
+      "bidAskSpreadPercent": 0.0219563069491711494126687900,
+      "orderbookDepthUsd": 242360.3117600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "APEUSDT": {
+      "bidAskSpreadPercent": 0.021994941163532387550863300,
+      "orderbookDepthUsd": 807699.6417,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CAKEUSDT": {
+      "bidAskSpreadPercent": 0.0037085797993658328543084400,
+      "orderbookDepthUsd": 551266.8965000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AI16ZUSDT": {
+      "bidAskSpreadPercent": 0.1389854065323141070187630300,
+      "orderbookDepthUsd": 195919.46127000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TIAUSDT": {
+      "bidAskSpreadPercent": 0.009560686457287633252067500,
+      "orderbookDepthUsd": 1843866.6358000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TRUMPUSDT": {
+      "bidAskSpreadPercent": 0.0166819584619234298106597700,
+      "orderbookDepthUsd": 2232360.01938000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BANKUSDT": {
+      "bidAskSpreadPercent": 0.047545465351242125282301200,
+      "orderbookDepthUsd": 37222.4369500,
+      "status": 0,
+      "warningMessage": null
+    },
+    "STBLUSDT": {
+      "bidAskSpreadPercent": 0.0183587295759133467964016900,
+      "orderbookDepthUsd": 112790.5526400,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CRVUSDT": {
+      "bidAskSpreadPercent": 0.1863932898415657036346691500,
+      "orderbookDepthUsd": 1547048.3402,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HBARUSDT": {
+      "bidAskSpreadPercent": 0.0057735053837937703876908900,
+      "orderbookDepthUsd": 1507158.37201,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TREEUSDT": {
+      "bidAskSpreadPercent": 0.0517196793379881044737522600,
+      "orderbookDepthUsd": 172575.0782000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FETUSDT": {
+      "bidAskSpreadPercent": 0.0384245917387127761767531200,
+      "orderbookDepthUsd": 1144835.5548000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TONUSDT": {
+      "bidAskSpreadPercent": 0.0046235291397924035416233200,
+      "orderbookDepthUsd": 980794.49158000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZORAUSDT": {
+      "bidAskSpreadPercent": 0.0104992388051866239697621900,
+      "orderbookDepthUsd": 545774.2522700,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MIRAUSDT": {
+      "bidAskSpreadPercent": 0.027789356676392941503404200,
+      "orderbookDepthUsd": 360980.4312000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ETCUSDT": {
+      "bidAskSpreadPercent": 0.0062377194897545457380781600,
+      "orderbookDepthUsd": 1726884.49676,
+      "status": 0,
+      "warningMessage": null
+    },
+    "USELESSUSDT": {
+      "bidAskSpreadPercent": 0.0329435018942513589194531400,
+      "orderbookDepthUsd": 272403.2631000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "OPUSDT": {
+      "bidAskSpreadPercent": 0.0222395196263760702768820200,
+      "orderbookDepthUsd": 2717472.08473000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CLOUSDT": {
+      "bidAskSpreadPercent": 0.0623830318153462258265751700,
+      "orderbookDepthUsd": 149535.4346900,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ETHFIUSDT": {
+      "bidAskSpreadPercent": 0.0097007324052965998932919400,
+      "orderbookDepthUsd": 1054079.37147000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "KDAUSDT": {
+      "bidAskSpreadPercent": 0.1707941929974380871050384300,
+      "orderbookDepthUsd": 121381.1595000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZENUSDT": {
+      "bidAskSpreadPercent": 0.0269215237582447166509624400,
+      "orderbookDepthUsd": 784094.3016,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DASHUSDT": {
+      "bidAskSpreadPercent": 0.0240876791521136938455979800,
+      "orderbookDepthUsd": 537955.08417,
+      "status": 0,
+      "warningMessage": null
+    },
+    "B2USDT": {
+      "bidAskSpreadPercent": 0.0394377306402997267528662800,
+      "orderbookDepthUsd": 54703.3543000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EPTUSDT": {
+      "bidAskSpreadPercent": 0.016907599966184800067630400,
+      "orderbookDepthUsd": 72769.6361230,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WALUSDT": {
+      "bidAskSpreadPercent": 0.0399760143913651808914651200,
+      "orderbookDepthUsd": 400691.0031000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOMIUSDT": {
+      "bidAskSpreadPercent": 0.0189519567895385198521747400,
+      "orderbookDepthUsd": 290634.0828000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LDOUSDT": {
+      "bidAskSpreadPercent": 0.0107962213225371120107962200,
+      "orderbookDepthUsd": 1361504.348200,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MLNUSDT": {
+      "bidAskSpreadPercent": 0.0127331762908257464824600500,
+      "orderbookDepthUsd": 120412.8566700,
+      "status": 0,
+      "warningMessage": null
+    },
+    "0GUSDT": {
+      "bidAskSpreadPercent": 0.0113713895838071412326586300,
+      "orderbookDepthUsd": 447610.9078000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "INJUSDT": {
+      "bidAskSpreadPercent": 0.0118112561270891159274788900,
+      "orderbookDepthUsd": 1670152.8461000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SEIUSDT": {
+      "bidAskSpreadPercent": 0.0497388709276299428002984300,
+      "orderbookDepthUsd": 1374297.5556000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SIGNUSDT": {
+      "bidAskSpreadPercent": 0.0242688994054119645674068700,
+      "orderbookDepthUsd": 347811.4810700,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AUCTIONUSDT": {
+      "bidAskSpreadPercent": 0.013560241372296426876398400,
+      "orderbookDepthUsd": 564840.68373000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "2ZUSDT": {
+      "bidAskSpreadPercent": 0.0041691855496028850764003300,
+      "orderbookDepthUsd": 357935.3211400,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ATOMUSDT": {
+      "bidAskSpreadPercent": 0.0315806095057634612348018300,
+      "orderbookDepthUsd": 3113290.20128,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BERAUSDT": {
+      "bidAskSpreadPercent": 0.0524521374246000524521374200,
+      "orderbookDepthUsd": 405156.5682000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PENDLEUSDT": {
+      "bidAskSpreadPercent": 0.0031183248358981555108595700,
+      "orderbookDepthUsd": 331062.2831000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XMRUSDT": {
+      "bidAskSpreadPercent": 0.0148572956750412289954982400,
+      "orderbookDepthUsd": 201816.87083,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ALICEUSDT": {
+      "bidAskSpreadPercent": 0.3034901365705614567526555400,
+      "orderbookDepthUsd": 177829.3747,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GALAUSDT": {
+      "bidAskSpreadPercent": 0.089645898700134468848050200,
+      "orderbookDepthUsd": 850943.30922,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LINEAUSDT": {
+      "bidAskSpreadPercent": 0.0665557404326123128119800300,
+      "orderbookDepthUsd": 889165.0881100,
+      "status": 0,
+      "warningMessage": null
+    },
+    "IPUSDT": {
+      "bidAskSpreadPercent": 0.019082148649937983016887700,
+      "orderbookDepthUsd": 1942836.4254000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SPXUSDT": {
+      "bidAskSpreadPercent": 0.0094737340722845909715314300,
+      "orderbookDepthUsd": 731151.8770000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MYXUSDT": {
+      "bidAskSpreadPercent": 0.0338810774182619007284431600,
+      "orderbookDepthUsd": 199577.7550000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LYNUSDT": {
+      "bidAskSpreadPercent": 0.051820929897797610479343600,
+      "orderbookDepthUsd": 42050.1904700,
+      "status": 0,
+      "warningMessage": null
+    },
+    "1000FLOKIUSDT": {
+      "bidAskSpreadPercent": 0.0135053008305760010804240700,
+      "orderbookDepthUsd": 1302162.9601900,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FORMUSDT": {
+      "bidAskSpreadPercent": 0.0145338274834677712375554100,
+      "orderbookDepthUsd": 387263.7732600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HANAUSDT": {
+      "bidAskSpreadPercent": 0.0184859968573805342453091800,
+      "orderbookDepthUsd": 86580.5623400,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PORT3USDT": {
+      "bidAskSpreadPercent": 0.0488878024932779271571742900,
+      "orderbookDepthUsd": 98664.9563900,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BELUSDT": {
+      "bidAskSpreadPercent": 0.0409752099979512395001024400,
+      "orderbookDepthUsd": 107515.99010,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HOLOUSDT": {
+      "bidAskSpreadPercent": 0.0632711167352103764631445700,
+      "orderbookDepthUsd": 93566.2993000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "INUSDT": {
+      "bidAskSpreadPercent": 0.0212698075082420504094437900,
+      "orderbookDepthUsd": 70127.5103700,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AEROUSDT": {
+      "bidAskSpreadPercent": 0.010662685930585914591885700,
+      "orderbookDepthUsd": 284424.97517000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SWARMSUSDT": {
+      "bidAskSpreadPercent": 0.0539228902669183068212456200,
+      "orderbookDepthUsd": 62512.2333000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "JTOUSDT": {
+      "bidAskSpreadPercent": 0.0087538845362629666914693400,
+      "orderbookDepthUsd": 774083.187800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TOSHIUSDT": {
+      "bidAskSpreadPercent": 0.0258899676375404530744336600,
+      "orderbookDepthUsd": 171211.7752805,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PNUTUSDT": {
+      "bidAskSpreadPercent": 0.0072272612293571351136486800,
+      "orderbookDepthUsd": 467191.9382700,
+      "status": 0,
+      "warningMessage": null
+    },
+    "QUSDT": {
+      "bidAskSpreadPercent": 0.079811644518935312662117400,
+      "orderbookDepthUsd": 29060.9676480,
+      "status": 0,
+      "warningMessage": null
+    },
+    "OMUSDT": {
+      "bidAskSpreadPercent": 0.0085357005676240877470018400,
+      "orderbookDepthUsd": 566670.83005300,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MOODENGUSDT": {
+      "bidAskSpreadPercent": 0.0084734991314663390247002500,
+      "orderbookDepthUsd": 522270.2613000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "RENDERUSDT": {
+      "bidAskSpreadPercent": 0.0402657539762432051540165100,
+      "orderbookDepthUsd": 925884.17860000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ICPUSDT": {
+      "bidAskSpreadPercent": 0.0320564192979644173745792600,
+      "orderbookDepthUsd": 1065105.448000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TRBUSDT": {
+      "bidAskSpreadPercent": 0.0038724417681569113404457200,
+      "orderbookDepthUsd": 234414.8548,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XNYUSDT": {
+      "bidAskSpreadPercent": 0.0285225328009127210496292100,
+      "orderbookDepthUsd": 112041.1194830,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOPHUSDT": {
+      "bidAskSpreadPercent": 0.0034783213621106454025287400,
+      "orderbookDepthUsd": 231396.9926650,
+      "status": 0,
+      "warningMessage": null
+    },
+    "COOKIEUSDT": {
+      "bidAskSpreadPercent": 0.1057641459545214172395557900,
+      "orderbookDepthUsd": 207745.5531000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOONUSDT": {
+      "bidAskSpreadPercent": 0.0281452293836194764987334600,
+      "orderbookDepthUsd": 386038.9600000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DYDXUSDT": {
+      "bidAskSpreadPercent": 0.2954209748892171344165435700,
+      "orderbookDepthUsd": 374520.8137,
+      "status": 0,
+      "warningMessage": null
+    },
+    "POPCATUSDT": {
+      "bidAskSpreadPercent": 0.0638365783593999361634216400,
+      "orderbookDepthUsd": 555161.3380000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ORDIUSDT": {
+      "bidAskSpreadPercent": 0.0188697046891216152467213900,
+      "orderbookDepthUsd": 740087.0645000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ARUSDT": {
+      "bidAskSpreadPercent": 0.0259437021662991308859774300,
+      "orderbookDepthUsd": 687532.8550,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TRUTHUSDT": {
+      "bidAskSpreadPercent": 0.006336533282641067072204800,
+      "orderbookDepthUsd": 31380.3468340,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CELOUSDT": {
+      "bidAskSpreadPercent": 0.4008016032064128256513026100,
+      "orderbookDepthUsd": 185992.5138,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ALGOUSDT": {
+      "bidAskSpreadPercent": 0.0537489922063961300725611400,
+      "orderbookDepthUsd": 1140372.84911,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EULUSDT": {
+      "bidAskSpreadPercent": 0.0127299344408376296862071200,
+      "orderbookDepthUsd": 154091.0966000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GRIFFAINUSDT": {
+      "bidAskSpreadPercent": 0.0913242009132420091324200900,
+      "orderbookDepthUsd": 152597.8229600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SANDUSDT": {
+      "bidAskSpreadPercent": 0.0046614613681389115487705400,
+      "orderbookDepthUsd": 486618.51582,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WUSDT": {
+      "bidAskSpreadPercent": 0.0135363790186125211505922200,
+      "orderbookDepthUsd": 603756.48305600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "STRKUSDT": {
+      "bidAskSpreadPercent": 0.0830220008302200083022000800,
+      "orderbookDepthUsd": 406628.00342000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MORPHOUSDT": {
+      "bidAskSpreadPercent": 0.0100150225338007010515773700,
+      "orderbookDepthUsd": 315079.10069000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ATHUSDT": {
+      "bidAskSpreadPercent": 0.0351926799225761041703325700,
+      "orderbookDepthUsd": 256767.7361300,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HIPPOUSDT": {
+      "bidAskSpreadPercent": 0.1247660636306924516531503400,
+      "orderbookDepthUsd": 125559.3244400,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZEREBROUSDT": {
+      "bidAskSpreadPercent": 0.0267272484297741547507684100,
+      "orderbookDepthUsd": 140027.9295900,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MUSDT": {
+      "bidAskSpreadPercent": 0.0445434298440979955456570200,
+      "orderbookDepthUsd": 116930.6218000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PHBUSDT": {
+      "bidAskSpreadPercent": 0.0559336254311550293651533500,
+      "orderbookDepthUsd": 93204.5699000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "API3USDT": {
+      "bidAskSpreadPercent": 0.0138628959589658279614611500,
+      "orderbookDepthUsd": 207531.06506,
+      "status": 0,
+      "warningMessage": null
+    },
+    "POLUSDT": {
+      "bidAskSpreadPercent": 0.0050855646248124698044600400,
+      "orderbookDepthUsd": 756172.8116900,
+      "status": 0,
+      "warningMessage": null
+    },
+    "NXPCUSDT": {
+      "bidAskSpreadPercent": 0.0273186723125256112552929900,
+      "orderbookDepthUsd": 332301.6730000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZROUSDT": {
+      "bidAskSpreadPercent": 0.0058117571847848196902333400,
+      "orderbookDepthUsd": 265957.73577000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TAUSDT": {
+      "bidAskSpreadPercent": 0.0406421459053038000406421500,
+      "orderbookDepthUsd": 66444.9735600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SYRUPUSDT": {
+      "bidAskSpreadPercent": 0.0051886058216157318528511400,
+      "orderbookDepthUsd": 52737.8982600,
+      "status": 0,
+      "warningMessage": null
+    },
+    "IMXUSDT": {
+      "bidAskSpreadPercent": 0.0185752763072350701216680600,
+      "orderbookDepthUsd": 541012.9429,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DEGENUSDT": {
+      "bidAskSpreadPercent": 0.090991810737033666969972700,
+      "orderbookDepthUsd": 57941.5527640,
+      "status": 0,
+      "warningMessage": null
+    },
+    "IOUSDT": {
+      "bidAskSpreadPercent": 0.027727713849993068071537500,
+      "orderbookDepthUsd": 224166.89827000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FLOWUSDT": {
+      "bidAskSpreadPercent": 0.3642987249544626593806921700,
+      "orderbookDepthUsd": 333996.0504,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SUSHIUSDT": {
+      "bidAskSpreadPercent": 0.0186480186480186480186480200,
+      "orderbookDepthUsd": 485901.9131,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AINUSDT": {
+      "bidAskSpreadPercent": 0.0525387473261530378654257500,
+      "orderbookDepthUsd": 142910.9914200,
+      "status": 0,
+      "warningMessage": null
+    },
+    "NOMUSDT": {
+      "bidAskSpreadPercent": 0.0475172249940603468757424600,
+      "orderbookDepthUsd": 84953.6789000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ENSUSDT": {
+      "bidAskSpreadPercent": 0.006420751870043982150309800,
+      "orderbookDepthUsd": 528233.9847,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SUSDT": {
+      "bidAskSpreadPercent": 0.0598623166716551930559712700,
+      "orderbookDepthUsd": 556836.3646000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ARCUSDT": {
+      "bidAskSpreadPercent": 0.1277955271565495207667731600,
+      "orderbookDepthUsd": 22134.8140800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BBUSDT": {
+      "bidAskSpreadPercent": 0.0157815828927641442436676400,
+      "orderbookDepthUsd": 422997.2188200,
+      "status": 0,
+      "warningMessage": null
+    },
+    "OGUSDT": {
+      "bidAskSpreadPercent": 0.0061332760894231653837897500,
+      "orderbookDepthUsd": 120020.4130000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GOATUSDT": {
+      "bidAskSpreadPercent": 0.0357525920629245620307472300,
+      "orderbookDepthUsd": 638122.8737300,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AEVOUSDT": {
+      "bidAskSpreadPercent": 0.0302709247767519297714545200,
+      "orderbookDepthUsd": 199499.37643400,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HEMIUSDT": {
+      "bidAskSpreadPercent": 0.0172043010752688172043010800,
+      "orderbookDepthUsd": 271708.6532480,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOLVUSDT": {
+      "bidAskSpreadPercent": 0.0530082162735223959713755600,
+      "orderbookDepthUsd": 107362.8695800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CATIUSDT": {
+      "bidAskSpreadPercent": 0.0233644859813084112149532700,
+      "orderbookDepthUsd": 68631.4827800,
+      "status": 0,
+      "warningMessage": null
+    },
+    "USDCUSDT": {
+      "bidAskSpreadPercent": 0.0001000781109656086575572200,
+      "orderbookDepthUsd": 792680.0455020,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BRETTUSDT": {
+      "bidAskSpreadPercent": 0.0359518245550961711306848800,
+      "orderbookDepthUsd": 296937.7688100,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TWTUSDT": {
+      "bidAskSpreadPercent": 0.007763071070915654232814500,
+      "orderbookDepthUsd": 242227.796100,
+      "status": 0,
+      "warningMessage": null
+    },
+    "KASUSDT": {
+      "bidAskSpreadPercent": 0.0182498403138972533990327600,
+      "orderbookDepthUsd": 359359.1120500,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DRIFTUSDT": {
+      "bidAskSpreadPercent": 0.0796336850487756320923750700,
+      "orderbookDepthUsd": 204006.3498000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SQDUSDT": {
+      "bidAskSpreadPercent": 0.0154083204930662557781201800,
+      "orderbookDepthUsd": 111055.3341100,
+      "status": 0,
+      "warningMessage": null
+    },
+    "JASMYUSDT": {
+      "bidAskSpreadPercent": 0.0185994606156421463777550500,
+      "orderbookDepthUsd": 579160.632488,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FLOCKUSDT": {
+      "bidAskSpreadPercent": 0.0471809389006841236140599200,
+      "orderbookDepthUsd": 64136.1827000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PYTHUSDT": {
+      "bidAskSpreadPercent": 0.008633714655730628102741200,
+      "orderbookDepthUsd": 588035.2864100,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DEEPUSDT": {
+      "bidAskSpreadPercent": 0.0467398924982472540313157300,
+      "orderbookDepthUsd": 329654.9190300,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZKUSDT": {
+      "bidAskSpreadPercent": 0.0304738686576260856315709300,
+      "orderbookDepthUsd": 286883.9678200,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GRASSUSDT": {
+      "bidAskSpreadPercent": 0.0227092085840808447825593300,
+      "orderbookDepthUsd": 211728.04761000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AKEUSDT": {
+      "bidAskSpreadPercent": 0.0055826936496859734822051600,
+      "orderbookDepthUsd": 60785.5848137,
+      "status": 0,
+      "warningMessage": null
+    },
+    "1000000MOGUSDT": {
+      "bidAskSpreadPercent": 0.0426166631152780737268271900,
+      "orderbookDepthUsd": 272844.34159000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "REDUSDT": {
+      "bidAskSpreadPercent": 0.0280229788426509737985147800,
+      "orderbookDepthUsd": 185549.4119000,
+      "status": 0,
+      "warningMessage": null
+    }
+  },
+  "Bybit": {
+    "BTCUSDT": {
+      "bidAskSpreadPercent": 0.000089595418448682208186600,
+      "orderbookDepthUsd": 3629317.8869,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ETHUSDT": {
+      "bidAskSpreadPercent": 0.0002525032541356876736748900,
+      "orderbookDepthUsd": 3242882.8200,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GIGGLEUSDT": {
+      "bidAskSpreadPercent": 0.0169025987745615888442848100,
+      "orderbookDepthUsd": 40225.65834,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOLUSDT": {
+      "bidAskSpreadPercent": 0.0051454886927885975970567800,
+      "orderbookDepthUsd": 39481389.064,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XRPUSDT": {
+      "bidAskSpreadPercent": 0.0038186157517899761336515500,
+      "orderbookDepthUsd": 20068331.16738,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HUSDT": {
+      "bidAskSpreadPercent": 0.0002840122409275839788694900,
+      "orderbookDepthUsd": 27220.688090,
+      "status": 0,
+      "warningMessage": null
+    },
+    "COAIUSDT": {
+      "bidAskSpreadPercent": 0.0186880956830498972154737400,
+      "orderbookDepthUsd": 32428.7077,
+      "status": 0,
+      "warningMessage": null
+    },
+    "VIRTUALUSDT": {
+      "bidAskSpreadPercent": 0.0077121813905063047082867400,
+      "orderbookDepthUsd": 650229.3784,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DOGEUSDT": {
+      "bidAskSpreadPercent": 0.0050670112234298598971396700,
+      "orderbookDepthUsd": 18645954.63424,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BNBUSDT": {
+      "bidAskSpreadPercent": 0.0089665994171710378838825400,
+      "orderbookDepthUsd": 10443673.000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EVAAUSDT": {
+      "bidAskSpreadPercent": 0.0105904156738151972464919200,
+      "orderbookDepthUsd": 146632.7123,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FUSDT": {
+      "bidAskSpreadPercent": 0.0046920821114369501466275700,
+      "orderbookDepthUsd": 47232.295056,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ASTERUSDT": {
+      "bidAskSpreadPercent": 0.0087661626123164584703046200,
+      "orderbookDepthUsd": 1710408.3531,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZECUSDT": {
+      "bidAskSpreadPercent": 0.0036884716817586632978625300,
+      "orderbookDepthUsd": 307556.7145,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BLESSUSDT": {
+      "bidAskSpreadPercent": 0.0724900326205146792316056500,
+      "orderbookDepthUsd": 66414.21910,
+      "status": 0,
+      "warningMessage": null
+    },
+    "4USDT": {
+      "bidAskSpreadPercent": 0.0768935024990388312187620100,
+      "orderbookDepthUsd": 105374.1801,
+      "status": 0,
+      "warningMessage": null
+    },
+    "APRUSDT": {
+      "bidAskSpreadPercent": 0.026957811025744709529586200,
+      "orderbookDepthUsd": 173799.0605,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SUIUSDT": {
+      "bidAskSpreadPercent": 0.0039245697690390690920507800,
+      "orderbookDepthUsd": 3469972.1720,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HYPEUSDT": {
+      "bidAskSpreadPercent": 0.0023284784557530881445519400,
+      "orderbookDepthUsd": 690888.34419,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PIPPINUSDT": {
+      "bidAskSpreadPercent": 0.0770416024653312788906009200,
+      "orderbookDepthUsd": 66161.89862,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AVNTUSDT": {
+      "bidAskSpreadPercent": 0.0134291277781508091049486300,
+      "orderbookDepthUsd": 332620.8959,
+      "status": 0,
+      "warningMessage": null
+    },
+    "KGENUSDT": {
+      "bidAskSpreadPercent": 0.0329543582138737848080408600,
+      "orderbookDepthUsd": 185236.9126,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EDENUSDT": {
+      "bidAskSpreadPercent": 0.0507485409794468409033240300,
+      "orderbookDepthUsd": 81477.2208,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TRXUSDT": {
+      "bidAskSpreadPercent": 0.0033498031990620551042626200,
+      "orderbookDepthUsd": 1464460.24586,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ENAUSDT": {
+      "bidAskSpreadPercent": 0.0214201563671414801328049700,
+      "orderbookDepthUsd": 3350364.3581,
+      "status": 0,
+      "warningMessage": null
+    },
+    "1000PEPEUSDT": {
+      "bidAskSpreadPercent": 0.0138995065675168531517131100,
+      "orderbookDepthUsd": 8084321.107200,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ADAUSDT": {
+      "bidAskSpreadPercent": 0.015219541891789057149379800,
+      "orderbookDepthUsd": 7041727.8647,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AVAXUSDT": {
+      "bidAskSpreadPercent": 0.0050483378347679026680465500,
+      "orderbookDepthUsd": 2692131.7627,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XPINUSDT": {
+      "bidAskSpreadPercent": 0.0012216650072383651678873100,
+      "orderbookDepthUsd": 22276.5679100,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AIXBTUSDT": {
+      "bidAskSpreadPercent": 0.0259033803911410439062297600,
+      "orderbookDepthUsd": 241528.00370,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LINKUSDT": {
+      "bidAskSpreadPercent": 0.0055067595473443652082931800,
+      "orderbookDepthUsd": 4031341.3618,
+      "status": 0,
+      "warningMessage": null
+    },
+    "RIVERUSDT": {
+      "bidAskSpreadPercent": 0.0138571329591907434351832600,
+      "orderbookDepthUsd": 73909.0152,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WLDUSDT": {
+      "bidAskSpreadPercent": 0.0112315381591508957151681900,
+      "orderbookDepthUsd": 1866674.99023,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XPLUSDT": {
+      "bidAskSpreadPercent": 0.0265428002654280026542800300,
+      "orderbookDepthUsd": 861965.8959,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AIAUSDT": {
+      "bidAskSpreadPercent": 0.0080492614802591862196643500,
+      "orderbookDepthUsd": 87441.8253,
+      "status": 0,
+      "warningMessage": null
+    },
+    "YBUSDT": {
+      "bidAskSpreadPercent": 0.0173807247762231685061267100,
+      "orderbookDepthUsd": 156848.37392,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TURTLEUSDT": {
+      "bidAskSpreadPercent": 0.0543625985322098396303343300,
+      "orderbookDepthUsd": 99183.9164,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BCHUSDT": {
+      "bidAskSpreadPercent": 0.0197258112239865864483676900,
+      "orderbookDepthUsd": 1973193.749,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TAOUSDT": {
+      "bidAskSpreadPercent": 0.0025711237096172882358234700,
+      "orderbookDepthUsd": 462644.91812,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SPKUSDT": {
+      "bidAskSpreadPercent": 0.0245790832001966326656015700,
+      "orderbookDepthUsd": 126061.12170,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZKCUSDT": {
+      "bidAskSpreadPercent": 0.0360165676211057086259679500,
+      "orderbookDepthUsd": 125041.37294,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DOODUSDT": {
+      "bidAskSpreadPercent": 0.0124339446689462231893068100,
+      "orderbookDepthUsd": 81067.023520,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LTCUSDT": {
+      "bidAskSpreadPercent": 0.0103183201774751070525718400,
+      "orderbookDepthUsd": 6205008.920,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BLUAIUSDT": {
+      "bidAskSpreadPercent": 0.0370438970179662900537136500,
+      "orderbookDepthUsd": 37051.91070,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WLFIUSDT": {
+      "bidAskSpreadPercent": 0.073610599926389400073610600,
+      "orderbookDepthUsd": 771623.0793,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PENGUUSDT": {
+      "bidAskSpreadPercent": 0.0046355313477807393672499700,
+      "orderbookDepthUsd": 722446.164760,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FARTCOINUSDT": {
+      "bidAskSpreadPercent": 0.0255069506440505037622752200,
+      "orderbookDepthUsd": 2710894.8867,
+      "status": 0,
+      "warningMessage": null
+    },
+    "KAITOUSDT": {
+      "bidAskSpreadPercent": 0.0082491235306248711074448300,
+      "orderbookDepthUsd": 80818.8461,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BIOUSDT": {
+      "bidAskSpreadPercent": 0.0108666123336049986416734600,
+      "orderbookDepthUsd": 216134.78200,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WIFUSDT": {
+      "bidAskSpreadPercent": 0.0182000182000182000182000200,
+      "orderbookDepthUsd": 3062389.8534,
+      "status": 0,
+      "warningMessage": null
+    },
+    "OPENUSDT": {
+      "bidAskSpreadPercent": 0.0254874474321396712119281300,
+      "orderbookDepthUsd": 105660.6935,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AAVEUSDT": {
+      "bidAskSpreadPercent": 0.0043949282527962731008416300,
+      "orderbookDepthUsd": 1397336.7304,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PUMPBTCUSDT": {
+      "bidAskSpreadPercent": 0.0704721634954193093727977400,
+      "orderbookDepthUsd": 45871.82930,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ENSOUSDT": {
+      "bidAskSpreadPercent": 0.0553250345781466113416320900,
+      "orderbookDepthUsd": 103661.3168,
+      "status": 0,
+      "warningMessage": null
+    },
+    "METUSDT": {
+      "bidAskSpreadPercent": 0.0184314809694958989954842900,
+      "orderbookDepthUsd": 205005.15045,
+      "status": 0,
+      "warningMessage": null
+    },
+    "NEARUSDT": {
+      "bidAskSpreadPercent": 0.0436205016357688113413304300,
+      "orderbookDepthUsd": 3418241.4499,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LIGHTUSDT": {
+      "bidAskSpreadPercent": 0.0130670557745497310364353100,
+      "orderbookDepthUsd": 29708.8517,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SNXUSDT": {
+      "bidAskSpreadPercent": 0.0081172125492106010795892700,
+      "orderbookDepthUsd": 629524.69144,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ORDERUSDT": {
+      "bidAskSpreadPercent": 0.0306138068268789223939996900,
+      "orderbookDepthUsd": 598702.5448,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FFUSDT": {
+      "bidAskSpreadPercent": 0.0619003404518724852986691400,
+      "orderbookDepthUsd": 133972.2056,
+      "status": 0,
+      "warningMessage": null
+    },
+    "UNIUSDT": {
+      "bidAskSpreadPercent": 0.0159782695534073659822641200,
+      "orderbookDepthUsd": 2025354.2108,
+      "status": 0,
+      "warningMessage": null
+    },
+    "JUPUSDT": {
+      "bidAskSpreadPercent": 0.0232477042892014413576659300,
+      "orderbookDepthUsd": 819615.1947,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FILUSDT": {
+      "bidAskSpreadPercent": 0.0638365783593999361634216400,
+      "orderbookDepthUsd": 1461842.2734,
+      "status": 0,
+      "warningMessage": null
+    },
+    "APTUSDT": {
+      "bidAskSpreadPercent": 0.0302069173840809545385893400,
+      "orderbookDepthUsd": 2492965.97398,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XLMUSDT": {
+      "bidAskSpreadPercent": 0.0030604905966426418154830200,
+      "orderbookDepthUsd": 806356.92807,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PAXGUSDT": {
+      "bidAskSpreadPercent": 0.0002432986430018186573564400,
+      "orderbookDepthUsd": 155837.31767,
+      "status": 0,
+      "warningMessage": null
+    },
+    "UBUSDT": {
+      "bidAskSpreadPercent": 0.0549609929619395123738568900,
+      "orderbookDepthUsd": 24326.434000,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EIGENUSDT": {
+      "bidAskSpreadPercent": 0.0088892839681763633939286200,
+      "orderbookDepthUsd": 572547.4205,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DOTUSDT": {
+      "bidAskSpreadPercent": 0.0032390237582392666850211300,
+      "orderbookDepthUsd": 1201311.54777,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XANUSDT": {
+      "bidAskSpreadPercent": 0.0185890882052235337856678100,
+      "orderbookDepthUsd": 46676.95858,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZBTUSDT": {
+      "bidAskSpreadPercent": 0.0365563882288429903125571200,
+      "orderbookDepthUsd": 147200.50267,
+      "status": 0,
+      "warningMessage": null
+    },
+    "1000BONKUSDT": {
+      "bidAskSpreadPercent": 0.0201146535250930302725535600,
+      "orderbookDepthUsd": 1512705.199900,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ONDOUSDT": {
+      "bidAskSpreadPercent": 0.0135382116022473431259730600,
+      "orderbookDepthUsd": 2250884.2922,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MERLUSDT": {
+      "bidAskSpreadPercent": 0.0076888575639136285000320400,
+      "orderbookDepthUsd": 43047.577199,
+      "status": 0,
+      "warningMessage": null
+    },
+    "RECALLUSDT": {
+      "bidAskSpreadPercent": 0.0254420557181020226434295900,
+      "orderbookDepthUsd": 95891.5981,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ARBUSDT": {
+      "bidAskSpreadPercent": 0.0311090371752994244828122600,
+      "orderbookDepthUsd": 2750154.73816,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PROVEUSDT": {
+      "bidAskSpreadPercent": 0.0110029157726797601364361600,
+      "orderbookDepthUsd": 142373.0603,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LAUSDT": {
+      "bidAskSpreadPercent": 0.0219563069491711494126687900,
+      "orderbookDepthUsd": 103947.81273,
+      "status": 0,
+      "warningMessage": null
+    },
+    "APEUSDT": {
+      "bidAskSpreadPercent": 0.0220191566662996807222283400,
+      "orderbookDepthUsd": 596603.91377,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CAKEUSDT": {
+      "bidAskSpreadPercent": 0.0370713623725671918443002800,
+      "orderbookDepthUsd": 731267.5685,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AI16ZUSDT": {
+      "bidAskSpreadPercent": 0.0138840680319333564734467200,
+      "orderbookDepthUsd": 257415.28366,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TIAUSDT": {
+      "bidAskSpreadPercent": 0.0956480153036824485891917700,
+      "orderbookDepthUsd": 1164916.8507,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TRUMPUSDT": {
+      "bidAskSpreadPercent": 0.0166819584619234298106597700,
+      "orderbookDepthUsd": 1531002.4106,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BANKUSDT": {
+      "bidAskSpreadPercent": 0.0594353640416047548291233300,
+      "orderbookDepthUsd": 24515.44210,
+      "status": 0,
+      "warningMessage": null
+    },
+    "STBLUSDT": {
+      "bidAskSpreadPercent": 0.027544415369783776339347200,
+      "orderbookDepthUsd": 107981.96380,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CRVUSDT": {
+      "bidAskSpreadPercent": 0.0186341190720208702133606600,
+      "orderbookDepthUsd": 1793549.50621,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HBARUSDT": {
+      "bidAskSpreadPercent": 0.0057725055560365976852252700,
+      "orderbookDepthUsd": 1678890.96289,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TREEUSDT": {
+      "bidAskSpreadPercent": 0.0051718341909958366734762500,
+      "orderbookDepthUsd": 55859.447204,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TONUSDT": {
+      "bidAskSpreadPercent": 0.0046235291397924035416233200,
+      "orderbookDepthUsd": 919901.70024,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZORAUSDT": {
+      "bidAskSpreadPercent": 0.0010484323315562405313455100,
+      "orderbookDepthUsd": 45119.650730,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MIRAUSDT": {
+      "bidAskSpreadPercent": 0.027766208524226016937387200,
+      "orderbookDepthUsd": 146453.55836,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ETCUSDT": {
+      "bidAskSpreadPercent": 0.0062369414039355100258833100,
+      "orderbookDepthUsd": 1673042.1260,
+      "status": 0,
+      "warningMessage": null
+    },
+    "USELESSUSDT": {
+      "bidAskSpreadPercent": 0.0329435018942513589194531400,
+      "orderbookDepthUsd": 138140.7393,
+      "status": 0,
+      "warningMessage": null
+    },
+    "OPUSDT": {
+      "bidAskSpreadPercent": 0.0222395196263760702768820200,
+      "orderbookDepthUsd": 1472311.83793,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CLOUSDT": {
+      "bidAskSpreadPercent": 0.031225604996096799375487900,
+      "orderbookDepthUsd": 57092.8383,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ETHFIUSDT": {
+      "bidAskSpreadPercent": 0.0097007324052965998932919400,
+      "orderbookDepthUsd": 620767.64239,
+      "status": 0,
+      "warningMessage": null
+    },
+    "KDAUSDT": {
+      "bidAskSpreadPercent": 0.1722652885443583118001722700,
+      "orderbookDepthUsd": 14628.40538,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZENUSDT": {
+      "bidAskSpreadPercent": 0.0179452669358456707043517300,
+      "orderbookDepthUsd": 422791.9257,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DASHUSDT": {
+      "bidAskSpreadPercent": 0.0240876791521136938455979800,
+      "orderbookDepthUsd": 273660.8988,
+      "status": 0,
+      "warningMessage": null
+    },
+    "B2USDT": {
+      "bidAskSpreadPercent": 0.0281602883613528202528793900,
+      "orderbookDepthUsd": 41038.1676,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EPTUSDT": {
+      "bidAskSpreadPercent": 0.0169133192389006342494714600,
+      "orderbookDepthUsd": 29110.011570,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WALUSDT": {
+      "bidAskSpreadPercent": 0.0399600399600399600399600400,
+      "orderbookDepthUsd": 204604.0999,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOMIUSDT": {
+      "bidAskSpreadPercent": 0.018948365703458076740881100,
+      "orderbookDepthUsd": 214016.55504,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LDOUSDT": {
+      "bidAskSpreadPercent": 0.0107973870323381741618528300,
+      "orderbookDepthUsd": 1576112.37436,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MLNUSDT": {
+      "bidAskSpreadPercent": 0.0127186009538950715421303700,
+      "orderbookDepthUsd": 62641.0927,
+      "status": 0,
+      "warningMessage": null
+    },
+    "0GUSDT": {
+      "bidAskSpreadPercent": 0.0056777856635911994322214300,
+      "orderbookDepthUsd": 161749.00147,
+      "status": 0,
+      "warningMessage": null
+    },
+    "INJUSDT": {
+      "bidAskSpreadPercent": 0.0118154427837183198440361600,
+      "orderbookDepthUsd": 1400904.3577,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SEIUSDT": {
+      "bidAskSpreadPercent": 0.0497636227917392386165712900,
+      "orderbookDepthUsd": 1712537.0754,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SIGNUSDT": {
+      "bidAskSpreadPercent": 0.024245363074312037822766400,
+      "orderbookDepthUsd": 158760.74970,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AUCTIONUSDT": {
+      "bidAskSpreadPercent": 0.0135492175326874872976085600,
+      "orderbookDepthUsd": 370083.7556,
+      "status": 0,
+      "warningMessage": null
+    },
+    "2ZUSDT": {
+      "bidAskSpreadPercent": 0.0416927246195538878465707700,
+      "orderbookDepthUsd": 375395.7163,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ATOMUSDT": {
+      "bidAskSpreadPercent": 0.0315806095057634612348018300,
+      "orderbookDepthUsd": 1368021.6867,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BERAUSDT": {
+      "bidAskSpreadPercent": 0.0524796641301495670427709300,
+      "orderbookDepthUsd": 247925.284,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PENDLEUSDT": {
+      "bidAskSpreadPercent": 0.0031179359264167121365655900,
+      "orderbookDepthUsd": 226982.2945,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XMRUSDT": {
+      "bidAskSpreadPercent": 0.0059468942344860396657845400,
+      "orderbookDepthUsd": 130271.6543,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ALICEUSDT": {
+      "bidAskSpreadPercent": 0.0302984396303590365096197500,
+      "orderbookDepthUsd": 154907.14208,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GALAUSDT": {
+      "bidAskSpreadPercent": 0.0895656068069861173309449200,
+      "orderbookDepthUsd": 2076794.40601,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LINEAUSDT": {
+      "bidAskSpreadPercent": 0.0665557404326123128119800300,
+      "orderbookDepthUsd": 558344.14440,
+      "status": 0,
+      "warningMessage": null
+    },
+    "IPUSDT": {
+      "bidAskSpreadPercent": 0.0076346076765980188193079200,
+      "orderbookDepthUsd": 85852.46436,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SPXUSDT": {
+      "bidAskSpreadPercent": 0.0189609404626469472885855100,
+      "orderbookDepthUsd": 335163.3473,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MYXUSDT": {
+      "bidAskSpreadPercent": 0.0033949517068119705997182200,
+      "orderbookDepthUsd": 87403.0724,
+      "status": 0,
+      "warningMessage": null
+    },
+    "LYNUSDT": {
+      "bidAskSpreadPercent": 0.0576867608883761176809922100,
+      "orderbookDepthUsd": 15963.8969,
+      "status": 0,
+      "warningMessage": null
+    },
+    "1000FLOKIUSDT": {
+      "bidAskSpreadPercent": 0.0135071250084419531302762200,
+      "orderbookDepthUsd": 1463754.65184,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FORMUSDT": {
+      "bidAskSpreadPercent": 0.0145169485374174348551934400,
+      "orderbookDepthUsd": 253435.9979,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HANAUSDT": {
+      "bidAskSpreadPercent": 0.0184928340268146093388811800,
+      "orderbookDepthUsd": 42481.05670,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BELUSDT": {
+      "bidAskSpreadPercent": 0.040992006558721049395367900,
+      "orderbookDepthUsd": 115032.5393,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HOLOUSDT": {
+      "bidAskSpreadPercent": 0.0633111744222855333966445100,
+      "orderbookDepthUsd": 90586.7382,
+      "status": 0,
+      "warningMessage": null
+    },
+    "INUSDT": {
+      "bidAskSpreadPercent": 0.0141542816702052370842179800,
+      "orderbookDepthUsd": 170668.29380,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AEROUSDT": {
+      "bidAskSpreadPercent": 0.0106570043160867480151329500,
+      "orderbookDepthUsd": 351350.6907,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SWARMSUSDT": {
+      "bidAskSpreadPercent": 0.1077005923532579429186860500,
+      "orderbookDepthUsd": 59797.31127,
+      "status": 0,
+      "warningMessage": null
+    },
+    "JTOUSDT": {
+      "bidAskSpreadPercent": 0.0875273522975929978118161900,
+      "orderbookDepthUsd": 572364.3957,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PNUTUSDT": {
+      "bidAskSpreadPercent": 0.0722804481387784604264546400,
+      "orderbookDepthUsd": 394276.4088,
+      "status": 0,
+      "warningMessage": null
+    },
+    "QUSDT": {
+      "bidAskSpreadPercent": 0.083894293190579869364600600,
+      "orderbookDepthUsd": 16148.394870,
+      "status": 0,
+      "warningMessage": null
+    },
+    "OMUSDT": {
+      "bidAskSpreadPercent": 0.0852878464818763326226012800,
+      "orderbookDepthUsd": 391828.0596,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MOODENGUSDT": {
+      "bidAskSpreadPercent": 0.0084684760977262141677605100,
+      "orderbookDepthUsd": 563026.24621,
+      "status": 0,
+      "warningMessage": null
+    },
+    "RENDERUSDT": {
+      "bidAskSpreadPercent": 0.0402495471925940833165626900,
+      "orderbookDepthUsd": 853744.7554,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ICPUSDT": {
+      "bidAskSpreadPercent": 0.0320564192979644173745792600,
+      "orderbookDepthUsd": 876127.6719,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TRBUSDT": {
+      "bidAskSpreadPercent": 0.0386922035209905204101373600,
+      "orderbookDepthUsd": 558516.7934,
+      "status": 0,
+      "warningMessage": null
+    },
+    "XNYUSDT": {
+      "bidAskSpreadPercent": 0.0712606000142521200028504200,
+      "orderbookDepthUsd": 99552.803350,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOPHUSDT": {
+      "bidAskSpreadPercent": 0.0347644707109334260385885600,
+      "orderbookDepthUsd": 181374.62690,
+      "status": 0,
+      "warningMessage": null
+    },
+    "COOKIEUSDT": {
+      "bidAskSpreadPercent": 0.031730921783277804220212600,
+      "orderbookDepthUsd": 141637.26240,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOONUSDT": {
+      "bidAskSpreadPercent": 0.0421970602714677544131092200,
+      "orderbookDepthUsd": 326578.7075,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DYDXUSDT": {
+      "bidAskSpreadPercent": 0.0295639320029563932002956400,
+      "orderbookDepthUsd": 641513.05548,
+      "status": 0,
+      "warningMessage": null
+    },
+    "POPCATUSDT": {
+      "bidAskSpreadPercent": 0.0638365783593999361634216400,
+      "orderbookDepthUsd": 552976.8533,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ORDIUSDT": {
+      "bidAskSpreadPercent": 0.018876828692779613025011800,
+      "orderbookDepthUsd": 1271529.86502,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ARUSDT": {
+      "bidAskSpreadPercent": 0.0259302476338649034098275600,
+      "orderbookDepthUsd": 420840.9515,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TRUTHUSDT": {
+      "bidAskSpreadPercent": 0.0063149253260080199551640300,
+      "orderbookDepthUsd": 27910.270100,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CELOUSDT": {
+      "bidAskSpreadPercent": 0.0401203610832497492477432300,
+      "orderbookDepthUsd": 268065.67942,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ALGOUSDT": {
+      "bidAskSpreadPercent": 0.0537778972842161871470825500,
+      "orderbookDepthUsd": 992896.96690,
+      "status": 0,
+      "warningMessage": null
+    },
+    "EULUSDT": {
+      "bidAskSpreadPercent": 0.025422651582560061014363800,
+      "orderbookDepthUsd": 36828.7783,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GRIFFAINUSDT": {
+      "bidAskSpreadPercent": 0.1369550330974663318876968700,
+      "orderbookDepthUsd": 101609.30890,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SANDUSDT": {
+      "bidAskSpreadPercent": 0.0466309162975052459780834700,
+      "orderbookDepthUsd": 998563.0520,
+      "status": 0,
+      "warningMessage": null
+    },
+    "WUSDT": {
+      "bidAskSpreadPercent": 0.0135400446821474510865885900,
+      "orderbookDepthUsd": 539203.907336,
+      "status": 0,
+      "warningMessage": null
+    },
+    "STRKUSDT": {
+      "bidAskSpreadPercent": 0.083090984628167843788948900,
+      "orderbookDepthUsd": 695885.95197,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MORPHOUSDT": {
+      "bidAskSpreadPercent": 0.005005881911245713713613500,
+      "orderbookDepthUsd": 193395.8217,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ATHUSDT": {
+      "bidAskSpreadPercent": 0.0703482237073513893774182200,
+      "orderbookDepthUsd": 163859.27740,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HIPPOUSDT": {
+      "bidAskSpreadPercent": 0.1248439450686641697877652900,
+      "orderbookDepthUsd": 30367.795760,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZEREBROUSDT": {
+      "bidAskSpreadPercent": 0.0268781077812122026609326700,
+      "orderbookDepthUsd": 99805.43884,
+      "status": 0,
+      "warningMessage": null
+    },
+    "MUSDT": {
+      "bidAskSpreadPercent": 0.022278165170316572727070200,
+      "orderbookDepthUsd": 44368.1135,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PHBUSDT": {
+      "bidAskSpreadPercent": 0.0186063819890222346264768800,
+      "orderbookDepthUsd": 83630.0552,
+      "status": 0,
+      "warningMessage": null
+    },
+    "API3USDT": {
+      "bidAskSpreadPercent": 0.0138494564088359531888373400,
+      "orderbookDepthUsd": 154801.39949,
+      "status": 0,
+      "warningMessage": null
+    },
+    "POLUSDT": {
+      "bidAskSpreadPercent": 0.0508517670989066870073735100,
+      "orderbookDepthUsd": 1444815.6471,
+      "status": 0,
+      "warningMessage": null
+    },
+    "NXPCUSDT": {
+      "bidAskSpreadPercent": 0.0273186723125256112552929900,
+      "orderbookDepthUsd": 196934.55015,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZROUSDT": {
+      "bidAskSpreadPercent": 0.0058137844830092148484055700,
+      "orderbookDepthUsd": 283804.36636,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TAUSDT": {
+      "bidAskSpreadPercent": 0.0203520911773684746107662600,
+      "orderbookDepthUsd": 50868.37468,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SYRUPUSDT": {
+      "bidAskSpreadPercent": 0.0129575639779721412374473600,
+      "orderbookDepthUsd": 28540.64352,
+      "status": 0,
+      "warningMessage": null
+    },
+    "IMXUSDT": {
+      "bidAskSpreadPercent": 0.0185856333054548833751510100,
+      "orderbookDepthUsd": 205269.69907,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DEGENUSDT": {
+      "bidAskSpreadPercent": 0.0454648783814503296203682700,
+      "orderbookDepthUsd": 66563.339560,
+      "status": 0,
+      "warningMessage": null
+    },
+    "IOUSDT": {
+      "bidAskSpreadPercent": 0.0277430989041475932861700700,
+      "orderbookDepthUsd": 170706.72288,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FLOWUSDT": {
+      "bidAskSpreadPercent": 0.0364497904137051211955531300,
+      "orderbookDepthUsd": 220220.36038,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SUSHIUSDT": {
+      "bidAskSpreadPercent": 0.0372856077554064131245339300,
+      "orderbookDepthUsd": 164050.98429,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AINUSDT": {
+      "bidAskSpreadPercent": 0.1726791546229212808288599400,
+      "orderbookDepthUsd": 38764.30630,
+      "status": 0,
+      "warningMessage": null
+    },
+    "NOMUSDT": {
+      "bidAskSpreadPercent": 0.0475172249940603468757424600,
+      "orderbookDepthUsd": 27662.88520,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ENSUSDT": {
+      "bidAskSpreadPercent": 0.006420751870043982150309800,
+      "orderbookDepthUsd": 525499.3444,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SUSDT": {
+      "bidAskSpreadPercent": 0.0599340725202277494755768700,
+      "orderbookDepthUsd": 379812.3120,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ARCUSDT": {
+      "bidAskSpreadPercent": 0.06400,
+      "orderbookDepthUsd": 33732.12767,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BBUSDT": {
+      "bidAskSpreadPercent": 0.0789577575996841689696012600,
+      "orderbookDepthUsd": 120100.1911,
+      "status": 0,
+      "warningMessage": null
+    },
+    "OGUSDT": {
+      "bidAskSpreadPercent": 0.0202397490271120638104087500,
+      "orderbookDepthUsd": 7690.89358,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GOATUSDT": {
+      "bidAskSpreadPercent": 0.0178810907465355386678587400,
+      "orderbookDepthUsd": 265569.44801,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AEVOUSDT": {
+      "bidAskSpreadPercent": 0.0454166982060404208614033800,
+      "orderbookDepthUsd": 74675.386875,
+      "status": 0,
+      "warningMessage": null
+    },
+    "HEMIUSDT": {
+      "bidAskSpreadPercent": 0.0172161487475251786175432600,
+      "orderbookDepthUsd": 265903.23462,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SOLVUSDT": {
+      "bidAskSpreadPercent": 0.0530082162735223959713755600,
+      "orderbookDepthUsd": 51835.34198,
+      "status": 0,
+      "warningMessage": null
+    },
+    "CATIUSDT": {
+      "bidAskSpreadPercent": 0.0351144144671387604611693100,
+      "orderbookDepthUsd": 102357.03873,
+      "status": 0,
+      "warningMessage": null
+    },
+    "USDCUSDT": {
+      "bidAskSpreadPercent": 0.010004502025911660247111200,
+      "orderbookDepthUsd": 2426542.48156,
+      "status": 0,
+      "warningMessage": null
+    },
+    "BRETTUSDT": {
+      "bidAskSpreadPercent": 0.0360165676211057086259679500,
+      "orderbookDepthUsd": 281267.52180,
+      "status": 0,
+      "warningMessage": null
+    },
+    "TWTUSDT": {
+      "bidAskSpreadPercent": 0.0077612635337032868951065200,
+      "orderbookDepthUsd": 526564.73249,
+      "status": 0,
+      "warningMessage": null
+    },
+    "KASUSDT": {
+      "bidAskSpreadPercent": 0.0182565038795070743952533100,
+      "orderbookDepthUsd": 475032.97990,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DRIFTUSDT": {
+      "bidAskSpreadPercent": 0.0199342170836240406658028500,
+      "orderbookDepthUsd": 501664.7218,
+      "status": 0,
+      "warningMessage": null
+    },
+    "SQDUSDT": {
+      "bidAskSpreadPercent": 0.0230582990661388878213750400,
+      "orderbookDepthUsd": 60428.09201,
+      "status": 0,
+      "warningMessage": null
+    },
+    "JASMYUSDT": {
+      "bidAskSpreadPercent": 0.0093001627528481748430597500,
+      "orderbookDepthUsd": 344863.752216,
+      "status": 0,
+      "warningMessage": null
+    },
+    "FLOCKUSDT": {
+      "bidAskSpreadPercent": 0.0141606287319156970569493300,
+      "orderbookDepthUsd": 18689.83282,
+      "status": 0,
+      "warningMessage": null
+    },
+    "PYTHUSDT": {
+      "bidAskSpreadPercent": 0.0863930885529157667386609100,
+      "orderbookDepthUsd": 557210.5869,
+      "status": 0,
+      "warningMessage": null
+    },
+    "DEEPUSDT": {
+      "bidAskSpreadPercent": 0.0116815606565037088955084400,
+      "orderbookDepthUsd": 213397.12070,
+      "status": 0,
+      "warningMessage": null
+    },
+    "ZKUSDT": {
+      "bidAskSpreadPercent": 0.0304553068372163849550784200,
+      "orderbookDepthUsd": 313098.157584,
+      "status": 0,
+      "warningMessage": null
+    },
+    "GRASSUSDT": {
+      "bidAskSpreadPercent": 0.022714366837024417944349800,
+      "orderbookDepthUsd": 180255.1610,
+      "status": 0,
+      "warningMessage": null
+    },
+    "AKEUSDT": {
+      "bidAskSpreadPercent": 0.0558503211393465512426696500,
+      "orderbookDepthUsd": 53391.965900,
+      "status": 0,
+      "warningMessage": null
+    },
+    "1000000MOGUSDT": {
+      "bidAskSpreadPercent": 0.0213015230588987112578549400,
+      "orderbookDepthUsd": 240230.8645,
+      "status": 0,
+      "warningMessage": null
+    },
+    "REDUSDT": {
+      "bidAskSpreadPercent": 0.0279916025192442267319804100,
+      "orderbookDepthUsd": 105348.6911,
+      "status": 0,
+      "warningMessage": null
+    }
+  }
+}
