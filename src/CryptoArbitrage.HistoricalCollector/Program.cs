@@ -68,6 +68,7 @@ builder.Services.AddSingleton<CryptoArbitrage.HistoricalCollector.Services.Persi
 builder.Services.AddSingleton<CryptoArbitrage.HistoricalCollector.Services.Persistence.OpportunityPersister>();
 
 // === REGISTER EXCHANGE CONNECTORS (needed for liquidity fetching and symbol discovery) ===
+builder.Services.AddSingleton<ConnectorManager>();
 builder.Services.AddScoped<BinanceConnector>();
 builder.Services.AddScoped<BybitConnector>();
 
