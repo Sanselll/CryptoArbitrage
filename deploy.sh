@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Clean up Docker resources before deployment
+echo "Cleaning up Docker resources..."
+docker system prune -a -f --volumes || true
+
+# Check available disk space
+echo "Available disk space:"
+df -h /
+
 APP_DIR="/home/deploy/crypto-arbitrage"
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
@@ -11,8 +19,8 @@ if [ ! -d .git ]; then
 fi
 
 git fetch origin
-git checkout develop
-git pull origin develop
+git checkout main
+git reset --hard origin/main
 
 # Extract owner name (lowercase)
 REPO_OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f1 | tr '[:upper:]' '[:lower:]')
