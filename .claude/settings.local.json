@@ -95,7 +95,8 @@
       "Bash(docker build:*)",
       "Bash(git log:*)",
       "Bash(git reset:*)",
-      "Bash(git ls-tree:*)"
+      "Bash(git ls-tree:*)",
+      "Bash(git check-ignore:*)"
     ],
     "deny": [],
     "ask": []
