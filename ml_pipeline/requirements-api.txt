@@ -1,0 +1,17 @@
+# Minimal requirements for ML API server (production)
+# Only includes packages needed for inference, not training
+
+# Web Framework
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Core ML Libraries
+numpy>=1.24.0,<2.0.0
+pandas>=2.0.0,<3.0.0
+scikit-learn>=1.3.0,<2.0.0
+
+# XGBoost (only model we actually use)
+xgboost>=2.0.0,<3.0.0
+
+# Model Loading
+joblib>=1.3.0
