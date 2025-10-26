@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference main API to reuse all services -->
+    <ProjectReference Include="..\CryptoArbitrage.API\CryptoArbitrage.API.csproj" />
+
+    <!-- CLI framework -->
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+
+    <!-- CSV export -->
+    <PackageReference Include="CsvHelper" Version="30.0.1" />
+
+    <!-- Parquet export (optional, for large datasets) -->
+    <PackageReference Include="Parquet.Net" Version="4.15.0" />
+
+    <!-- Configuration and DI -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.6" />
+  </ItemGroup>
+
+</Project>

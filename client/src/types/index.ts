@@ -91,9 +91,19 @@ export interface ArbitrageOpportunity {
   shortFundingRate: number;
   longFundingIntervalHours?: number;   // Funding interval for long exchange (1h, 4h, 8h, etc.)
   shortFundingIntervalHours?: number;  // Funding interval for short exchange
+  longNextFundingTime?: string;        // When long funding rate expires/renews
+  shortNextFundingTime?: string;       // When short funding rate expires/renews
+
+  // Cross-exchange price fields - NEW properly-named fields
+  longExchangePrice?: number;          // Price on long exchange (perpetual)
+  shortExchangePrice?: number;         // Price on short exchange (perpetual)
+  currentPriceSpreadPercent?: number;  // Current instant price spread: (Short - Long) / Long * 100
 
   // Spot-perpetual fields
   exchange?: string;
+  // DEPRECATED: spotPrice/perpetualPrice are confusing for cross-exchange
+  // For cross-exchange: spotPrice = longExchangePrice, perpetualPrice = shortExchangePrice
+  // Use longExchangePrice/shortExchangePrice for cross-exchange instead
   spotPrice?: number;
   perpetualPrice?: number;
   fundingRate?: number;
@@ -140,6 +150,14 @@ export interface ArbitrageOpportunity {
   orderbookDepthUsd?: number;
   liquidityStatus?: LiquidityStatus;
   liquidityWarning?: string;
+
+  // ML Predictions
+  mlPredictedProfitPercent?: number;     // Expected profit %
+  mlSuccessProbability?: number;          // Probability of success (0-1)
+  mlPredictedDurationHours?: number;      // Optimal hold duration (hours)
+  mlPredictedHoldHours?: number;          // Alias for mlPredictedDurationHours (deprecated)
+  mlCompositeScore?: number;              // Combined ML score (0-100)
+  mlModelVersion?: string;                // ML model version
 
   status: OpportunityStatus;
   detectedAt: string;

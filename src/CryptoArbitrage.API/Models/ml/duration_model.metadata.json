@@ -1,0 +1,12 @@
+{
+  "model_type": "duration",
+  "objective": "reg:squarederror",
+  "is_classifier": false,
+  "requires_sigmoid": false,
+  "output_constraints": {
+    "min": 0.0,
+    "max": null
+  },
+  "feature_count": 54,
+  "description": "Duration prediction model"
+}

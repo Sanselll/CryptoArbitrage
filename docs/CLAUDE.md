@@ -393,6 +393,273 @@ See `DEPLOYMENT.md` for detailed deployment guides for each platform.
 
 **Persistence**: Docker volumes ensure data persists across container restarts and deployments
 
+## Machine Learning (ML) Pipeline
+
+### Architecture
+
+The ML system uses a **Flask REST API microservice** architecture running on port 5250, separate from the C# backend on port 5052.
+
+**Why Flask API instead of embedded Python.NET?**
+- ✅ Simple deployment (no platform-specific Python DLL dependencies)
+- ✅ Easy debugging (standard Flask logs)
+- ✅ Scalable (can run on separate server/container)
+- ✅ Language agnostic (any service can call HTTP API)
+
+### ML Commands
+
+**Location**: `ml_pipeline/` directory
+
+#### Setup and Training
+
+```bash
+cd ml_pipeline
+
+# Create virtual environment (first time only)
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Train models (creates .pkl files in models/xgboost/)
+./train.sh
+
+# Output:
+# - models/xgboost/profit_model.pkl
+# - models/xgboost/success_model.pkl
+# - models/xgboost/duration_model.pkl
+# - models/xgboost/scaler.pkl
+```
+
+#### Start ML API Server
+
+```bash
+cd ml_pipeline
+source venv/bin/activate
+
+# Start Flask server (development)
+python ml_api_server.py
+
+# Server runs on http://localhost:5250
+
+# Start with Gunicorn (production)
+gunicorn -w 4 -b 0.0.0.0:5250 ml_api_server:app
+```
+
+#### Testing ML API
+
+```bash
+# Health check
+curl http://localhost:5250/health
+
+# Expected response:
+# {"status": "healthy", "service": "ml-api", "version": "1.0.0"}
+
+# Single prediction (requires opportunity JSON)
+curl -X POST http://localhost:5250/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "BTCUSDT",
+    "fundProfit8h": -0.0242,
+    "fundApr": -10.63,
+    "volume24h": 1500000000,
+    ...
+  }'
+
+# Batch predictions
+curl -X POST http://localhost:5250/predict/batch \
+  -H "Content-Type: application/json" \
+  -d @opportunities.json
+```
+
+#### Model Validation
+
+```bash
+cd ml_pipeline
+source venv/bin/activate
+
+# Validate trained models against backend predictions
+python validate_backend_predictions.py
+
+# This will:
+# 1. Load historical opportunities
+# 2. Make predictions via ML API
+# 3. Compare with backend opportunity data
+# 4. Output validation report
+```
+
+#### Troubleshooting ML API
+
+```bash
+# Check if ML API is running
+curl http://localhost:5250/health
+
+# Find process using port 5250
+lsof -i :5250
+
+# Kill ML API process
+pkill -f ml_api_server
+
+# View ML API logs
+tail -f /tmp/ml_api_server.log
+
+# Check models exist
+ls -la ml_pipeline/models/xgboost/
+# Should show: profit_model.pkl, success_model.pkl, duration_model.pkl, scaler.pkl
+
+# Retrain models if missing
+cd ml_pipeline
+source venv/bin/activate
+./train.sh
+```
+
+### ML Integration with C# Backend
+
+The C# backend automatically connects to ML API on startup:
+
+```bash
+# Backend checks ML API health on startup
+cd src/CryptoArbitrage.API
+dotnet run
+
+# Look for log message:
+# ✅ Python ML API is available at http://localhost:5250
+# OR
+# ⚠️ Python ML API is not available. ML predictions will be disabled.
+```
+
+**Backend configuration** (`appsettings.json`):
+```json
+{
+  "MLApi": {
+    "Host": "localhost",
+    "Port": "5250"
+  }
+}
+```
+
+**Integration flow**:
+1. OpportunityEnricher calls OpportunityMLScorer
+2. OpportunityMLScorer calls PythonMLApiClient (HTTP client)
+3. PythonMLApiClient sends POST request to `http://localhost:5250/predict`
+4. Flask API runs prediction and returns scores
+5. Backend enriches opportunities with ML predictions
+
+### ML Model Files
+
+**Location**: `ml_pipeline/models/xgboost/`
+
+**Files** (gitignored):
+- `profit_model.pkl` - Predicts expected profit percentage
+- `success_model.pkl` - Predicts probability of profitable trade
+- `duration_model.pkl` - Predicts optimal hold duration (hours)
+- `scaler.pkl` - StandardScaler for feature normalization
+
+**Training data**: `src/CryptoArbitrage.HistoricalCollector/data/training_data.csv`
+
+### Historical Data Collection
+
+```bash
+# Navigate to historical collector
+cd src/CryptoArbitrage.HistoricalCollector
+
+# Backfill historical data (snapshots + simulations)
+dotnet run -- backfill --start-date 2024-04-24 --end-date 2024-10-24
+
+# Generate training data from snapshots
+dotnet run -- simulate --output training_data.csv
+
+# Live collection (runs continuously)
+dotnet run -- live --interval 5
+
+# Full pipeline (backfill + simulate)
+dotnet run -- full --start-date 2024-04-24 --end-date 2024-10-24 --output training_data.csv
+```
+
+### ML Deployment
+
+**Development**:
+```bash
+# Terminal 1: Start ML API
+cd ml_pipeline && source venv/bin/activate && python ml_api_server.py
+
+# Terminal 2: Start C# backend
+cd src/CryptoArbitrage.API && dotnet run
+
+# Terminal 3: Start frontend
+cd client && npm run dev
+```
+
+**Production (systemd)**:
+```bash
+# Create /etc/systemd/system/ml-api.service
+sudo systemctl enable ml-api
+sudo systemctl start ml-api
+sudo systemctl status ml-api
+
+# View logs
+sudo journalctl -u ml-api -f
+```
+
+**Production (Docker)**:
+```bash
+# Build ML API image
+docker build -f Dockerfile.ml-api -t crypto-arbitrage-ml-api .
+
+# Run ML API container
+docker run -d -p 5250:5250 --name ml-api crypto-arbitrage-ml-api
+
+# Or use docker-compose (includes backend + frontend + ML API)
+docker-compose up -d
+docker-compose logs -f ml-api
+```
+
+### ML Documentation
+
+- **ML API Guide**: `ml_pipeline/ML_API_GUIDE.md` - Comprehensive API reference
+- **ML Pipeline README**: `ml_pipeline/README.md` - Quick start guide
+- **ML Implementation Guide**: `docs/ml-implementation-guide.md` - Full system design
+- **Architecture**: `docs/ARCHITECTURE.md` - ML Services Architecture section
+- **Deployment**: `docs/DEPLOYMENT_GUIDE.md` - ML API Service Deployment section
+
+### Port Configuration
+
+- **Frontend**: 5173 (Vite dev server)
+- **Backend**: 5052 (C# ASP.NET Core)
+- **ML API**: 5250 (Python Flask)
+- **PostgreSQL**: 5432
+
+### ML Performance
+
+**Features**: 54 engineered features per opportunity
+**Models**: XGBoost (gradient boosting)
+**Inference time**: ~10-20ms per opportunity
+**Batch efficiency**: Use `/predict/batch` for multiple opportunities
+
+### Model Retraining
+
+```bash
+# When new training data is available
+cd ml_pipeline
+source venv/bin/activate
+
+# Retrain models
+./train.sh
+
+# Restart ML API to load new models
+# systemd:
+sudo systemctl restart ml-api
+
+# Docker:
+docker restart ml-api
+
+# Manual:
+pkill -f ml_api_server
+python ml_api_server.py
+```
+
 ## Git Commit Guidelines
 
 When creating git commits:
