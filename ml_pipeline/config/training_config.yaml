@@ -1,0 +1,169 @@
+# ML Model Training Configuration
+
+# Data
+data:
+  train_test_split: 0.2  # 80% train, 20% test
+  validation_split: 0.2  # Of training data, 20% for validation
+  random_state: 42
+
+# Feature Engineering
+features:
+  # Cyclical encoding for time features
+  encode_time_cyclical: true
+
+  # Feature scaling
+  scale_features: true
+  scaler_type: 'standard'  # 'standard', 'minmax', 'robust'
+
+  # Feature selection
+  remove_low_variance: true
+  variance_threshold: 0.01
+
+# XGBoost Hyperparameters
+xgboost:
+  profit_predictor:
+    n_estimators: 3000  # Increased from 500 for deeper learning
+    max_depth: 12  # Increased from 6 for complex patterns
+    learning_rate: 0.015  # Decreased from 0.05 for more accurate convergence
+    min_child_weight: 1  # Decreased from 3 for finer patterns
+    subsample: 0.9  # Increased from 0.8 for more data per tree
+    colsample_bytree: 0.9  # Increased from 0.8 for more features
+    gamma: 0.1
+    reg_alpha: 0.1
+    reg_lambda: 1.0
+    objective: 'reg:squarederror'
+    eval_metric: 'rmse'
+    tree_method: 'hist'  # Optimized for CPU
+    early_stopping_rounds: 150  # Increased from 50 for more patience
+
+  success_classifier:
+    n_estimators: 2000  # Increased from 300
+    max_depth: 10  # Increased from 5
+    learning_rate: 0.02  # Decreased from 0.05
+    min_child_weight: 1  # Decreased from 3
+    subsample: 0.9  # Increased from 0.8
+    colsample_bytree: 0.9  # Increased from 0.8
+    gamma: 0.1
+    scale_pos_weight: 7.6  # FIXED: Was 1.0, now matches 7.6:1 class imbalance
+    objective: 'binary:logistic'
+    eval_metric: 'auc'
+    tree_method: 'hist'
+    early_stopping_rounds: 150  # Increased from 50
+
+  duration_predictor:
+    n_estimators: 1500  # Increased from 400
+    max_depth: 10  # Increased from 6
+    learning_rate: 0.02  # Decreased from 0.05
+    min_child_weight: 1  # Decreased from 3
+    subsample: 0.9  # Increased from 0.8
+    colsample_bytree: 0.9  # Increased from 0.8
+    gamma: 0.1
+    reg_alpha: 0.1
+    reg_lambda: 1.0
+    objective: 'reg:squarederror'
+    eval_metric: 'rmse'
+    tree_method: 'hist'
+    early_stopping_rounds: 150  # Increased from 50
+
+# LightGBM Hyperparameters
+lightgbm:
+  profit_predictor:
+    n_estimators: 500
+    max_depth: 6
+    learning_rate: 0.05
+    num_leaves: 31
+    min_child_samples: 20
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 1.0
+    objective: 'regression'
+    metric: 'rmse'
+    early_stopping_rounds: 50
+
+  success_classifier:
+    n_estimators: 300
+    max_depth: 5
+    learning_rate: 0.05
+    num_leaves: 31
+    min_child_samples: 20
+    subsample: 0.8
+    colsample_bytree: 0.8
+    objective: 'binary'
+    metric: 'auc'
+    early_stopping_rounds: 50
+
+  duration_predictor:
+    n_estimators: 400
+    max_depth: 6
+    learning_rate: 0.05
+    num_leaves: 31
+    min_child_samples: 20
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 1.0
+    objective: 'regression'
+    metric: 'rmse'
+    early_stopping_rounds: 50
+
+# CatBoost Hyperparameters
+catboost:
+  profit_predictor:
+    iterations: 500
+    depth: 6
+    learning_rate: 0.05
+    l2_leaf_reg: 1.0
+    loss_function: 'RMSE'
+    early_stopping_rounds: 50
+
+  success_classifier:
+    iterations: 300
+    depth: 5
+    learning_rate: 0.05
+    l2_leaf_reg: 1.0
+    loss_function: 'Logloss'
+    early_stopping_rounds: 50
+
+  duration_predictor:
+    iterations: 400
+    depth: 6
+    learning_rate: 0.05
+    l2_leaf_reg: 1.0
+    loss_function: 'RMSE'
+    early_stopping_rounds: 50
+
+# Random Forest Hyperparameters
+random_forest:
+  profit_predictor:
+    n_estimators: 200
+    max_depth: 10
+    min_samples_split: 5
+    min_samples_leaf: 2
+    max_features: 'sqrt'
+
+  success_classifier:
+    n_estimators: 200
+    max_depth: 10
+    min_samples_split: 5
+    min_samples_leaf: 2
+    max_features: 'sqrt'
+    class_weight: 'balanced'
+
+  duration_predictor:
+    n_estimators: 200
+    max_depth: 10
+    min_samples_split: 5
+    min_samples_leaf: 2
+    max_features: 'sqrt'
+
+# Training
+training:
+  verbose: true
+  save_models: true
+  save_feature_importance: true
+
+# ONNX Export
+onnx:
+  target_opset: 12
+  export_format: 'onnx'

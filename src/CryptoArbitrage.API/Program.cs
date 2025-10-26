@@ -23,6 +23,7 @@ using CryptoArbitrage.API.Services.DataCollection.Events;
 using CryptoArbitrage.API.Services.Exchanges;
 using CryptoArbitrage.API.Services.Notifications;
 using CryptoArbitrage.API.Services.Streaming;
+using CryptoArbitrage.API.Services.ML;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +37,10 @@ builder.Services.AddSingleton(arbitrageConfig);
 // Add environment configuration
 var environmentConfig = builder.Configuration.GetSection("Environment").Get<EnvironmentConfig>() ?? new EnvironmentConfig();
 builder.Services.AddSingleton(environmentConfig);
+
+// Add opportunity dump configuration
+var opportunityDumpConfig = builder.Configuration.GetSection("OpportunityDump").Get<OpportunityDumpConfig>() ?? new OpportunityDumpConfig();
+builder.Services.AddSingleton(opportunityDumpConfig);
 
 // Add notification configuration
 builder.Services.Configure<NotificationSettings>(builder.Configuration.GetSection("NotificationSettings"));
@@ -294,6 +299,9 @@ builder.Services.AddHostedService<OpportunityAggregator>();
 // Background Services - Enrichment (Layer 4: Enrichers)
 builder.Services.AddHostedService<OpportunityEnricher>();
 
+// Background Services - Dumping (Layer 4.5: Snapshot Dumpers)
+builder.Services.AddHostedService<OpportunitySnapshotDumper>();
+
 // Background Services - Broadcasting (Layer 5: Broadcasters)
 builder.Services.AddHostedService<SignalRBroadcaster>();
 
@@ -303,6 +311,22 @@ builder.Services.AddSingleton<SymbolDiscoveryService>();
 // Consumer Services - clean APIs for reading data
 builder.Services.AddSingleton<IMarketDataService, MarketDataService>();
 builder.Services.AddSingleton<IFundingRateService, FundingRateService>();
+
+// ============================================================================
+// ML SERVICES - XGBoost model integration
+// ============================================================================
+
+// ML Configuration
+builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+{
+    ["MLModels:Path"] = "models/ml",
+    ["MLApi:Host"] = "localhost",
+    ["MLApi:Port"] = "5250"
+});
+
+// ML Services - Using HTTP API to call Python Flask server
+builder.Services.AddSingleton<PythonMLApiClient>();
+builder.Services.AddSingleton<OpportunityMLScorer>();
 
 // ============================================================================
 
@@ -373,6 +397,35 @@ using (var scope = app.Services.CreateScope())
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         logger.LogError(ex, "An error occurred while migrating the database");
         throw; // Re-throw to prevent app from starting with broken database
+    }
+}
+
+// Check if Python ML API is available on startup
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("Checking Python ML API availability...");
+
+        var mlApiClient = scope.ServiceProvider.GetRequiredService<PythonMLApiClient>();
+        var isHealthy = await mlApiClient.HealthCheckAsync();
+
+        if (isHealthy)
+        {
+            logger.LogInformation("✅ Python ML API is available at http://localhost:5250");
+        }
+        else
+        {
+            logger.LogWarning("⚠️ Python ML API is not available - ML predictions will not work");
+            logger.LogWarning("   Start the ML API server: cd ml_pipeline && python ml_api_server.py");
+        }
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogWarning(ex, "Failed to connect to Python ML API - continuing without ML predictions");
+        // Don't throw - allow app to start without ML if API is not running
     }
 }
 
