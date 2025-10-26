@@ -48,6 +48,8 @@ models/**/*.h5
 models/**/*.pt
 # Keep ONNX models for deployment
 !models/**/*.onnx
+# Keep trained XGBoost models for deployment
+!models/xgboost/*.pkl
 
 # Data (large files)
 data/**/*.csv
