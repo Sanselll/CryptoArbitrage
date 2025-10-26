@@ -19,6 +19,7 @@ public class LiquidityMetricsCollector : IDataCollector<LiquidityMetricsDto, Liq
     private readonly LiquidityCollectorConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly SymbolDiscoveryService _symbolDiscoveryService;
+    private readonly ConnectorManager _connectorManager;
 
     public LiquidityCollectorConfiguration Configuration => _configuration;
     public CollectionResult<LiquidityMetricsDto>? LastResult { get; private set; }
@@ -29,13 +30,15 @@ public class LiquidityMetricsCollector : IDataCollector<LiquidityMetricsDto, Liq
         IDataRepository<LiquidityMetricsDto> repository,
         LiquidityCollectorConfiguration configuration,
         IServiceProvider serviceProvider,
-        SymbolDiscoveryService symbolDiscoveryService)
+        SymbolDiscoveryService symbolDiscoveryService,
+        ConnectorManager connectorManager)
     {
         _logger = logger;
         _repository = repository;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
         _symbolDiscoveryService = symbolDiscoveryService;
+        _connectorManager = connectorManager;
     }
 
     public async Task<CollectionResult<LiquidityMetricsDto>> CollectAsync(CancellationToken cancellationToken = default)
@@ -54,17 +57,10 @@ public class LiquidityMetricsCollector : IDataCollector<LiquidityMetricsDto, Liq
                 LastResult = result;
                 return result;
             }
-            
-            // Get exchange connectors - use scoped services
-            using var scope = _serviceProvider.CreateScope();
-            var binanceConnector = scope.ServiceProvider.GetService<BinanceConnector>();
-            var bybitConnector = scope.ServiceProvider.GetService<BybitConnector>();
 
-            var connectors = new List<(string Name, IExchangeConnector? Connector)>
-            {
-                ("Binance", binanceConnector),
-                ("Bybit", bybitConnector)
-            };
+            // Get enabled exchange connectors from ConnectorManager
+            using var scope = _serviceProvider.CreateScope();
+            var connectors = _connectorManager.GetEnabledConnectors(scope);
 
             // Collect from all exchanges in parallel
             var allMetrics = new Dictionary<string, LiquidityMetricsDto>();
