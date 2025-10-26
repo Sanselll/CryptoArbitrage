@@ -31,7 +31,8 @@ jobs:
       - name: Build and push backend image
         uses: docker/build-push-action@v5
         with:
-          context: ./src/CryptoArbitrage.API
+          context: .
+          file: ./src/CryptoArbitrage.API/Dockerfile
           push: true
           tags: |
             ghcr.io/${{ env.OWNER_LOWER }}/crypto-arbitrage/api:latest

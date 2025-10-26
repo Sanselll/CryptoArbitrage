@@ -91,7 +91,13 @@ public class ArbitrageOpportunityDto
 
     public OpportunityStatus Status { get; set; }
     public DateTime DetectedAt { get; set; }
-    
+
+    // ML Predictions
+    public decimal? MLPredictedProfitPercent { get; set; }      // Predicted actual profit %
+    public decimal? MLSuccessProbability { get; set; }          // Probability of being profitable (0-1)
+    public decimal? MLPredictedDurationHours { get; set; }      // Predicted hold duration in hours
+    public decimal? MLCompositeScore { get; set; }              // Success prob × predicted profit
+
     // Computed unique key for frontend tracking (not stored in DB)
     public string UniqueKey => Strategy == ArbitrageStrategy.SpotPerpetual
         ? $"{Symbol}-{Exchange}-{SubType}"

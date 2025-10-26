@@ -138,12 +138,16 @@ comparison_df, best_model_name = compare_all_models(historical_data)
 print(f"Best model: {best_model_name}")
 ```
 
-### 7. Export to ONNX
+### 7. Start ML API Server
 
-```python
-ensemble.export_all_onnx(output_dir='models/xgboost/')
-# Creates: profit_model.onnx, success_model.onnx, duration_model.onnx
+```bash
+python ml_api_server.py
 ```
+
+The Flask API server starts on port 5250 and provides:
+- `GET /health` - Health check
+- `POST /predict` - Single opportunity prediction
+- `POST /predict/batch` - Batch predictions
 
 ## Configuration
 
@@ -200,10 +204,34 @@ RandomForest            12.45%        64.1%     1.95     -11.8%
 
 ## Integration with C# API
 
-1. Train and export best model to ONNX
-2. Copy ONNX files to C# API: `src/CryptoArbitrage.API/models/`
-3. Use `Microsoft.ML.OnnxRuntime` to load models in C#
-4. Implement `OpportunityMLScorer.cs` (see ml-implementation-guide.md)
+The ML pipeline integrates with the C# backend via **Flask REST API**:
+
+1. **Train Models**: Run `./train.sh` to train XGBoost models
+2. **Start ML API**: Run `python ml_api_server.py` (port 5250)
+3. **C# Integration**: Backend calls API via `PythonMLApiClient`
+4. **Real-time Scoring**: Opportunities are enriched with ML predictions
+
+### Architecture
+
+```
+C# Backend (Port 5052)              Python ML API (Port 5250)
+┌─────────────────────┐             ┌────────────────────────┐
+│ OpportunityEnricher │             │   ml_api_server.py     │
+│        ↓            │             │          ↓             │
+│ OpportunityMLScorer │  HTTP POST  │    MLPredictor         │
+│        ↓            │────────────>│          ↓             │
+│ PythonMLApiClient   │             │   XGBoost Models       │
+└─────────────────────┘             └────────────────────────┘
+```
+
+### Why Flask API?
+
+- ✅ **Simple Deployment**: No platform-specific Python DLL dependencies
+- ✅ **Easy Debugging**: Standard Flask logs and error messages
+- ✅ **Scalable**: Can run on separate server/container
+- ✅ **Language Agnostic**: Any language can call HTTP API
+
+For detailed integration steps, see [ML_API_GUIDE.md](ML_API_GUIDE.md)
 
 ## Development
 
@@ -239,25 +267,61 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### ONNX Export Fails
+### ML API Server Won't Start
 
-Ensure you have the correct ONNX version:
+Check if port 5250 is available:
 ```bash
-pip install --upgrade onnx skl2onnx onnxruntime
+lsof -i :5250
+# Kill any process using the port
+kill -9 <PID>
+```
+
+### Models Not Found
+
+Ensure models are trained:
+```bash
+./train.sh
+# Creates models/xgboost/*.pkl files
+```
+
+## Quick Start Guide
+
+### 1. Train Models
+```bash
+./train.sh
+```
+
+### 2. Start ML API Server
+```bash
+python ml_api_server.py
+# Server runs on http://localhost:5250
+```
+
+### 3. Test API
+```bash
+curl http://localhost:5250/health
+```
+
+### 4. Start C# Backend
+```bash
+cd ../src/CryptoArbitrage.API
+dotnet run
+# Backend connects to ML API automatically
 ```
 
 ## Next Steps
 
-1. Explore data with Jupyter notebooks
-2. Train initial models
-3. Run backtests
-4. Compare model performance
-5. Export best model to ONNX
-6. Integrate with C# API
+1. Collect historical data with `CryptoArbitrage.HistoricalCollector`
+2. Train models with `./train.sh`
+3. Validate predictions with `validate_backend_predictions.py`
+4. Start ML API server
+5. Start C# backend (will connect to ML API)
+6. Monitor ML predictions in frontend
 
 ## References
 
-- [ML Implementation Guide](../docs/ml-implementation-guide.md)
+- [ML API Guide](ML_API_GUIDE.md) - Comprehensive API documentation
+- [ML Implementation Guide](../docs/ml-implementation-guide.md) - System design
+- [Architecture Documentation](../docs/ARCHITECTURE.md) - Overall system architecture
 - [XGBoost Documentation](https://xgboost.readthedocs.io/)
-- [LightGBM Documentation](https://lightgbm.readthedocs.io/)
-- [ONNX Runtime](https://onnxruntime.ai/)
+- [Flask Documentation](https://flask.palletsprojects.com/)

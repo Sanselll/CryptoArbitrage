@@ -103,7 +103,7 @@ class DataLoader:
         df = self.df
 
         # Profitability stats
-        profitable_count = (df['target_was_profitable'] == True).sum()
+        profitable_count = (df['was_profitable'] == True).sum()
         profitable_pct = profitable_count / len(df) * 100
 
         return {
@@ -118,17 +118,17 @@ class DataLoader:
                 'win_rate_pct': profitable_pct
             },
             'profit_stats': {
-                'mean_profit_pct': df['target_profit_pct'].mean(),
-                'median_profit_pct': df['target_profit_pct'].median(),
-                'std_profit_pct': df['target_profit_pct'].std(),
-                'min_profit_pct': df['target_profit_pct'].min(),
-                'max_profit_pct': df['target_profit_pct'].max()
+                'mean_profit_pct': df['actual_profit_pct'].mean(),
+                'median_profit_pct': df['actual_profit_pct'].median(),
+                'std_profit_pct': df['actual_profit_pct'].std(),
+                'min_profit_pct': df['actual_profit_pct'].min(),
+                'max_profit_pct': df['actual_profit_pct'].max()
             },
             'duration_stats': {
-                'mean_hold_hours': df['target_hold_hours'].mean(),
-                'median_hold_hours': df['target_hold_hours'].median(),
-                'min_hold_hours': df['target_hold_hours'].min(),
-                'max_hold_hours': df['target_hold_hours'].max()
+                'mean_hold_hours': df['actual_hold_hours'].mean(),
+                'median_hold_hours': df['actual_hold_hours'].median(),
+                'min_hold_hours': df['actual_hold_hours'].min(),
+                'max_hold_hours': df['actual_hold_hours'].max()
             },
             'symbols': {
                 'unique_count': df['symbol'].nunique(),
@@ -185,12 +185,15 @@ class DataLoader:
         stratify_column: Optional[str] = None
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Split data into training and testing sets.
+        Split data into training and testing sets BY OPPORTUNITY GROUP.
+
+        This prevents data leakage by ensuring the same opportunity
+        (entry_time + symbol) never appears in both train and test sets.
 
         Args:
             test_size: Proportion of data for testing (0.0 to 1.0)
             random_state: Random seed for reproducibility
-            stratify_column: Column to use for stratified splitting (e.g., 'target_was_profitable')
+            stratify_column: Column to use for stratified splitting (e.g., 'was_profitable')
 
         Returns:
             (train_df, test_df)
@@ -200,18 +203,58 @@ class DataLoader:
 
         from sklearn.model_selection import train_test_split
 
-        stratify = self.df[stratify_column] if stratify_column else None
+        # Create opportunity group identifier
+        # Each unique (entry_time, symbol) is one opportunity
+        self.df['_opportunity_id'] = self.df['entry_time'].astype(str) + '_' + self.df['symbol']
 
-        train_df, test_df = train_test_split(
-            self.df,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=stratify
-        )
+        # Get unique opportunity IDs
+        unique_opportunities = self.df['_opportunity_id'].unique()
 
-        print(f"\n✅ Data Split:")
-        print(f"   Training: {len(train_df):,} records ({len(train_df)/len(self.df)*100:.1f}%)")
-        print(f"   Testing: {len(test_df):,} records ({len(test_df)/len(self.df)*100:.1f}%)")
+        print(f"\n📊 Data Split (Group-Based - Prevents Leakage):")
+        print(f"   Total records: {len(self.df):,}")
+        print(f"   Unique opportunities: {len(unique_opportunities):,}")
+        print(f"   Avg records per opportunity: {len(self.df) / len(unique_opportunities):.1f}")
+
+        # Split opportunity IDs (not rows!)
+        # This ensures same opportunity doesn't appear in train AND test
+        if stratify_column:
+            # For stratification, use majority class of each opportunity
+            opportunity_labels = self.df.groupby('_opportunity_id')[stratify_column].agg(
+                lambda x: x.mode()[0] if len(x.mode()) > 0 else x.iloc[0]
+            )
+            stratify_values = [opportunity_labels[opp_id] for opp_id in unique_opportunities]
+
+            train_opps, test_opps = train_test_split(
+                unique_opportunities,
+                test_size=test_size,
+                random_state=random_state,
+                stratify=stratify_values
+            )
+        else:
+            train_opps, test_opps = train_test_split(
+                unique_opportunities,
+                test_size=test_size,
+                random_state=random_state
+            )
+
+        # Filter dataframe by opportunity IDs
+        train_df = self.df[self.df['_opportunity_id'].isin(train_opps)].copy()
+        test_df = self.df[self.df['_opportunity_id'].isin(test_opps)].copy()
+
+        # Drop temporary column
+        train_df = train_df.drop(columns=['_opportunity_id'])
+        test_df = test_df.drop(columns=['_opportunity_id'])
+        self.df = self.df.drop(columns=['_opportunity_id'])
+
+        # Verify no leakage
+        train_keys = set(zip(train_df['entry_time'], train_df['symbol']))
+        test_keys = set(zip(test_df['entry_time'], test_df['symbol']))
+        overlap = train_keys.intersection(test_keys)
+
+        print(f"\n✅ Split Results:")
+        print(f"   Training: {len(train_df):,} records from {len(train_opps):,} opportunities ({len(train_df)/len(self.df)*100:.1f}%)")
+        print(f"   Testing: {len(test_df):,} records from {len(test_opps):,} opportunities ({len(test_df)/len(self.df)*100:.1f}%)")
+        print(f"   Leakage check: {len(overlap)} overlapping opportunities (should be 0) ✓" if len(overlap) == 0 else f"   ⚠️  WARNING: {len(overlap)} overlapping opportunities detected!")
 
         return train_df, test_df
 

@@ -1,0 +1,12 @@
+{
+  "model_type": "success",
+  "objective": "binary:logistic",
+  "is_classifier": true,
+  "requires_sigmoid": true,
+  "output_constraints": {
+    "min": 0.0,
+    "max": 1.0
+  },
+  "feature_count": 54,
+  "description": "Success prediction model"
+}

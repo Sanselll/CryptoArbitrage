@@ -349,6 +349,572 @@ docker exec -it arbitrage-backend bash
 
 ---
 
+## ML API Service Deployment
+
+The ML API is a Python Flask microservice that provides machine learning predictions for arbitrage opportunities. It runs independently from the main C# backend.
+
+### Prerequisites
+
+- Python 3.11+
+- Virtual environment (venv)
+- Trained ML models (XGBoost .pkl files)
+
+### Development Deployment
+
+#### 1. Setup Python Environment
+
+```bash
+cd ml_pipeline
+
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+#### 2. Train Models
+
+```bash
+# Ensure you're in ml_pipeline directory with venv activated
+./train.sh
+
+# This creates:
+# - models/xgboost/profit_model.pkl
+# - models/xgboost/success_model.pkl
+# - models/xgboost/duration_model.pkl
+# - models/xgboost/scaler.pkl
+```
+
+#### 3. Start ML API Server
+
+```bash
+# Start Flask server (development mode)
+python ml_api_server.py
+
+# Server runs on http://localhost:5250
+```
+
+#### 4. Verify ML API
+
+```bash
+# Health check
+curl http://localhost:5250/health
+
+# Expected response:
+# {
+#   "status": "healthy",
+#   "service": "ml-api",
+#   "version": "1.0.0"
+# }
+```
+
+### Production Deployment Options
+
+#### Option 1: systemd Service (Linux - Recommended)
+
+Create `/etc/systemd/system/ml-api.service`:
+
+```ini
+[Unit]
+Description=Crypto Arbitrage ML API
+After=network.target
+Requires=network.target
+
+[Service]
+Type=simple
+User=appuser
+Group=appuser
+WorkingDirectory=/opt/crypto-arbitrage/ml_pipeline
+Environment="PATH=/opt/crypto-arbitrage/ml_pipeline/venv/bin"
+ExecStart=/opt/crypto-arbitrage/ml_pipeline/venv/bin/python ml_api_server.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/var/log/ml-api/ml-api.log
+StandardError=append:/var/log/ml-api/ml-api-error.log
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/crypto-arbitrage/ml_pipeline
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Setup and start:
+
+```bash
+# Create log directory
+sudo mkdir -p /var/log/ml-api
+sudo chown appuser:appuser /var/log/ml-api
+
+# Enable and start service
+sudo systemctl daemon-reload
+sudo systemctl enable ml-api
+sudo systemctl start ml-api
+
+# Check status
+sudo systemctl status ml-api
+
+# View logs
+sudo journalctl -u ml-api -f
+```
+
+#### Option 2: Gunicorn (Production WSGI Server)
+
+Install Gunicorn:
+
+```bash
+pip install gunicorn
+```
+
+Create `gunicorn_config.py` in `ml_pipeline/`:
+
+```python
+# gunicorn_config.py
+bind = "0.0.0.0:5250"
+workers = 4
+worker_class = "sync"
+timeout = 120
+keepalive = 5
+
+# Logging
+accesslog = "/var/log/ml-api/access.log"
+errorlog = "/var/log/ml-api/error.log"
+loglevel = "info"
+
+# Process naming
+proc_name = "ml-api"
+```
+
+Update systemd service to use Gunicorn:
+
+```ini
+[Service]
+ExecStart=/opt/crypto-arbitrage/ml_pipeline/venv/bin/gunicorn \
+    --config gunicorn_config.py \
+    ml_api_server:app
+```
+
+Start with Gunicorn directly:
+
+```bash
+gunicorn --config gunicorn_config.py ml_api_server:app
+```
+
+#### Option 3: Docker Container
+
+Create `Dockerfile.ml-api` in project root:
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY ml_pipeline/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application
+COPY ml_pipeline/ .
+
+# Create models directory
+RUN mkdir -p models/xgboost
+
+# Expose port
+EXPOSE 5250
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:5250/health')"
+
+# Run application
+CMD ["python", "ml_api_server.py"]
+```
+
+Build and run:
+
+```bash
+# Build image
+docker build -f Dockerfile.ml-api -t crypto-arbitrage-ml-api .
+
+# Copy trained models to volume
+docker volume create ml-models
+docker run --rm -v ml-models:/models -v $(pwd)/ml_pipeline/models/xgboost:/source alpine cp -r /source/* /models/
+
+# Run container
+docker run -d \
+    --name ml-api \
+    -p 5250:5250 \
+    -v ml-models:/app/models/xgboost \
+    --restart unless-stopped \
+    crypto-arbitrage-ml-api
+
+# Check logs
+docker logs -f ml-api
+
+# Check health
+curl http://localhost:5250/health
+```
+
+#### Option 4: docker-compose Integration
+
+Update existing `docker-compose.yml` to include ML API:
+
+```yaml
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./src/CryptoArbitrage.API
+      dockerfile: Dockerfile
+    container_name: arbitrage-backend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - MLApi__Host=ml-api
+      - MLApi__Port=5250
+    depends_on:
+      - ml-api
+    ports:
+      - "5000:8080"
+    restart: unless-stopped
+    networks:
+      - arbitrage-network
+
+  ml-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml-api
+    container_name: ml-api
+    ports:
+      - "5250:5250"
+    volumes:
+      - ml-models:/app/models/xgboost
+    restart: unless-stopped
+    networks:
+      - arbitrage-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5250/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: arbitrage-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - arbitrage-network
+
+networks:
+  arbitrage-network:
+    driver: bridge
+
+volumes:
+  arbitrage-data:
+  arbitrage-logs:
+  ml-models:
+```
+
+Deploy with docker-compose:
+
+```bash
+# Build and start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f ml-api
+
+# Check status
+docker-compose ps
+
+# Restart ML API only
+docker-compose restart ml-api
+```
+
+### Cloud Deployment Options
+
+#### AWS - EC2 with systemd
+
+```bash
+# SSH into EC2 instance
+ssh ubuntu@your-ec2-instance
+
+# Install Python and dependencies
+sudo apt update
+sudo apt install python3.11 python3.11-venv
+
+# Clone repository
+cd /opt
+sudo git clone <repo-url> crypto-arbitrage
+sudo chown -R ubuntu:ubuntu crypto-arbitrage
+
+# Setup ML API
+cd crypto-arbitrage/ml_pipeline
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Train models (if not already trained)
+./train.sh
+
+# Create systemd service (see Option 1 above)
+sudo cp ml-api.service /etc/systemd/system/
+sudo systemctl enable ml-api
+sudo systemctl start ml-api
+```
+
+#### Azure - Container Instances
+
+```bash
+# Build and push image to Azure Container Registry
+az acr create --resource-group CryptoArbitrage --name arbitrageacr --sku Basic
+az acr login --name arbitrageacr
+
+docker build -f Dockerfile.ml-api -t arbitrageacr.azurecr.io/ml-api:latest .
+docker push arbitrageacr.azurecr.io/ml-api:latest
+
+# Deploy to Container Instances
+az container create \
+    --resource-group CryptoArbitrage \
+    --name ml-api \
+    --image arbitrageacr.azurecr.io/ml-api:latest \
+    --cpu 2 \
+    --memory 4 \
+    --ports 5250 \
+    --ip-address Public \
+    --registry-login-server arbitrageacr.azurecr.io \
+    --registry-username $(az acr credential show --name arbitrageacr --query username -o tsv) \
+    --registry-password $(az acr credential show --name arbitrageacr --query passwords[0].value -o tsv)
+```
+
+#### Google Cloud - Cloud Run
+
+```bash
+# Build and deploy
+cd ml_pipeline
+
+gcloud run deploy ml-api \
+    --source . \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --port 5250 \
+    --memory 2Gi \
+    --cpu 2 \
+    --timeout 300
+```
+
+### Configuration
+
+#### Environment Variables
+
+```bash
+# Optional configuration via environment variables
+export FLASK_ENV=production
+export ML_MODEL_PATH=/app/models/xgboost
+export FLASK_PORT=5250
+export FLASK_HOST=0.0.0.0
+```
+
+#### Backend Configuration
+
+Update `appsettings.Production.json` in C# backend:
+
+```json
+{
+  "MLApi": {
+    "Host": "ml-api",  // Use "localhost" for same server, or container name for Docker
+    "Port": "5250"
+  }
+}
+```
+
+### Monitoring & Troubleshooting
+
+#### Check ML API Health
+
+```bash
+# Health endpoint
+curl http://localhost:5250/health
+
+# Test prediction (requires valid opportunity JSON)
+curl -X POST http://localhost:5250/predict \
+    -H "Content-Type: application/json" \
+    -d @test_opportunity.json
+```
+
+#### View Logs
+
+```bash
+# systemd service
+sudo journalctl -u ml-api -f
+
+# Docker
+docker logs -f ml-api
+
+# Gunicorn logs
+tail -f /var/log/ml-api/access.log
+tail -f /var/log/ml-api/error.log
+```
+
+#### Common Issues
+
+**Port Already in Use**:
+```bash
+# Find process using port 5250
+sudo lsof -i :5250
+
+# Kill process
+sudo kill -9 <PID>
+```
+
+**Models Not Found**:
+```bash
+# Check models directory
+ls -la ml_pipeline/models/xgboost/
+
+# Should contain:
+# - profit_model.pkl
+# - success_model.pkl
+# - duration_model.pkl
+# - scaler.pkl
+
+# Retrain if missing
+cd ml_pipeline
+source venv/bin/activate
+./train.sh
+```
+
+**Backend Can't Connect to ML API**:
+```bash
+# Check if ML API is running
+curl http://localhost:5250/health
+
+# Check backend configuration
+grep -A3 "MLApi" src/CryptoArbitrage.API/appsettings.json
+
+# Check backend logs for ML API connection errors
+journalctl -u arbitrage -f | grep "ML API"
+```
+
+**Import Errors**:
+```bash
+# Verify all dependencies installed
+cd ml_pipeline
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Check Python version
+python --version  # Should be 3.11+
+```
+
+### Performance Tuning
+
+#### Gunicorn Workers
+
+Adjust workers based on CPU cores:
+
+```python
+# gunicorn_config.py
+workers = (cpu_cores * 2) + 1  # Recommended formula
+```
+
+#### Model Loading
+
+Models are loaded once at startup and cached in memory. For better performance:
+
+```python
+# Ensure models are pre-loaded
+# ml_api_server.py already does this in initialize_predictor()
+```
+
+#### Batch Predictions
+
+Use batch endpoint for multiple opportunities:
+
+```bash
+# More efficient than multiple single predictions
+curl -X POST http://localhost:5250/predict/batch \
+    -H "Content-Type: application/json" \
+    -d @opportunities_batch.json
+```
+
+### Security Considerations
+
+- **Firewall**: Only allow connections from C# backend (not public internet)
+- **Authentication**: Add API key authentication if exposing publicly
+- **Rate Limiting**: Implement rate limiting to prevent abuse
+- **HTTPS**: Use HTTPS in production (behind nginx or cloud load balancer)
+
+### Nginx Reverse Proxy (Optional)
+
+If exposing ML API through Nginx:
+
+```nginx
+# /etc/nginx/sites-available/ml-api
+server {
+    listen 80;
+    server_name ml-api.yourdomain.com;
+
+    location / {
+        proxy_pass http://localhost:5250;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+    }
+}
+```
+
+### Model Updates
+
+When retraining models:
+
+```bash
+# 1. Retrain models
+cd ml_pipeline
+source venv/bin/activate
+./train.sh
+
+# 2. Restart ML API
+# systemd:
+sudo systemctl restart ml-api
+
+# Docker:
+docker restart ml-api
+
+# docker-compose:
+docker-compose restart ml-api
+
+# Manual:
+# Kill process and restart
+pkill -f ml_api_server
+python ml_api_server.py
+```
+
+---
+
 ## Cloud Deployments
 
 ### Azure App Service

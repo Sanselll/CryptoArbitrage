@@ -48,6 +48,14 @@ class FeaturePreprocessor:
         """
         df = self._create_features(df)
         df = self._encode_categorical(df, fit=True)
+
+        # Drop non-numeric columns that can't be used for training
+        # entry_time is datetime, symbol is object, strategy/exchange are objects (not encoding them)
+        # strategy_name and exit_reason are target variables (what we're trying to predict), not features
+        cols_to_drop = ['entry_time', 'symbol', 'exit_time', 'strategy', 'long_exchange', 'short_exchange',
+                        'strategy_name', 'exit_reason']
+        df = df.drop(columns=[col for col in cols_to_drop if col in df.columns])
+
         df = self._scale_features(df, fit=True)
 
         self.is_fitted = True
@@ -70,6 +78,11 @@ class FeaturePreprocessor:
 
         df = self._create_features(df)
         df = self._encode_categorical(df, fit=False)
+
+        # Drop non-numeric columns that can't be used for training
+        cols_to_drop = ['entry_time', 'symbol', 'exit_time', 'strategy', 'long_exchange', 'short_exchange']
+        df = df.drop(columns=[col for col in cols_to_drop if col in df.columns])
+
         df = self._scale_features(df, fit=False)
 
         # Ensure same columns as training
@@ -92,6 +105,48 @@ class FeaturePreprocessor:
             DataFrame with new features
         """
         df = df.copy()
+
+        # Fill NaN values in break-even columns with a large value (indicates no break-even point)
+        # This is more meaningful than 0 (which would indicate instant break-even)
+        if 'fund_break_even_24h_proj' in df.columns:
+            df['fund_break_even_24h_proj'] = df['fund_break_even_24h_proj'].fillna(999)
+        if 'fund_break_even_3d_proj' in df.columns:
+            df['fund_break_even_3d_proj'] = df['fund_break_even_3d_proj'].fillna(999)
+        if 'break_even_hours' in df.columns:
+            df['break_even_hours'] = df['break_even_hours'].fillna(999)
+
+        # === TEMPORAL FEATURES ===
+
+        # Market session (Asian/European/US hours)
+        if 'hour_of_day' in df.columns:
+            df['is_asian_session'] = df['hour_of_day'].between(0, 8).astype(float)
+            df['is_european_session'] = df['hour_of_day'].between(8, 16).astype(float)
+            df['is_us_session'] = df['hour_of_day'].between(16, 24).astype(float)
+
+        # Weekend effect
+        if 'day_of_week' in df.columns:
+            df['is_weekend'] = df['day_of_week'].isin([5, 6]).astype(float)
+            df['is_weekday'] = (~df['day_of_week'].isin([5, 6])).astype(float)
+
+        # Cyclical encoding for hour (captures 24h cyclicality)
+        if 'hour_of_day' in df.columns:
+            df['hour_sin'] = np.sin(2 * np.pi * df['hour_of_day'] / 24)
+            df['hour_cos'] = np.cos(2 * np.pi * df['hour_of_day'] / 24)
+
+        # Cyclical encoding for day of week (captures 7-day cyclicality)
+        if 'day_of_week' in df.columns:
+            df['day_sin'] = np.sin(2 * np.pi * df['day_of_week'] / 7)
+            df['day_cos'] = np.cos(2 * np.pi * df['day_of_week'] / 7)
+
+        # Funding cycle position (hours until next funding event)
+        if 'long_next_funding_minutes' in df.columns:
+            df['hours_until_long_funding'] = df['long_next_funding_minutes'] / 60
+        if 'short_next_funding_minutes' in df.columns:
+            df['hours_until_short_funding'] = df['short_next_funding_minutes'] / 60
+
+        # Time until NEXT funding event (minimum of both exchanges)
+        if 'hours_until_long_funding' in df.columns and 'hours_until_short_funding' in df.columns:
+            df['hours_until_next_funding'] = df[['hours_until_long_funding', 'hours_until_short_funding']].min(axis=1)
 
         # === PROFITABILITY FEATURES ===
 
@@ -123,6 +178,43 @@ class FeaturePreprocessor:
             np.where(df['fund_profit_8h'] < df['fund_profit_8h_3d_proj'], -1, 0)  # Downtrend vs Stable
         )
 
+        # Rate acceleration (change in momentum)
+        df['rate_acceleration'] = df['rate_momentum_24h'] - df['rate_momentum_3d']
+
+        # === EXCHANGE-AGNOSTIC FEATURES (instead of encoding exchange names) ===
+
+        # Funding differential (absolute difference between exchanges)
+        df['funding_differential'] = np.abs(df['long_funding_rate'] - df['short_funding_rate'])
+
+        # Funding direction (which exchange has higher rate)
+        df['funding_direction'] = (df['long_funding_rate'] > df['short_funding_rate']).astype(float)
+
+        # Funding asymmetry (ratio of rates)
+        df['funding_asymmetry'] = np.where(
+            np.abs(df['short_funding_rate']) > 1e-10,
+            df['long_funding_rate'] / df['short_funding_rate'],
+            0
+        )
+
+        # === PROFIT SIGNAL FEATURES ===
+
+        # Expected profit signal (profit adjusted for volatility)
+        df['expected_profit_signal'] = np.where(
+            df['spread_volatility_cv'] > 0.01,
+            df['fund_apr'] / df['spread_volatility_cv'],
+            df['fund_apr'] * 100  # Low volatility = high signal
+        )
+
+        # Sharpe-like proxy (profit per unit of spread volatility)
+        df['sharpe_proxy'] = np.where(
+            df['spread_volatility_stddev'] > 0.001,
+            df['fund_profit_8h'] / df['spread_volatility_stddev'],
+            df['fund_profit_8h'] * 1000
+        )
+
+        # Profit consistency score
+        df['profit_consistency'] = 1.0 / (1.0 + np.abs(df['rate_momentum_24h']))
+
         # === RISK FEATURES ===
 
         # Volatility risk score
@@ -131,29 +223,16 @@ class FeaturePreprocessor:
             np.where(df['spread_volatility_cv'] < 0.5, 0.5, 0.0)  # Medium vs High risk
         )
 
-        # === LIQUIDITY FEATURES ===
+        # === BREAK-EVEN FEATURES ===
 
-        # Volume adequacy (normalized by position size)
-        df['volume_adequacy'] = df['volume_24h'] / 1000  # Assuming $1000 position size
-
-        # Liquidity score (categorical to numerical)
-        liquidity_mapping = {'Good': 1.0, 'Medium': 0.6, 'Low': 0.2}
-        df['liquidity_score'] = df['liquidity_status'].map(liquidity_mapping).fillna(0.5)
-
-        # === TIMING FEATURES (Cyclical Encoding) ===
-
-        # Hour of day (sin/cos encoding to capture cyclical nature)
-        df['hour_sin'] = np.sin(2 * np.pi * df['hour_of_day'] / 24)
-        df['hour_cos'] = np.cos(2 * np.pi * df['hour_of_day'] / 24)
-
-        # Day of week (sin/cos encoding)
-        df['day_sin'] = np.sin(2 * np.pi * df['day_of_week'] / 7)
-        df['day_cos'] = np.cos(2 * np.pi * df['day_of_week'] / 7)
+        # Break-even feasibility (can we break even within 24 hours?)
+        df['break_even_feasibility'] = np.where(
+            (df['break_even_hours'].notna()) & (df['break_even_hours'] < 24),
+            1.0,
+            0.0
+        )
 
         # === INTERACTION FEATURES ===
-
-        # Profit weighted by liquidity (opportunities with good liquidity are more valuable)
-        df['profit_x_liquidity'] = df['fund_profit_8h'] * df['liquidity_score']
 
         # Risk-adjusted return (profit divided by volatility)
         df['risk_adjusted_return'] = np.where(
@@ -180,18 +259,8 @@ class FeaturePreprocessor:
 
         # === EXCHANGE FEATURES ===
 
-        # Volume imbalance (if long/short volumes differ significantly)
-        df['volume_imbalance'] = np.where(
-            (df['long_volume_24h'].notna()) & (df['short_volume_24h'].notna()) &
-            (df['long_volume_24h'] + df['short_volume_24h'] > 0),
-            np.abs(df['long_volume_24h'] - df['short_volume_24h']) / (df['long_volume_24h'] + df['short_volume_24h']),
-            0
-        )
-
-        # === BTC CONTEXT ===
-
-        # BTC price (normalized to thousands)
-        df['btc_price_k'] = df['btc_price_at_entry'] / 1000
+        # Note: long_volume_24h and short_volume_24h not in dataset
+        # Volume imbalance feature removed
 
         return df
 
@@ -208,7 +277,12 @@ class FeaturePreprocessor:
         """
         df = df.copy()
 
-        categorical_cols = ['symbol', 'strategy', 'long_exchange', 'short_exchange', 'market_regime']
+        # Removed ALL categorical encoding:
+        # - 'symbol' (197 unique values = too many features)
+        # - 'market_regime' (not in dataset)
+        # - 'strategy' (only 2 values, low variance)
+        # - 'long_exchange', 'short_exchange' (learns names not patterns - won't generalize!)
+        categorical_cols = []  # No categorical encoding - use engineered features instead
 
         if fit:
             # One-hot encoding
@@ -233,16 +307,34 @@ class FeaturePreprocessor:
             DataFrame with scaled features
         """
         # Columns to scale (numerical features only)
+        # Note: Only including columns that exist in the dataset
         scale_cols = [
+            # Funding features
             'fund_profit_8h', 'fund_apr', 'fund_profit_8h_24h_proj', 'fund_profit_8h_3d_proj',
-            'break_even_hours', 'spread_volatility_cv', 'spread_volatility_stddev',
-            'spread_30sample_avg', 'volume_24h', 'long_volume_24h', 'short_volume_24h',
-            'bid_ask_spread_pct', 'orderbook_depth_usd', 'position_cost_pct',
-            'position_size_usd', 'btc_price_at_entry',
-            # Engineered features
-            'rate_momentum_24h', 'rate_momentum_3d', 'rate_stability',
-            'volume_adequacy', 'risk_adjusted_return', 'breakeven_efficiency',
-            'spread_consistency', 'volume_imbalance', 'btc_price_k'
+            'funding_differential', 'funding_asymmetry',
+            'long_funding_rate', 'short_funding_rate',
+
+            # Spread features
+            'current_price_spread_pct', 'price_spread_24h_avg', 'price_spread_3d_avg',
+            'spread_30sample_avg', 'spread_volatility_stddev', 'spread_volatility_cv',
+
+            # Break-even features
+            'break_even_hours', 'fund_break_even_24h_proj', 'fund_break_even_3d_proj',
+
+            # Volume
+            'volume_24h',
+
+            # Engineered profit signals
+            'expected_profit_signal', 'sharpe_proxy', 'profit_consistency',
+
+            # Momentum and trend features
+            'rate_momentum_24h', 'rate_momentum_3d', 'rate_acceleration', 'rate_stability',
+
+            # Other engineered features
+            'risk_adjusted_return', 'breakeven_efficiency', 'spread_consistency',
+
+            # Temporal features (cyclical encodings don't need scaling)
+            'hours_until_long_funding', 'hours_until_short_funding', 'hours_until_next_funding'
         ]
 
         # Only scale columns that exist

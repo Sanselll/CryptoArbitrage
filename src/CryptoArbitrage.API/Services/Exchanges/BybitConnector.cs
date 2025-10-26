@@ -1310,7 +1310,8 @@ public class BybitConnector : IExchangeConnector
                 return new List<KlineDto>();
             }
 
-            var results = klines.Data.List.Select(k => new KlineDto
+            // Bybit returns klines in reverse chronological order (newest first), so reverse it
+            var results = klines.Data.List.Reverse().Select(k => new KlineDto
             {
                 Exchange = ExchangeName,
                 Symbol = symbol,
