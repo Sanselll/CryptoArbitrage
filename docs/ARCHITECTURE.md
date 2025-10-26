@@ -3,11 +3,12 @@
 ## Table of Contents
 1. [System Overview](#system-overview)
 2. [Backend Architecture](#backend-architecture)
-3. [Frontend Architecture](#frontend-architecture)
-4. [Data Flow](#data-flow)
-5. [Database Design](#database-design)
-6. [Real-time Communication](#real-time-communication)
-7. [Security Considerations](#security-considerations)
+3. [ML Services Architecture](#ml-services-architecture)
+4. [Frontend Architecture](#frontend-architecture)
+5. [Data Flow](#data-flow)
+6. [Database Design](#database-design)
+7. [Real-time Communication](#real-time-communication)
+8. [Security Considerations](#security-considerations)
 
 ## System Overview
 
@@ -17,10 +18,10 @@ The Crypto Funding Arbitrage Platform is a full-stack application designed to mo
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Frontend (React)                         │
+│              Frontend (React) - Port 5173                    │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
 │  │ Dashboard│  │ Positions│  │  Funding │  │Opportunities│ │
-│  │ Widgets  │  │   Grid   │  │   Rates  │  │    List    │  │
+│  │ Widgets  │  │   Grid   │  │   Rates  │  │ + ML Scores │  │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬──────┘  │
 │       │             │              │              │          │
 │       └─────────────┴──────────────┴──────────────┘          │
@@ -43,21 +44,27 @@ The Crypto Funding Arbitrage Platform is a full-stack application designed to mo
 │                   │     Hub     │                           │
 │                   └──────┬──────┘                           │
 │                          │                                   │
-│         Backend (.NET 8 Web API)                            │
+│      Backend (.NET 8 Web API) - Port 5052                   │
 │                          │                                   │
 │   ┌──────────────────────┼────────────────────────┐         │
 │   │                      │                        │         │
 │   │  ┌───────────────────▼────────┐              │         │
-│   │  │ ArbitrageEngineService     │              │         │
-│   │  │  (Background Service)       │              │         │
-│   │  └───┬──────────────┬─────────┘              │         │
-│   │      │              │                         │         │
-│   │  ┌───▼────┐    ┌────▼────┐    ┌─────────┐  │         │
-│   │  │Binance │    │ Bybit   │    │  Risk   │  │         │
-│   │  │Connector   │Connector│    │ Manager │  │         │
-│   │  └───┬────┘    └────┬────┘    └────┬────┘  │         │
-│   │      │              │               │        │         │
-│   └──────┼──────────────┼───────────────┼────────┘         │
+│   │  │ OpportunityEnricher         │              │         │
+│   │  │   └─> OpportunityMLScorer  │─────┐        │         │
+│   │  │         └─> PythonMLApiClient    │        │         │
+│   │  └────────────────────────────┘     │        │         │
+│   │                                      │ HTTP   │         │
+│   │  ┌───────────────────────────┐      │        │         │
+│   │  │ ArbitrageEngineService     │      │        │         │
+│   │  │  (Background Service)       │      │        │         │
+│   │  └───┬──────────────┬─────────┘      │        │         │
+│   │      │              │                 │        │         │
+│   │  ┌───▼────┐    ┌────▼────┐    ┌─────▼───┐   │         │
+│   │  │Binance │    │ Bybit   │    │  Risk   │   │         │
+│   │  │Connector   │Connector│    │ Manager │   │         │
+│   │  └───┬────┘    └────┬────┘    └────┬────┘   │         │
+│   │      │              │               │         │         │
+│   └──────┼──────────────┼───────────────┼─────────┘         │
 │          │              │               │                   │
 │   ┌──────▼──────────────▼───────────────▼────────┐         │
 │   │         Entity Framework Core                 │         │
@@ -65,10 +72,30 @@ The Crypto Funding Arbitrage Platform is a full-stack application designed to mo
 │   └──────────────────┬────────────────────────────┘         │
 │                      │                                       │
 │   ┌──────────────────▼────────────────────────────┐         │
-│   │            SQLite Database                     │         │
+│   │         PostgreSQL Database                    │         │
 │   │  (Exchanges, Positions, FundingRates, etc.)   │         │
 │   └────────────────────────────────────────────────┘         │
-└─────────────────────────────────────────────────────────────┘
+└───────────────┬───────────────────────────────────────────────┘
+                │
+                │ HTTP POST (JSON)
+                │
+┌───────────────▼───────────────────────────────────────────────┐
+│         Python ML API Server (Flask) - Port 5250              │
+│                                                                │
+│   ┌────────────────────────────────────────────────┐          │
+│   │  ml_api_server.py (Flask App)                  │          │
+│   │    └─> MLPredictor (csharp_bridge.py)         │          │
+│   │          ├─> XGBoost Profit Model              │          │
+│   │          ├─> XGBoost Success Model             │          │
+│   │          ├─> XGBoost Duration Model            │          │
+│   │          └─> FeaturePreprocessor               │          │
+│   └────────────────────────────────────────────────┘          │
+│                                                                │
+│   Endpoints:                                                   │
+│   - GET  /health           (Health check)                     │
+│   - POST /predict          (Single prediction)                │
+│   - POST /predict/batch    (Batch predictions)                │
+└────────────────────────────────────────────────────────────────┘
                      │              │
           ┌──────────┘              └──────────┐
           │                                    │
@@ -77,6 +104,15 @@ The Crypto Funding Arbitrage Platform is a full-stack application designed to mo
     │    API    │                       │     API     │
     └───────────┘                       └─────────────┘
 ```
+
+### Port Configuration
+
+| Service | Port | Protocol | Purpose |
+|---------|------|----------|---------|
+| Frontend | 5173 | HTTP | React development server |
+| Backend API | 5052 | HTTP | .NET Web API |
+| ML API | 5250 | HTTP | Flask ML predictions |
+| PostgreSQL | 5432 | TCP | Database server |
 
 ## Backend Architecture
 
@@ -215,6 +251,291 @@ builder.Services.AddHostedService<ArbitrageEngineService>();
 // CORS
 builder.Services.AddCors(/* configuration */);
 ```
+
+---
+
+## ML Services Architecture
+
+### Overview
+
+The ML Services layer provides machine learning-powered predictions for arbitrage opportunities using XGBoost models trained on historical data. This layer operates as an **independent Flask API microservice** that communicates with the C# backend via HTTP.
+
+### Technology Stack
+
+- **Framework**: Flask 3.0 (Python)
+- **ML Library**: XGBoost 2.0
+- **Feature Engineering**: pandas, NumPy
+- **Model Format**: Joblib pickle files
+- **API Protocol**: REST/JSON over HTTP
+- **Port**: 5250
+
+### Architecture Pattern: Microservice
+
+**Why Microservice vs Embedded**:
+- ✅ **Independent Scaling**: ML API can scale separately from backend
+- ✅ **Language Agnostic**: Python ML ecosystem without .NET constraints
+- ✅ **Simple Deployment**: No platform-specific Python DLL dependencies
+- ✅ **Easy Debugging**: Standard Flask logs and error handling
+- ✅ **Version Control**: Models can be updated without backend redeployment
+
+### Components
+
+#### 1. Flask API Server (`ml_api_server.py`)
+
+**Responsibilities**:
+- HTTP endpoint handling
+- Request validation
+- JSON serialization/deserialization
+- Error handling and logging
+
+**Endpoints**:
+```python
+GET  /health           # Health check for monitoring
+POST /predict          # Single opportunity prediction
+POST /predict/batch    # Batch predictions (more efficient)
+```
+
+**Example Request/Response**:
+```json
+# POST /predict
+{
+  "symbol": "BTCUSDT",
+  "longExchange": "Bybit",
+  "shortExchange": "Binance",
+  "longFundingRate": -0.001,
+  "shortFundingRate": 0.002,
+  ...
+}
+
+# Response
+{
+  "predicted_profit_percent": 1.234,
+  "success_probability": 0.789,
+  "predicted_duration_hours": 12.5,
+  "composite_score": 0.974
+}
+```
+
+#### 2. ML Predictor (`src/csharp_bridge.py`)
+
+**Responsibilities**:
+- Model loading and caching
+- Feature extraction from opportunity data
+- Prediction generation
+- Composite score calculation
+
+**Models**:
+1. **Profit Model** (`profit_model.pkl`): Predicts expected profit percentage
+2. **Success Model** (`success_model.pkl`): Predicts probability of profitable outcome (0-1)
+3. **Duration Model** (`duration_model.pkl`): Predicts optimal hold time in hours
+
+**Feature Engineering**:
+- Extracts 54 features from opportunity data
+- Temporal features (hour, day of week, cyclical encodings)
+- Funding rate features (rates, intervals, projections)
+- Price spread statistics
+- Volume metrics
+
+#### 3. Feature Preprocessor (`src/data/preprocessor.py`)
+
+**Responsibilities**:
+- StandardScaler normalization (first 31 features)
+- Feature engineering (23 derived features)
+- Missing value handling
+- Cyclical encoding for temporal data
+
+**Normalization**:
+```python
+# First 31 features normalized with StandardScaler
+normalized = (feature - mean) / std
+
+# Features 31-53 are derived ratios and encodings (no normalization)
+hour_sin = sin(2π * hour / 24)
+day_cos = cos(2π * day / 7)
+```
+
+### Integration with C# Backend
+
+#### Client Implementation (`Services/ML/PythonMLApiClient.cs`)
+
+```csharp
+public class PythonMLApiClient
+{
+    private readonly HttpClient _httpClient;
+    private readonly string _baseUrl = "http://localhost:5250";
+
+    public async Task<MLPredictionResult> ScoreOpportunityAsync(
+        ArbitrageOpportunityDto opportunity)
+    {
+        var json = JsonSerializer.Serialize(opportunity);
+        var content = new StringContent(json, UTF8, "application/json");
+
+        var response = await _httpClient.PostAsync("/predict", content);
+        var result = await response.Content.ReadAsStringAsync();
+
+        return JsonSerializer.Deserialize<MLPredictionResult>(result);
+    }
+
+    public async Task<List<MLPredictionResult>> ScoreOpportunitiesBatchAsync(
+        IEnumerable<ArbitrageOpportunityDto> opportunities)
+    {
+        // Batch endpoint for efficiency (single HTTP call)
+        var response = await _httpClient.PostAsync("/predict/batch", ...);
+        return Deserialize<List<MLPredictionResult>>(response);
+    }
+}
+```
+
+#### Integration Flow
+
+1. **Startup Health Check**:
+```csharp
+// Program.cs
+var mlApiClient = scope.ServiceProvider.GetRequiredService<PythonMLApiClient>();
+var isHealthy = await mlApiClient.HealthCheckAsync();
+// ✅ Python ML API is available at http://localhost:5250
+```
+
+2. **Opportunity Enrichment**:
+```csharp
+// OpportunityEnricher.cs
+public async Task<List<ArbitrageOpportunityDto>> EnrichOpportunitiesAsync(
+    List<ArbitrageOpportunityDto> opportunities)
+{
+    // Phase 1-3: Market data enrichment...
+
+    // Phase 4: ML scoring
+    if (_mlScorer != null)
+    {
+        await _mlScorer.ScoreAndEnrichOpportunitiesAsync(opportunities);
+    }
+
+    return opportunities;
+}
+```
+
+3. **ML Scoring**:
+```csharp
+// OpportunityMLScorer.cs
+public async Task ScoreAndEnrichOpportunitiesAsync(
+    List<ArbitrageOpportunityDto> opportunities)
+{
+    var predictions = await _mlApiClient.ScoreOpportunitiesBatchAsync(opportunities);
+
+    for (int i = 0; i < opportunities.Count; i++)
+    {
+        opportunities[i].MLPredictedProfitPercent = predictions[i].PredictedProfitPercent;
+        opportunities[i].MLSuccessProbability = predictions[i].SuccessProbability;
+        opportunities[i].MLPredictedDurationHours = predictions[i].PredictedDurationHours;
+        opportunities[i].MLCompositeScore = predictions[i].CompositeScore;
+    }
+}
+```
+
+### Model Training Pipeline
+
+```
+┌──────────────────────────────────────┐
+│  Historical Data Collection          │
+│  (CryptoArbitrage.HistoricalCollector)│
+│  → training_data.csv                 │
+└────────────┬─────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────┐
+│  ML Training (Python)                │
+│  ./train.sh                          │
+│  - Feature engineering               │
+│  - XGBoost training                  │
+│  - Model evaluation                  │
+│  → models/xgboost/*.pkl              │
+└────────────┬─────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────┐
+│  ML API Deployment                   │
+│  python ml_api_server.py             │
+│  - Load trained models               │
+│  - Start Flask server (port 5250)   │
+└──────────────────────────────────────┘
+```
+
+### Deployment Considerations
+
+**Development**:
+```bash
+# Start ML API
+cd ml_pipeline
+python ml_api_server.py
+
+# Start backend (connects automatically)
+cd ../src/CryptoArbitrage.API
+dotnet run
+```
+
+**Production**:
+```bash
+# Use Gunicorn for production WSGI
+gunicorn --bind 0.0.0.0:5250 --workers 4 ml_api_server:app
+
+# Or systemd service
+systemctl start ml-api
+```
+
+**Docker**:
+```dockerfile
+FROM python:3.10-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+EXPOSE 5250
+CMD ["python", "ml_api_server.py"]
+```
+
+### Performance Characteristics
+
+| Operation | Latency | Notes |
+|-----------|---------|-------|
+| Single Prediction | ~10-20ms | Includes HTTP overhead |
+| Batch (10 opps) | ~15-30ms | More efficient than 10 singles |
+| Batch (100 opps) | ~50-100ms | Recommended for bulk scoring |
+| Model Loading | ~2-5s | One-time on startup |
+
+**Optimization Tips**:
+- Always use `/predict/batch` for multiple opportunities
+- Models are cached in memory (no reload per request)
+- Use Gunicorn workers to handle concurrent requests
+
+### Monitoring and Health
+
+**Health Check**:
+```bash
+curl http://localhost:5250/health
+# {"status": "healthy", "service": "ml-api", "version": "1.0.0"}
+```
+
+**Logging**:
+```python
+# Flask logs to stdout
+127.0.0.1 - - [26/Oct/2025 17:15:13] "POST /predict HTTP/1.1" 200 -
+```
+
+**Error Handling**:
+```json
+# API returns structured errors
+{
+  "error": "Missing required field: fundProfit8h"
+}
+```
+
+### References
+
+- [ML API Guide](../ml_pipeline/ML_API_GUIDE.md) - Complete API documentation
+- [ML Implementation Guide](ml-implementation-guide.md) - Training and deployment
+- [Training README](../ml_pipeline/README.md) - Model training workflow
+
+---
 
 ## Frontend Architecture
 

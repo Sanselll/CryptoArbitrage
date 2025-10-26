@@ -1,0 +1,44 @@
+xgboost:
+  success_classifier:
+    n_estimators: 1500
+    max_depth: 11
+    learning_rate: 0.03129926620588006
+    min_child_weight: 10
+    subsample: 0.9890898915737059
+    colsample_bytree: 0.7780874908732436
+    gamma: 0.2828364305968697
+    reg_alpha: 0.49326562706568244
+    reg_lambda: 3.3253962521475
+    scale_pos_weight: 3.387982438097335
+    objective: binary:logistic
+    eval_metric: auc
+    tree_method: hist
+    early_stopping_rounds: 150
+  profit_predictor:
+    n_estimators: 4500
+    max_depth: 14
+    learning_rate: 0.009998851845883639
+    min_child_weight: 10
+    subsample: 0.9980341806326457
+    colsample_bytree: 0.7390278059058913
+    gamma: 0.18660209052539536
+    reg_alpha: 0.10404086524316918
+    reg_lambda: 4.6210183668159015
+    objective: reg:squarederror
+    eval_metric: rmse
+    tree_method: hist
+    early_stopping_rounds: 150
+  duration_predictor:
+    n_estimators: 3000
+    max_depth: 14
+    learning_rate: 0.006694755548534381
+    min_child_weight: 10
+    subsample: 0.9996958651049216
+    colsample_bytree: 0.7344606289549767
+    gamma: 0.053723598184720445
+    reg_alpha: 0.046829834272052326
+    reg_lambda: 4.649171098015957
+    objective: reg:squarederror
+    eval_metric: rmse
+    tree_method: hist
+    early_stopping_rounds: 150

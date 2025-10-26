@@ -1,0 +1,56 @@
+# Opportunity Scoring Configuration
+
+# Composite Score Weights (must sum to 1.0)
+weights:
+  predicted_profit: 0.40      # Weight for predicted profit %
+  success_probability: 0.30   # Weight for probability of success
+  risk_adjusted_return: 0.20  # Weight for profit/risk ratio
+  hold_duration: 0.10         # Weight for shorter hold times (inverse)
+
+# Normalization
+normalization:
+  # Normalize scores to 0-100 range
+  min_score: 0
+  max_score: 100
+
+  # Expected ranges for each component (for normalization)
+  profit_range:
+    min: -5.0  # Minimum expected profit % (loss)
+    max: 20.0  # Maximum expected profit %
+
+  success_probability_range:
+    min: 0.0   # 0% probability
+    max: 1.0   # 100% probability
+
+  duration_range:
+    min: 1.0   # 1 hour minimum
+    max: 168.0 # 1 week maximum
+
+# Risk Adjustment
+risk_adjustment:
+  # How to calculate risk-adjusted return
+  method: 'sharpe'  # 'sharpe', 'simple_ratio'
+
+  # Volatility penalty
+  volatility_penalty_factor: 1.0
+
+  # Minimum acceptable risk metrics
+  min_spread_volatility_cv: 0.0
+  max_spread_volatility_cv: 1.0
+
+# Filtering
+filtering:
+  # Minimum thresholds to consider an opportunity
+  min_predicted_profit: 0.1  # Minimum 0.1% profit
+  min_success_probability: 0.5  # Minimum 50% success chance
+  max_hold_duration: 168  # Maximum 7 days
+
+  # Liquidity requirements
+  min_volume_24h: 100000  # Minimum $100k daily volume
+  required_liquidity_status: ['Good', 'Medium']  # Exclude 'Low'
+
+# Hold Duration Preference
+duration_preference:
+  # Prefer shorter hold times
+  optimal_duration_hours: 24  # Prefer 24-hour holds
+  duration_penalty_factor: 0.1  # Penalty per hour over optimal

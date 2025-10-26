@@ -53,3 +53,7 @@ logs/
 
 # Reference source code
 RefSource/
+src/CryptoArbitrage.HistoricalCollector/data/
+
+# Backend dumps (opportunity snapshots)
+src/CryptoArbitrage.API/Data/backend_dumps/

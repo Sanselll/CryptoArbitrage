@@ -4,6 +4,7 @@ using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.DataCollection.Events;
+using CryptoArbitrage.API.Services.ML;
 using Microsoft.Extensions.Options;
 
 namespace CryptoArbitrage.API.Services.Arbitrage.Detection;
@@ -20,6 +21,7 @@ public class OpportunityEnricher : IHostedService
     private readonly IDataRepository<LiquidityMetricsDto> _liquidityRepository;
     private readonly IDataRepository<ArbitrageOpportunityDto> _opportunityRepository;
     private readonly ArbitrageConfig _config;
+    private readonly OpportunityMLScorer? _mlScorer;
 
     public OpportunityEnricher(
         ILogger<OpportunityEnricher> logger,
@@ -27,7 +29,8 @@ public class OpportunityEnricher : IHostedService
         IDataRepository<MarketDataSnapshot> marketDataRepository,
         IDataRepository<LiquidityMetricsDto> liquidityRepository,
         IDataRepository<ArbitrageOpportunityDto> opportunityRepository,
-        IOptions<ArbitrageConfig> config)
+        IOptions<ArbitrageConfig> config,
+        OpportunityMLScorer? mlScorer = null)
     {
         _logger = logger;
         _eventBus = eventBus;
@@ -35,6 +38,7 @@ public class OpportunityEnricher : IHostedService
         _liquidityRepository = liquidityRepository;
         _opportunityRepository = opportunityRepository;
         _config = config.Value;
+        _mlScorer = mlScorer;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -115,6 +119,20 @@ public class OpportunityEnricher : IHostedService
             foreach (var opportunity in opportunities)
             {
                 await EnrichSingleOpportunityAsync(opportunity, marketDataSnapshot, liquidityMetricsDict);
+            }
+
+            // Phase 4: Apply ML scoring (if available)
+            if (_mlScorer != null)
+            {
+                try
+                {
+                    await _mlScorer.ScoreAndEnrichOpportunitiesAsync(opportunities);
+                    _logger.LogDebug("Applied ML scoring to {Count} opportunities", opportunities.Count);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to apply ML scoring, continuing without ML predictions");
+                }
             }
 
             return opportunities;

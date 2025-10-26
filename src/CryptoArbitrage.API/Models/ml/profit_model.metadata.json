@@ -1,0 +1,12 @@
+{
+  "model_type": "profit",
+  "objective": "reg:squarederror",
+  "is_classifier": false,
+  "requires_sigmoid": false,
+  "output_constraints": {
+    "min": null,
+    "max": null
+  },
+  "feature_count": 54,
+  "description": "Profit prediction model"
+}
