@@ -151,6 +151,14 @@ export interface ArbitrageOpportunity {
   liquidityStatus?: LiquidityStatus;
   liquidityWarning?: string;
 
+  // ML Predictions
+  mlPredictedProfitPercent?: number;     // Expected profit %
+  mlSuccessProbability?: number;          // Probability of success (0-1)
+  mlPredictedDurationHours?: number;      // Optimal hold duration (hours)
+  mlPredictedHoldHours?: number;          // Alias for mlPredictedDurationHours (deprecated)
+  mlCompositeScore?: number;              // Combined ML score (0-100)
+  mlModelVersion?: string;                // ML model version
+
   status: OpportunityStatus;
   detectedAt: string;
   executedAt?: string;

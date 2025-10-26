@@ -569,15 +569,9 @@ simulateCommand.SetHandler(async (opportunitiesFile, outputFile, durations) =>
     }
     Console.WriteLine();
 
-    // Parse hold durations
-    var durationArray = durations
-        .Split(',', StringSplitOptions.RemoveEmptyEntries)
-        .Select(d => ParseDurationToHours(d))
-        .ToArray();
-
-    // Step 2: Simulate positions
-    Console.WriteLine("Step 2: Simulating positions...");
-    var simulations = await simulator.SimulateAllPositions(snapshots, durationArray);
+    // Step 2: Simulate positions with recommended exit strategies
+    Console.WriteLine("Step 2: Simulating positions with exit strategies...");
+    var simulations = await simulator.SimulateAllPositions(snapshots);
 
     // Step 3: Export to CSV
     Console.WriteLine("Step 3: Exporting to CSV...");
@@ -689,13 +683,8 @@ fullCommand.SetHandler(async (startDate, endDate, interval, exchanges, symbols, 
     Console.WriteLine("║ PHASE 3: SIMULATE POSITIONS           ║");
     Console.WriteLine("╚════════════════════════════════════════╝");
 
-    Console.WriteLine("Simulating positions across all opportunities...");
-    var durationArray = durations
-        .Split(',', StringSplitOptions.RemoveEmptyEntries)
-        .Select(d => ParseDurationToHours(d))
-        .ToArray();
-
-    var simulations = await simulator.SimulateAllPositions(snapshots, durationArray);
+    Console.WriteLine("Simulating positions with exit strategies across all opportunities...");
+    var simulations = await simulator.SimulateAllPositions(snapshots);
 
     Console.WriteLine("Exporting training data to CSV...");
     await exporter.ExportToCsv(simulations, output);

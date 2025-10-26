@@ -8,6 +8,7 @@ import { EmptyState } from './ui/EmptyState';
 import { LoadingOverlay } from './ui/LoadingOverlay';
 import { ExchangeBadge } from './ui/ExchangeBadge';
 import { AlertDialog, ConfirmDialog } from './ui/Dialog';
+import { MLScoreBadge } from './ui/MLScoreBadge';
 import {
   Table,
   TableHeader,
@@ -106,7 +107,7 @@ const formatExecutionTime = (openedAt: string) => {
 };
 
 type SortField = 'spread' | 'priceSpread24h' | 'priceSpread3d' | 'spread30Sample' | 'spreadVolStdDev' | 'spreadVolCv' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
-  | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d';
+  | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d' | 'mlScore';
 type SortDirection = 'asc' | 'desc';
 
 export const OpportunitiesList = () => {
@@ -277,6 +278,10 @@ export const OpportunitiesList = () => {
         case 'fundBreakEven3d':
           aValue = a.fundBreakEvenTime3dProj ?? Infinity;
           bValue = b.fundBreakEvenTime3dProj ?? Infinity;
+          break;
+        case 'mlScore':
+          aValue = a.mlCompositeScore ?? -Infinity;
+          bValue = b.mlCompositeScore ?? -Infinity;
           break;
         default:
           aValue = a.fundApr;
@@ -690,6 +695,17 @@ export const OpportunitiesList = () => {
                           <ArrowUpDown className="w-3 h-3" />
                         )}
                       </div></TableHead>
+                <TableHead
+                  className="sticky right-[85px] z-40 bg-binance-bg-secondary border-l border-binance-border text-center cursor-pointer hover:bg-binance-bg-hover transition-colors w-[85px]"
+                  onClick={() => handleSort('mlScore')}
+                  title="machine learning predicted score (0-100)">
+                  <div className="flex items-center justify-center gap-1">
+                    ML Score
+                    {sortField === 'mlScore' && (
+                      <ArrowUpDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right" title="execute or view opportunity details">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -981,6 +997,22 @@ export const OpportunitiesList = () => {
                       ) : (
                         <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
                       )}
+                    </TableCell>
+                    <TableCell className={`sticky right-[85px] z-20 border-l border-binance-border w-[85px] ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                      <div className="px-0.5">
+                        {opp.mlCompositeScore !== undefined ? (
+                          <MLScoreBadge
+                            score={opp.mlCompositeScore}
+                            profitPrediction={opp.mlPredictedProfitPercent}
+                            successProbability={opp.mlSuccessProbability}
+                            holdDuration={opp.mlPredictedDurationHours || opp.mlPredictedHoldHours}
+                            modelVersion={opp.mlModelVersion}
+                            size="sm"
+                          />
+                        ) : (
+                          <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                       {findMatchingPositions(opp).length > 0 ? (

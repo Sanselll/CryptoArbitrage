@@ -378,7 +378,8 @@ public class HistoricalDataFetcher
 
             if (!klines.Any())
             {
-                _logger.LogWarning("No klines returned for {Symbol} from {Exchange}", symbol, connector.ExchangeName);
+                _logger.LogDebug("No klines returned for {Symbol} from {Exchange} (symbol may not exist on this exchange)",
+                    symbol, connector.ExchangeName);
                 return new List<PriceDto>();
             }
 

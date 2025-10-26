@@ -110,9 +110,16 @@ public class CsvExporter
             // === TARGET VARIABLES (y) - What We Predict ===
             // ========================================
 
+            // Strategy tracking (NEW)
+            Map(m => m.StrategyName).Name("strategy_name");
+            Map(m => m.ExitReason).Name("exit_reason");
+
+            // Outcome metrics
             Map(m => m.ActualHoldHours).Name("actual_hold_hours");
             Map(m => m.ActualProfitPercent).Name("actual_profit_pct");
             Map(m => m.WasProfitable).Name("was_profitable");
+            Map(m => m.HitProfitTarget).Name("hit_profit_target");
+            Map(m => m.HitStopLoss).Name("hit_stop_loss");
 
             // === OPTIONAL: Additional metrics for analysis ===
             Map(m => m.ExitTime).Name("exit_time");

@@ -54,23 +54,24 @@ def train_model_ensemble(
     # Preprocess features
     print("Preprocessing features...")
     X_train = preprocessor.fit_transform(train_df.drop(columns=[
-        'target_hold_hours', 'target_profit_pct', 'target_profit_usd', 'target_was_profitable',
-        'peak_profit_pct', 'max_drawdown_pct', 'funding_payments_count', 'total_funding_usd'
+        'actual_hold_hours', 'actual_profit_pct', 'was_profitable',
+        'exit_time', 'peak_profit_pct', 'max_drawdown_pct'
     ], errors='ignore'))
 
     X_val = preprocessor.transform(val_df.drop(columns=[
-        'target_hold_hours', 'target_profit_pct', 'target_profit_usd', 'target_was_profitable',
-        'peak_profit_pct', 'max_drawdown_pct', 'funding_payments_count', 'total_funding_usd'
+        'actual_hold_hours', 'actual_profit_pct', 'was_profitable',
+        'exit_time', 'peak_profit_pct', 'max_drawdown_pct'
     ], errors='ignore'))
 
     # Extract targets
-    y_profit_train = train_df['target_profit_pct']
-    y_success_train = train_df['target_was_profitable'].astype(int)
-    y_duration_train = train_df['target_hold_hours']
+    # Clip profit targets to reduce noise from extreme outliers (-100% liquidations, +200% anomalies)
+    y_profit_train = train_df['actual_profit_pct'].clip(-50, 50)
+    y_success_train = train_df['was_profitable'].astype(int)
+    y_duration_train = train_df['actual_hold_hours']
 
-    y_profit_val = val_df['target_profit_pct']
-    y_success_val = val_df['target_was_profitable'].astype(int)
-    y_duration_val = val_df['target_hold_hours']
+    y_profit_val = val_df['actual_profit_pct'].clip(-50, 50)
+    y_success_val = val_df['was_profitable'].astype(int)
+    y_duration_val = val_df['actual_hold_hours']
 
     # Create models based on type
     model_config = config.get(model_type, {})
@@ -145,12 +146,12 @@ def main():
     print("\nSplitting data...")
     train_val_df, test_df = loader.split_train_test(
         test_size=args.test_size,
-        stratify_column='target_was_profitable'
+        stratify_column='was_profitable'
     )
 
     train_df, val_df = loader.split_train_test(
         test_size=args.val_size,
-        stratify_column='target_was_profitable'
+        stratify_column='was_profitable'
     )
 
     # Determine which models to train
@@ -180,13 +181,14 @@ def main():
         print(f"{'='*80}\n")
 
         X_test = preprocessor.transform(test_df.drop(columns=[
-            'target_hold_hours', 'target_profit_pct', 'target_profit_usd', 'target_was_profitable',
-            'peak_profit_pct', 'max_drawdown_pct', 'funding_payments_count', 'total_funding_usd'
+            'actual_hold_hours', 'actual_profit_pct', 'was_profitable',
+            'exit_time', 'peak_profit_pct', 'max_drawdown_pct'
         ], errors='ignore'))
 
-        y_profit_test = test_df['target_profit_pct']
-        y_success_test = test_df['target_was_profitable'].astype(int)
-        y_duration_test = test_df['target_hold_hours']
+        # Clip test targets too for consistent evaluation
+        y_profit_test = test_df['actual_profit_pct'].clip(-50, 50)
+        y_success_test = test_df['was_profitable'].astype(int)
+        y_duration_test = test_df['actual_hold_hours']
 
         metrics = ensemble.evaluate_all(X_test, y_profit_test, y_success_test, y_duration_test)
 
@@ -216,8 +218,12 @@ def main():
 
         # Export to ONNX if requested
         if args.export_onnx:
-            print(f"\nExporting to ONNX...")
-            ensemble.export_all_onnx(output_dir)
+            print(f"\nExporting to XGBoost JSON format...")
+            try:
+                ensemble.export_all_onnx(output_dir)
+            except Exception as e:
+                print(f"⚠️  Export to JSON skipped: {e}")
+                print(f"   Models are saved as pickle (.pkl) files")
 
         # Save feature importance
         print(f"\nSaving feature importance...")

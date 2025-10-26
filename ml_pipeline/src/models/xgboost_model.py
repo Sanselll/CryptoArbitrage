@@ -65,12 +65,16 @@ class XGBoostModel(BaseMLModel):
         if X_val is not None and y_val is not None:
             eval_set.append((X_val, y_val))
 
-        # Train
+        # Train with progress output
+        # XGBoost verbose parameter: int = show every N iterations, True = every iteration
+        if verbose:
+            print(f"Training {self.__class__.__name__}...")
+
         self.model.fit(
             X_train,
             y_train,
             eval_set=eval_set,
-            verbose=verbose
+            verbose=10 if verbose else 0  # Show progress every 10 trees
         )
 
         self.is_trained = True

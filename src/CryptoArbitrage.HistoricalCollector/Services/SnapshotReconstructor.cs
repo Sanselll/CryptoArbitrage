@@ -218,7 +218,7 @@ public class SnapshotReconstructor
 
         // === CALCULATE HISTORICAL PRICE SPREAD AVERAGES ===
         // For each cross-exchange opportunity, calculate 24h and 3d price spread averages
-        // Matches backend implementation
+        // Uses dictionary lookups for O(n) instead of O(n²) nested loops
         foreach (var opportunity in opportunities)
         {
             if (opportunity.Strategy == ArbitrageStrategy.CrossExchange)
@@ -692,8 +692,7 @@ public class SnapshotReconstructor
     }
 
     /// <summary>
-    /// Calculate 24h and 3D average price spreads from historical kline data
-    /// Matches backend implementation in OpportunityDetectionService.CalculateHistoricalPriceSpreadAsync
+    /// Calculate 24h and 3D average price spreads using indexed lookups - O(n log n) instead of O(n²)
     /// </summary>
     private (decimal? avg24h, decimal? avg3d) CalculateHistoricalPriceSpread(
         DateTime timestamp,
@@ -704,38 +703,72 @@ public class SnapshotReconstructor
     {
         try
         {
-            // Get price histories for long and short exchanges
-            if (!priceHistory.TryGetValue(longExchange, out var longExchangePrices) ||
-                !priceHistory.TryGetValue(shortExchange, out var shortExchangePrices))
+            var threeDaysAgo = timestamp.AddDays(-3);
+            var oneDayAgo = timestamp.AddHours(-24);
+
+            // Get price lists for both exchanges
+            if (!priceHistory.ContainsKey(longExchange) ||
+                !priceHistory[longExchange].ContainsKey(symbol) ||
+                !priceHistory.ContainsKey(shortExchange) ||
+                !priceHistory[shortExchange].ContainsKey(symbol))
             {
                 return (null, null);
             }
 
-            if (!longExchangePrices.TryGetValue(symbol, out var longPrices) ||
-                !shortExchangePrices.TryGetValue(symbol, out var shortPrices))
-            {
-                return (null, null);
-            }
+            // OPTIMIZATION: Pre-filter to only last 3 days instead of processing ALL history
+            // This reduces from ~270k records to ~4,320 records per symbol
+            var longPrices = priceHistory[longExchange][symbol]
+                .Where(p => p.Timestamp >= threeDaysAgo && p.Timestamp <= timestamp)
+                .OrderBy(p => p.Timestamp)
+                .ToList();
+
+            var shortPrices = priceHistory[shortExchange][symbol]
+                .Where(p => p.Timestamp >= threeDaysAgo && p.Timestamp <= timestamp)
+                .OrderBy(p => p.Timestamp)
+                .ToList();
 
             if (!longPrices.Any() || !shortPrices.Any())
             {
                 return (null, null);
             }
 
-            // Calculate spreads for each hour where we have data from both exchanges
+            // OPTIMIZATION: Build dictionary for O(1) lookup instead of O(n) FirstOrDefault
+            // This changes the inner loop from O(n²) to O(n)
+            var shortPricesByTime = new Dictionary<DateTime, PriceDto>();
+            foreach (var sp in shortPrices)
+            {
+                if (!shortPricesByTime.ContainsKey(sp.Timestamp))
+                {
+                    shortPricesByTime[sp.Timestamp] = sp;
+                }
+            }
+
+            // Calculate spreads - now O(n) instead of O(n²)
             var spreads = new List<(DateTime timestamp, decimal spread)>();
 
             foreach (var longPrice in longPrices)
             {
-                // Find corresponding short price at the same timestamp (within 1 minute tolerance)
-                var shortPrice = shortPrices.FirstOrDefault(sp =>
-                    Math.Abs((sp.Timestamp - longPrice.Timestamp).TotalMinutes) < 1);
-
-                if (shortPrice != null && longPrice.Price > 0)
+                // Try exact match first (O(1) lookup)
+                if (shortPricesByTime.TryGetValue(longPrice.Timestamp, out var shortPrice))
                 {
-                    // Calculate spread: (Short - Long) / Long * 100
-                    decimal spread = ((shortPrice.Price - longPrice.Price) / longPrice.Price) * 100m;
-                    spreads.Add((longPrice.Timestamp, spread));
+                    if (longPrice.Price > 0)
+                    {
+                        decimal spread = ((shortPrice.Price - longPrice.Price) / longPrice.Price) * 100m;
+                        spreads.Add((longPrice.Timestamp, spread));
+                    }
+                }
+                else
+                {
+                    // Fallback: Find closest within 1 minute (still needed for misaligned timestamps)
+                    // But now operates on filtered dataset (4k records) not full history (270k records)
+                    var shortPrice1Min = shortPrices.FirstOrDefault(sp =>
+                        Math.Abs((sp.Timestamp - longPrice.Timestamp).TotalMinutes) < 1);
+
+                    if (shortPrice1Min != null && longPrice.Price > 0)
+                    {
+                        decimal spread = ((shortPrice1Min.Price - longPrice.Price) / longPrice.Price) * 100m;
+                        spreads.Add((longPrice.Timestamp, spread));
+                    }
                 }
             }
 
@@ -744,15 +777,13 @@ public class SnapshotReconstructor
                 return (null, null);
             }
 
-            // Calculate 24h average (last 24 hours before timestamp)
-            var oneDayAgo = timestamp.AddHours(-24);
+            // Calculate 24h average
             var last24hSpreads = spreads.Where(s => s.timestamp >= oneDayAgo && s.timestamp <= timestamp).ToList();
             decimal? avg24h = last24hSpreads.Any()
                 ? last24hSpreads.Average(s => s.spread)
                 : null;
 
-            // Calculate 3D average (last 72 hours before timestamp)
-            var threeDaysAgo = timestamp.AddDays(-3);
+            // Calculate 3D average
             var last3dSpreads = spreads.Where(s => s.timestamp >= threeDaysAgo && s.timestamp <= timestamp).ToList();
             decimal? avg3d = last3dSpreads.Any()
                 ? last3dSpreads.Average(s => s.spread)
