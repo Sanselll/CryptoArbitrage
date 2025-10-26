@@ -11,8 +11,8 @@ if [ ! -d .git ]; then
 fi
 
 git fetch origin
-git checkout develop
-git pull origin develop
+git checkout main
+git reset --hard origin/main
 
 # Extract owner name (lowercase)
 REPO_OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f1 | tr '[:upper:]' '[:lower:]')
