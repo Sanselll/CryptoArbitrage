@@ -15,6 +15,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "client", "client", "{F9A5E6
 		client\vite.config.ts = client\vite.config.ts
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CryptoArbitrage.HistoricalCollector", "src\CryptoArbitrage.HistoricalCollector\CryptoArbitrage.HistoricalCollector.csproj", "{29F012B3-06B4-4495-93D1-15DBCB809471}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -28,8 +30,13 @@ Global
 		{997DCA50-65DF-4F5D-8D4A-53089E539EB9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{997DCA50-65DF-4F5D-8D4A-53089E539EB9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{997DCA50-65DF-4F5D-8D4A-53089E539EB9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{29F012B3-06B4-4495-93D1-15DBCB809471}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{29F012B3-06B4-4495-93D1-15DBCB809471}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{29F012B3-06B4-4495-93D1-15DBCB809471}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{29F012B3-06B4-4495-93D1-15DBCB809471}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{997DCA50-65DF-4F5D-8D4A-53089E539EB9} = {CBC10B47-28B8-4BC6-825E-1E52E73AA6E2}
+		{29F012B3-06B4-4495-93D1-15DBCB809471} = {CBC10B47-28B8-4BC6-825E-1E52E73AA6E2}
 	EndGlobalSection
 EndGlobal
