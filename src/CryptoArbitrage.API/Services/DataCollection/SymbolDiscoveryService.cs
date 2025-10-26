@@ -13,6 +13,7 @@ public class SymbolDiscoveryService
     private readonly ILogger<SymbolDiscoveryService> _logger;
     private readonly ArbitrageConfig _config;
     private readonly IServiceProvider _serviceProvider;
+    private readonly ConnectorManager _connectorManager;
 
     private List<string>? _cachedSymbols;
     private DateTime? _lastDiscovery;
@@ -24,11 +25,13 @@ public class SymbolDiscoveryService
     public SymbolDiscoveryService(
         ILogger<SymbolDiscoveryService> logger,
         ArbitrageConfig config,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ConnectorManager connectorManager)
     {
         _logger = logger;
         _config = config;
         _serviceProvider = serviceProvider;
+        _connectorManager = connectorManager;
     }
 
     /// <summary>
@@ -114,16 +117,15 @@ public class SymbolDiscoveryService
         _logger.LogInformation("Starting symbol auto-discovery...");
 
         using var scope = _serviceProvider.CreateScope();
-        var binanceConnector = scope.ServiceProvider.GetService<BinanceConnector>();
-        var bybitConnector = scope.ServiceProvider.GetService<BybitConnector>();
+        var connectors = _connectorManager.GetEnabledConnectors(scope);
 
-        var connectors = new List<(string Name, IExchangeConnector? Connector)>
+        if (!connectors.Any())
         {
-            ("Binance", binanceConnector),
-            ("Bybit", bybitConnector)
-        };
+            _logger.LogWarning("No enabled connectors found for symbol discovery");
+            return new List<string>();
+        }
 
-        // Collect symbols from all exchanges
+        // Collect symbols from all enabled exchanges
         var symbolSets = new List<List<string>>();
         foreach (var (name, connector) in connectors.Where(c => c.Connector != null))
         {

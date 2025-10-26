@@ -4,6 +4,8 @@ using Binance.Net.Objects;
 using Bybit.Net;
 using Bybit.Net.Clients;
 using Bybit.Net.Objects;
+using Kraken.Net;
+using Kraken.Net.Clients;
 using CryptoExchange.Net.Authentication;
 
 namespace CryptoArbitrage.API.Services.Authentication;
@@ -41,6 +43,7 @@ public class ApiKeyValidator : IApiKeyValidator
             {
                 "binance" => await ValidateBinanceApiKeyAsync(apiKey, apiSecret, serverIp),
                 "bybit" => await ValidateBybitApiKeyAsync(apiKey, apiSecret, serverIp),
+                "kraken" => await ValidateKrakenApiKeyAsync(apiKey, apiSecret, serverIp),
                 _ => ApiKeyValidationResult.Failure(
                     new List<string> { $"Unsupported exchange: {exchangeName}" },
                     false,
@@ -437,6 +440,120 @@ public class ApiKeyValidator : IApiKeyValidator
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating Bybit API key");
+            return ApiKeyValidationResult.Failure(
+                new List<string> { $"Validation error: {ex.Message}" });
+        }
+    }
+
+    private async Task<ApiKeyValidationResult> ValidateKrakenApiKeyAsync(string apiKey, string apiSecret, string? serverIp)
+    {
+        try
+        {
+            _logger.LogInformation("--- Kraken Validation Started ---");
+
+            // Use Kraken.Net library
+            var isLive = _configuration.GetValue<bool>("Environment:IsLive");
+            _logger.LogInformation("Environment: {Environment} (IsLive: {IsLive})",
+                isLive ? "Live" : "Demo", isLive);
+
+            var credentials = new ApiCredentials(apiKey, apiSecret);
+            var environment = isLive
+                ? KrakenEnvironment.Live
+                : KrakenEnvironment.CreateCustom("Demo", "https://api.kraken.com", "wss://ws.kraken.com", "wss://ws-auth.kraken.com/", "https://demo-futures.kraken.com", "wss://futures.kraken.com/");
+
+            using var client = new KrakenRestClient(options =>
+            {
+                options.ApiCredentials = credentials;
+                options.Environment = environment;
+                options.RequestTimeout = TimeSpan.FromSeconds(10);
+            });
+
+            // Test connection by getting account balance
+            _logger.LogInformation("Calling Kraken SpotApi.Account.GetBalancesAsync()...");
+            var balanceResult = await client.FuturesApi.Account.GetBalancesAsync();
+            _logger.LogInformation("API Call completed. Success: {Success}", balanceResult.Success);
+
+            if (!balanceResult.Success)
+            {
+                _logger.LogWarning("Kraken API key validation failed");
+                _logger.LogWarning("Error Code: {Code}", balanceResult.Error?.Code);
+                _logger.LogWarning("Error Message: {Message}", balanceResult.Error?.Message);
+
+                // Check if it's an authentication error
+                var isAuthError = balanceResult.Error != null && (
+                    balanceResult.Error.Message.Contains("Invalid key", StringComparison.OrdinalIgnoreCase) ||
+                    balanceResult.Error.Message.Contains("Invalid signature", StringComparison.OrdinalIgnoreCase) ||
+                    balanceResult.Error.Message.Contains("Permission denied", StringComparison.OrdinalIgnoreCase));
+
+                if (isAuthError)
+                {
+                    return ApiKeyValidationResult.Failure(
+                        new List<string> { $"Authentication failed: {balanceResult.Error?.Message ?? "Invalid API credentials"}" });
+                }
+
+                return ApiKeyValidationResult.Failure(
+                    new List<string> { $"API validation failed: {balanceResult.Error?.Message ?? "Unknown error"}" });
+            }
+
+            // DEMO MODE: Simple validation
+            if (!isLive)
+            {
+                _logger.LogInformation("Demo mode detected - performing basic validation");
+                _logger.LogInformation("✓ Demo connection test successful - API key is valid");
+                return ApiKeyValidationResult.Success();
+            }
+
+            // LIVE MODE: Perform additional validation
+            _logger.LogInformation("--- Kraken API Key Validation ---");
+
+            // Note: Kraken doesn't have a dedicated API key permissions endpoint like Binance/Bybit
+            // We validate by attempting to access key features
+
+            // Test if we can query account info (requires 'Query Funds' permission)
+            _logger.LogInformation("Testing 'Query Funds' permission...");
+            var queryTest = await client.SpotApi.Account.GetBalancesAsync();
+            if (!queryTest.Success)
+            {
+                _logger.LogWarning("Query Funds permission test failed");
+                return ApiKeyValidationResult.Failure(
+                    new List<string> { "Missing 'Query Funds' permission - Required to view account balances" });
+            }
+            _logger.LogInformation("✓ Query Funds permission validated");
+
+            // Test if we can query open orders (requires 'Query Open Orders & Trades' permission)
+            _logger.LogInformation("Testing 'Query Open Orders & Trades' permission...");
+            var ordersTest = await client.SpotApi.Trading.GetOpenOrdersAsync();
+            if (!ordersTest.Success)
+            {
+                _logger.LogWarning("Query Orders permission test failed");
+                return ApiKeyValidationResult.Failure(
+                    new List<string> { "Missing 'Query Open Orders & Trades' permission - Required to view orders" });
+            }
+            _logger.LogInformation("✓ Query Open Orders & Trades permission validated");
+
+            // For Kraken, we cannot test trading permissions without actually placing an order
+            // So we'll log a warning about what permissions are expected
+            _logger.LogInformation("--- Expected Trading Permissions ---");
+            _logger.LogInformation("Note: Kraken API key should have the following permissions:");
+            _logger.LogInformation("  - Query Funds (validated ✓)");
+            _logger.LogInformation("  - Query Open Orders & Trades (validated ✓)");
+            _logger.LogInformation("  - Create & Modify Orders (required for trading - cannot test without placing order)");
+            _logger.LogInformation("  - Cancel/Close Orders (required for trading - cannot test without placing order)");
+
+            // IP Restrictions
+            _logger.LogInformation("--- IP Restrictions ---");
+            _logger.LogInformation("Note: Kraken does not provide API to check IP restrictions programmatically");
+            _logger.LogInformation("If you have IP restrictions enabled, ensure server IP is whitelisted: {ServerIp}", serverIp ?? "Unknown");
+            _logger.LogInformation("For live trading, it's recommended to enable IP restrictions in Kraken settings");
+
+            _logger.LogInformation("✓ Basic API key validation successful!");
+            _logger.LogInformation("Note: Full trading permissions will be validated when orders are placed");
+
+            return ApiKeyValidationResult.Success();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error validating Kraken API key");
             return ApiKeyValidationResult.Failure(
                 new List<string> { $"Validation error: {ex.Message}" });
         }

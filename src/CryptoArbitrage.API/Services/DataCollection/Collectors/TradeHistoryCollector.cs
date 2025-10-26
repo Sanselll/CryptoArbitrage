@@ -20,6 +20,7 @@ public class TradeHistoryCollector : IDataCollector<List<TradeDto>, TradeHistory
     private readonly IDataRepository<List<TradeDto>> _repository;
     private readonly TradeHistoryCollectorConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
+    private readonly ConnectorManager _connectorManager;
 
     public TradeHistoryCollectorConfiguration Configuration => _configuration;
     public CollectionResult<List<TradeDto>>? LastResult { get; private set; }
@@ -29,12 +30,14 @@ public class TradeHistoryCollector : IDataCollector<List<TradeDto>, TradeHistory
         ILogger<TradeHistoryCollector> logger,
         IDataRepository<List<TradeDto>> repository,
         TradeHistoryCollectorConfiguration configuration,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ConnectorManager connectorManager)
     {
         _logger = logger;
         _repository = repository;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
+        _connectorManager = connectorManager;
     }
 
     public async Task<CollectionResult<List<TradeDto>>> CollectAsync(CancellationToken cancellationToken = default)
@@ -83,39 +86,28 @@ public class TradeHistoryCollector : IDataCollector<List<TradeDto>, TradeHistory
                 {
                     // Create a new scoped connector for this user
                     using var connectorScope = _serviceProvider.CreateScope();
-                    object? connector = null;
 
                     // Decrypt API credentials
                     var decryptedApiKey = encryptionService.Decrypt(apiKey.EncryptedApiKey);
                     var decryptedSecret = encryptionService.Decrypt(apiKey.EncryptedApiSecret);
 
-                    // Get connector based on exchange and connect it
-                    switch (apiKey.ExchangeName.ToLower())
-                    {
-                        case "binance":
-                            var binanceConnector = connectorScope.ServiceProvider.GetRequiredService<BinanceConnector>();
-                            await binanceConnector.ConnectAsync(decryptedApiKey, decryptedSecret);
-                            connector = binanceConnector;
-                            break;
-                        case "bybit":
-                            var bybitConnector = connectorScope.ServiceProvider.GetRequiredService<BybitConnector>();
-                            await bybitConnector.ConnectAsync(decryptedApiKey, decryptedSecret);
-                            connector = bybitConnector;
-                            break;
-                        default:
-                            _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
-                                apiKey.ExchangeName, apiKey.UserId);
-                            return ((string?)null, (List<TradeDto>?)null);
-                    }
+                    // Get connector using ConnectorManager
+                    var connector = await _connectorManager.GetConnectorByNameAsync(
+                        connectorScope,
+                        apiKey.ExchangeName,
+                        decryptedApiKey,
+                        decryptedSecret,
+                        cancellationToken);
 
                     if (connector == null)
                     {
+                        _logger.LogWarning("Could not create connector for {Exchange} for user {UserId}",
+                            apiKey.ExchangeName, apiKey.UserId);
                         return ((string?)null, (List<TradeDto>?)null);
                     }
 
-                    // Fetch trade history using dynamic
-                    dynamic dynamicConnector = connector;
-                    List<TradeDto> trades = await dynamicConnector.GetUserTradesAsync(startTime, endTime, 100);
+                    // Fetch trade history
+                    List<TradeDto> trades = await connector.GetUserTradesAsync(startTime, endTime, 100);
 
                     var key = $"tradehistory:{apiKey.UserId}:{apiKey.ExchangeName}";
 
