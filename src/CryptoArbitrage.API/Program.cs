@@ -317,11 +317,15 @@ builder.Services.AddSingleton<IFundingRateService, FundingRateService>();
 // ============================================================================
 
 // ML Configuration
+// Read ML_API_URL from environment (e.g., "http://ml-api:5250" in Docker)
+var mlApiUrl = Environment.GetEnvironmentVariable("ML_API_URL") ?? "http://localhost:5250";
+var mlApiUri = new Uri(mlApiUrl);
+
 builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 {
     ["MLModels:Path"] = "models/ml",
-    ["MLApi:Host"] = "localhost",
-    ["MLApi:Port"] = "5250"
+    ["MLApi:Host"] = mlApiUri.Host,
+    ["MLApi:Port"] = mlApiUri.Port.ToString()
 });
 
 // ML Services - Using HTTP API to call Python Flask server
@@ -411,13 +415,15 @@ using (var scope = app.Services.CreateScope())
         var mlApiClient = scope.ServiceProvider.GetRequiredService<PythonMLApiClient>();
         var isHealthy = await mlApiClient.HealthCheckAsync();
 
+        var mlApiUrl = Environment.GetEnvironmentVariable("ML_API_URL") ?? "http://localhost:5250";
+
         if (isHealthy)
         {
-            logger.LogInformation("✅ Python ML API is available at http://localhost:5250");
+            logger.LogInformation($"✅ Python ML API is available at {mlApiUrl}");
         }
         else
         {
-            logger.LogWarning("⚠️ Python ML API is not available - ML predictions will not work");
+            logger.LogWarning($"⚠️ Python ML API is not available at {mlApiUrl} - ML predictions will not work");
             logger.LogWarning("   Start the ML API server: cd ml_pipeline && python ml_api_server.py");
         }
     }
