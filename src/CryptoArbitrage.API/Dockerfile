@@ -68,3 +68,4 @@ ENV ASPNETCORE_ENVIRONMENT=Production
 
 # Use entrypoint script to start both services
 ENTRYPOINT ["/app/entrypoint.sh"]
+# Rebuild trigger
