@@ -8,9 +8,11 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy minimal requirements for API server (not training dependencies)
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt && \
+    rm -rf /root/.cache/pip && \
+    find /usr/local/lib/python3.11 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 
 # Copy application code
 COPY ml_api_server.py .
