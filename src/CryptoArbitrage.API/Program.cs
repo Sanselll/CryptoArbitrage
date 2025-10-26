@@ -415,8 +415,6 @@ using (var scope = app.Services.CreateScope())
         var mlApiClient = scope.ServiceProvider.GetRequiredService<PythonMLApiClient>();
         var isHealthy = await mlApiClient.HealthCheckAsync();
 
-        var mlApiUrl = Environment.GetEnvironmentVariable("ML_API_URL") ?? "http://localhost:5250";
-
         if (isHealthy)
         {
             logger.LogInformation($"✅ Python ML API is available at {mlApiUrl}");
