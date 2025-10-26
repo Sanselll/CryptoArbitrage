@@ -28,6 +28,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build and push ML API image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ml_pipeline
+          file: ./ml_pipeline/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LOWER }}/crypto-arbitrage/ml-api:latest
+            ghcr.io/${{ env.OWNER_LOWER }}/crypto-arbitrage/ml-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Build and push backend image
         uses: docker/build-push-action@v5
         with:

@@ -21,6 +21,28 @@ services:
     # Don't expose port 5432 to host in production
     # Only accessible within Docker network
 
+  # ML API (Production - Internal only)
+  ml-api:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourusername}/crypto-arbitrage/ml-api:${IMAGE_TAG:-latest}
+    container_name: crypto-arbitrage-ml-api-prod
+    restart: always
+    networks:
+      - arbitrage-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5250/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 768M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+
   # Backend API - Real Mode (Production)
   backend-real:
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourusername}/crypto-arbitrage/api:${IMAGE_TAG:-latest}
@@ -31,6 +53,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=ProductionReal
       - ASPNETCORE_URLS=http://+:8080
+      - ML_API_URL=http://ml-api:5250
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=crypto_arbitrage_real;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - Jwt__SecretKey=${JWT_SECRET_KEY}
@@ -40,6 +63,8 @@ services:
       - PROD_DOMAIN=${PROD_DOMAIN}
     depends_on:
       postgres:
+        condition: service_healthy
+      ml-api:
         condition: service_healthy
     networks:
       - arbitrage-network
@@ -68,6 +93,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=ProductionDemo
       - ASPNETCORE_URLS=http://+:8080
+      - ML_API_URL=http://ml-api:5250
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=crypto_arbitrage_demo;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - Jwt__SecretKey=${JWT_SECRET_KEY}
@@ -77,6 +103,8 @@ services:
       - PROD_DOMAIN=${PROD_DOMAIN}
     depends_on:
       postgres:
+        condition: service_healthy
+      ml-api:
         condition: service_healthy
     networks:
       - arbitrage-network
