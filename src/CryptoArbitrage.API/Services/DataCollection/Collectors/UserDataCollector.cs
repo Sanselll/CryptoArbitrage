@@ -20,7 +20,6 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
     private readonly IDataRepository<UserDataSnapshot> _repository;
     private readonly UserDataCollectorConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
-    private readonly ConnectorManager _connectorManager;
 
     public UserDataCollectorConfiguration Configuration => _configuration;
     public CollectionResult<UserDataSnapshot>? LastResult { get; private set; }
@@ -30,14 +29,12 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
         ILogger<UserDataCollector> logger,
         IDataRepository<UserDataSnapshot> repository,
         UserDataCollectorConfiguration configuration,
-        IServiceProvider serviceProvider,
-        ConnectorManager connectorManager)
+        IServiceProvider serviceProvider)
     {
         _logger = logger;
         _repository = repository;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
-        _connectorManager = connectorManager;
     }
 
     public async Task<CollectionResult<UserDataSnapshot>> CollectAsync(CancellationToken cancellationToken = default)
@@ -82,35 +79,46 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                 {
                     // Create a new scoped connector for this user
                     using var connectorScope = _serviceProvider.CreateScope();
+                    object? connector = null;
 
                     // Decrypt API credentials
                     var decryptedApiKey = encryptionService.Decrypt(apiKey.EncryptedApiKey);
                     var decryptedSecret = encryptionService.Decrypt(apiKey.EncryptedApiSecret);
 
-                    // Get connector using ConnectorManager
-                    var connector = await _connectorManager.GetConnectorByNameAsync(
-                        connectorScope,
-                        apiKey.ExchangeName,
-                        decryptedApiKey,
-                        decryptedSecret,
-                        cancellationToken);
+                    // Get connector based on exchange and connect it
+                    switch (apiKey.ExchangeName.ToLower())
+                    {
+                        case "binance":
+                            var binanceConnector = connectorScope.ServiceProvider.GetRequiredService<BinanceConnector>();
+                            await binanceConnector.ConnectAsync(decryptedApiKey, decryptedSecret);
+                            connector = binanceConnector;
+                            break;
+                        case "bybit":
+                            var bybitConnector = connectorScope.ServiceProvider.GetRequiredService<BybitConnector>();
+                            await bybitConnector.ConnectAsync(decryptedApiKey, decryptedSecret);
+                            connector = bybitConnector;
+                            break;
+                        default:
+                            _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
+                                apiKey.ExchangeName, apiKey.UserId);
+                            return ((string?)null, (UserDataSnapshot?)null);
+                    }
 
                     if (connector == null)
                     {
-                        _logger.LogWarning("Could not create connector for {Exchange} for user {UserId}",
-                            apiKey.ExchangeName, apiKey.UserId);
                         return ((string?)null, (UserDataSnapshot?)null);
                     }
 
-                    // Fetch balance, positions, and fees
-                    var balance = await connector.GetAccountBalanceAsync();
-                    var positions = await connector.GetOpenPositionsAsync();
+                    // Fetch balance, positions, and fees using dynamic to call connector methods
+                    dynamic dynamicConnector = connector;
+                    var balance = await dynamicConnector.GetAccountBalanceAsync();
+                    var positions = await dynamicConnector.GetOpenPositionsAsync();
 
                     // Fetch fee information
                     FeeInfoDto? feeInfo = null;
                     try
                     {
-                        feeInfo = await connector.GetTradingFeesAsync();
+                        feeInfo = await dynamicConnector.GetTradingFeesAsync();
                         feeInfo.UserId = apiKey.UserId; // Set user ID on the fee info
                         _logger.LogDebug("Collected fee info for user {UserId} on {Exchange}: Maker={Maker}%, Taker={Taker}%",
                             apiKey.UserId, apiKey.ExchangeName, feeInfo.MakerFeeRate * 100, feeInfo.TakerFeeRate * 100);

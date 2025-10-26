@@ -309,8 +309,6 @@ builder.Services.AddSingleton<IFundingRateService, FundingRateService>();
 // Add exchange connectors and services
 builder.Services.AddScoped<BinanceConnector>();
 builder.Services.AddScoped<BybitConnector>();
-builder.Services.AddScoped<KrakenConnector>();
-builder.Services.AddSingleton<ConnectorManager>();
 builder.Services.AddScoped<ArbitrageExecutionService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 

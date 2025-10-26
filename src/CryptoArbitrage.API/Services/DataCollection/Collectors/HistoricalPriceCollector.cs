@@ -20,7 +20,6 @@ public class HistoricalPriceCollector : IDataCollector<Dictionary<string, List<H
     private readonly HistoricalPriceCollectorConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly SymbolDiscoveryService _symbolDiscoveryService;
-    private readonly ConnectorManager _connectorManager;
 
     public HistoricalPriceCollectorConfiguration Configuration => _configuration;
     public CollectionResult<Dictionary<string, List<HistoricalPriceDto>>>? LastResult { get; private set; }
@@ -31,15 +30,13 @@ public class HistoricalPriceCollector : IDataCollector<Dictionary<string, List<H
         IDataRepository<Dictionary<string, List<HistoricalPriceDto>>> repository,
         HistoricalPriceCollectorConfiguration configuration,
         IServiceProvider serviceProvider,
-        SymbolDiscoveryService symbolDiscoveryService,
-        ConnectorManager connectorManager)
+        SymbolDiscoveryService symbolDiscoveryService)
     {
         _logger = logger;
         _repository = repository;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
         _symbolDiscoveryService = symbolDiscoveryService;
-        _connectorManager = connectorManager;
     }
 
     public async Task<CollectionResult<Dictionary<string, List<HistoricalPriceDto>>>> CollectAsync(CancellationToken cancellationToken = default)
@@ -61,9 +58,16 @@ public class HistoricalPriceCollector : IDataCollector<Dictionary<string, List<H
 
             _logger.LogInformation("Collecting historical prices for {Count} symbols", symbols.Count);
 
-            // Get enabled exchange connectors from ConnectorManager
+            // Get exchange connectors - use scoped services
             using var scope = _serviceProvider.CreateScope();
-            var connectors = _connectorManager.GetEnabledConnectors(scope);
+            var binanceConnector = scope.ServiceProvider.GetService<BinanceConnector>();
+            var bybitConnector = scope.ServiceProvider.GetService<BybitConnector>();
+
+            var connectors = new List<(string Name, IExchangeConnector? Connector)>
+            {
+                ("Binance", binanceConnector),
+                ("Bybit", bybitConnector)
+            };
 
             // Calculate time range
             var endTime = DateTime.UtcNow;

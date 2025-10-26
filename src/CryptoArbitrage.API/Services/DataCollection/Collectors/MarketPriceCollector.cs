@@ -20,7 +20,6 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
     private readonly MarketPriceCollectorConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly SymbolDiscoveryService _symbolDiscoveryService;
-    private readonly ConnectorManager _connectorManager;
 
     public MarketPriceCollectorConfiguration Configuration => _configuration;
     public CollectionResult<MarketDataSnapshot>? LastResult { get; private set; }
@@ -32,8 +31,7 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
         IDataRepository<PriceHistoryDto> priceHistoryRepository,
         MarketPriceCollectorConfiguration configuration,
         IServiceProvider serviceProvider,
-        SymbolDiscoveryService symbolDiscoveryService,
-        ConnectorManager connectorManager)
+        SymbolDiscoveryService symbolDiscoveryService)
     {
         _logger = logger;
         _repository = repository;
@@ -41,7 +39,6 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
         _configuration = configuration;
         _serviceProvider = serviceProvider;
         _symbolDiscoveryService = symbolDiscoveryService;
-        _connectorManager = connectorManager;
     }
 
     public async Task<CollectionResult<MarketDataSnapshot>> CollectAsync(CancellationToken cancellationToken = default)
@@ -63,9 +60,16 @@ public class MarketPriceCollector : IDataCollector<MarketDataSnapshot, MarketPri
 
             _logger.LogDebug("Collecting market prices for {Count} symbols from exchanges", symbols.Count);
 
-            // Get enabled exchange connectors from ConnectorManager
+            // Get exchange connectors - use scoped services
             using var scope = _serviceProvider.CreateScope();
-            var connectors = _connectorManager.GetEnabledConnectors(scope);
+            var binanceConnector = scope.ServiceProvider.GetService<BinanceConnector>();
+            var bybitConnector = scope.ServiceProvider.GetService<BybitConnector>();
+
+            var connectors = new List<(string Name, IExchangeConnector? Connector)>
+            {
+                ("Binance", binanceConnector),
+                ("Bybit", bybitConnector)
+            };
 
             // Collect from all exchanges in parallel (with limit)
             var semaphore = new SemaphoreSlim(Configuration.MaxParallelFetches);

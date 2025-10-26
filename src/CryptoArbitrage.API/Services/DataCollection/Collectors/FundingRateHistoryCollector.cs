@@ -20,7 +20,6 @@ public class FundingRateHistoryCollector : IDataCollector<FundingRateDto, Fundin
     private readonly FundingRateHistoryCollectorConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
     private readonly SymbolDiscoveryService _symbolDiscoveryService;
-    private readonly ConnectorManager _connectorManager;
 
     public FundingRateHistoryCollectorConfiguration Configuration => _configuration;
     public CollectionResult<FundingRateDto>? LastResult { get; private set; }
@@ -31,15 +30,13 @@ public class FundingRateHistoryCollector : IDataCollector<FundingRateDto, Fundin
         IDataRepository<FundingRateDto> repository,
         FundingRateHistoryCollectorConfiguration configuration,
         IServiceProvider serviceProvider,
-        SymbolDiscoveryService symbolDiscoveryService,
-        ConnectorManager connectorManager)
+        SymbolDiscoveryService symbolDiscoveryService)
     {
         _logger = logger;
         _repository = repository;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
         _symbolDiscoveryService = symbolDiscoveryService;
-        _connectorManager = connectorManager;
     }
 
     public async Task<CollectionResult<FundingRateDto>> CollectAsync(CancellationToken cancellationToken = default)
@@ -69,9 +66,16 @@ public class FundingRateHistoryCollector : IDataCollector<FundingRateDto, Fundin
 
             while (retryCount <= maxRetries)
             {
-                // Get enabled exchange connectors from ConnectorManager
+                // Get exchange connectors - use scoped services
                 using var scope = _serviceProvider.CreateScope();
-                var connectors = _connectorManager.GetEnabledConnectors(scope);
+                var binanceConnector = scope.ServiceProvider.GetService<BinanceConnector>();
+                var bybitConnector = scope.ServiceProvider.GetService<BybitConnector>();
+
+                var connectors = new List<(string Name, IExchangeConnector? Connector)>
+                {
+                    ("Binance", binanceConnector),
+                    ("Bybit", bybitConnector)
+                };
 
                 // Collect from all exchanges in parallel
                 var semaphore = new SemaphoreSlim(Configuration.MaxParallelFetches);

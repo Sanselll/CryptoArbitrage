@@ -26,14 +26,6 @@ const exchangeConfigs: Record<string, ExchangeConfig> = {
     borderColor: 'border-orange-400',
     bgColor: 'bg-orange-400/10',
   },
-  kraken: {
-    color: 'text-purple-500',
-    icon: CircleDollarSign,
-    badgeVariant: 'info',
-    faviconUrl: 'https://www.kraken.com/favicon.ico',
-    borderColor: 'border-purple-500',
-    bgColor: 'bg-purple-500/10',
-  },
   // Add more exchanges as needed
   // coinbase: {
   //   color: 'text-blue-500',

@@ -20,7 +20,6 @@ public class OrderHistoryCollector : IDataCollector<List<OrderDto>, OrderHistory
     private readonly IDataRepository<List<OrderDto>> _repository;
     private readonly OrderHistoryCollectorConfiguration _configuration;
     private readonly IServiceProvider _serviceProvider;
-    private readonly ConnectorManager _connectorManager;
 
     public OrderHistoryCollectorConfiguration Configuration => _configuration;
     public CollectionResult<List<OrderDto>>? LastResult { get; private set; }
@@ -30,14 +29,12 @@ public class OrderHistoryCollector : IDataCollector<List<OrderDto>, OrderHistory
         ILogger<OrderHistoryCollector> logger,
         IDataRepository<List<OrderDto>> repository,
         OrderHistoryCollectorConfiguration configuration,
-        IServiceProvider serviceProvider,
-        ConnectorManager connectorManager)
+        IServiceProvider serviceProvider)
     {
         _logger = logger;
         _repository = repository;
         _configuration = configuration;
         _serviceProvider = serviceProvider;
-        _connectorManager = connectorManager;
     }
 
     public async Task<CollectionResult<List<OrderDto>>> CollectAsync(CancellationToken cancellationToken = default)
@@ -86,28 +83,39 @@ public class OrderHistoryCollector : IDataCollector<List<OrderDto>, OrderHistory
                 {
                     // Create a new scoped connector for this user
                     using var connectorScope = _serviceProvider.CreateScope();
+                    object? connector = null;
 
                     // Decrypt API credentials
                     var decryptedApiKey = encryptionService.Decrypt(apiKey.EncryptedApiKey);
                     var decryptedSecret = encryptionService.Decrypt(apiKey.EncryptedApiSecret);
 
-                    // Get connector using ConnectorManager
-                    var connector = await _connectorManager.GetConnectorByNameAsync(
-                        connectorScope,
-                        apiKey.ExchangeName,
-                        decryptedApiKey,
-                        decryptedSecret,
-                        cancellationToken);
+                    // Get connector based on exchange and connect it
+                    switch (apiKey.ExchangeName.ToLower())
+                    {
+                        case "binance":
+                            var binanceConnector = connectorScope.ServiceProvider.GetRequiredService<BinanceConnector>();
+                            await binanceConnector.ConnectAsync(decryptedApiKey, decryptedSecret);
+                            connector = binanceConnector;
+                            break;
+                        case "bybit":
+                            var bybitConnector = connectorScope.ServiceProvider.GetRequiredService<BybitConnector>();
+                            await bybitConnector.ConnectAsync(decryptedApiKey, decryptedSecret);
+                            connector = bybitConnector;
+                            break;
+                        default:
+                            _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
+                                apiKey.ExchangeName, apiKey.UserId);
+                            return ((string?)null, (List<OrderDto>?)null);
+                    }
 
                     if (connector == null)
                     {
-                        _logger.LogWarning("Unknown exchange {Exchange} for user {UserId}",
-                            apiKey.ExchangeName, apiKey.UserId);
                         return ((string?)null, (List<OrderDto>?)null);
                     }
 
-                    // Fetch order history
-                    List<OrderDto> orders = await connector.GetOrderHistoryAsync(startTime, endTime, 100);
+                    // Fetch order history using dynamic
+                    dynamic dynamicConnector = connector;
+                    List<OrderDto> orders = await dynamicConnector.GetOrderHistoryAsync(startTime, endTime, 100);
 
                     var key = $"orderhistory:{apiKey.UserId}:{apiKey.ExchangeName}";
 

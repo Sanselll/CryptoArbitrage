@@ -23,22 +23,19 @@ public class UserController : BaseController
     private readonly ICurrentUserService _currentUser;
     private readonly IEncryptionService _encryption;
     private readonly IApiKeyValidator _apiKeyValidator;
-    private readonly ConnectorManager _connectorManager;
 
     public UserController(
         ArbitrageDbContext db,
         ICurrentUserService currentUser,
         IEncryptionService encryption,
         ILogger<UserController> logger,
-        IApiKeyValidator apiKeyValidator,
-        ConnectorManager connectorManager)
+        IApiKeyValidator apiKeyValidator)
         : base(logger)
     {
         _db = db;
         _currentUser = currentUser;
         _encryption = encryption;
         _apiKeyValidator = apiKeyValidator;
-        _connectorManager = connectorManager;
     }
 
     /// <summary>
@@ -107,15 +104,9 @@ public class UserController : BaseController
             return Unauthorized(new { error = "Session expired. Please log out and log back in." });
         }
 
-        // Validate exchange name using ConnectorManager
-        if (!_connectorManager.IsExchangeEnabled(request.ExchangeName))
-        {
-            var enabledExchanges = _connectorManager.GetEnabledExchangeNames();
-            return BadRequest(new
-            {
-                error = $"Exchange '{request.ExchangeName}' is not invalid. Supported exchanges: {string.Join(", ", enabledExchanges)}"
-            });
-        }
+        // Validate exchange name
+        if (!new[] { "Binance", "Bybit" }.Contains(request.ExchangeName))
+            return BadRequest(new { error = "Invalid exchange name. Supported: Binance, Bybit" });
 
         // Validate API credentials
         if (string.IsNullOrWhiteSpace(request.ApiKey) || string.IsNullOrWhiteSpace(request.ApiSecret))
@@ -138,15 +129,22 @@ public class UserController : BaseController
             IExchangeConnector? connector = null;
             try
             {
-                // Use ConnectorManager to get and initialize the connector
-                using var scope = serviceProvider.CreateScope();
-                connector = await _connectorManager.GetConnectorByNameAsync(
-                    scope,
-                    request.ExchangeName,
-                    request.ApiKey,
-                    request.ApiSecret);
+                connector = request.ExchangeName switch
+                {
+                    "Binance" => serviceProvider.GetRequiredService<BinanceConnector>(),
+                    "Bybit" => serviceProvider.GetRequiredService<BybitConnector>(),
+                    _ => null
+                };
 
                 if (connector == null)
+                {
+                    return BadRequest(new { error = $"Exchange {request.ExchangeName} is not supported" });
+                }
+
+                // Test the API credentials by connecting to the exchange
+                var connectionSuccess = await connector.ConnectAsync(request.ApiKey, request.ApiSecret);
+
+                if (!connectionSuccess)
                 {
                     Logger.LogWarning("API key validation failed for user {UserId} on {Exchange}",
                         _currentUser.UserId, request.ExchangeName);
