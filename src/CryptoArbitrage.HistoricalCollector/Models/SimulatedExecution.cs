@@ -79,6 +79,16 @@ public class SimulatedExecution
     // ===================================================================
 
     /// <summary>
+    /// Strategy used for this simulation
+    /// </summary>
+    public string StrategyName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Why the position was exited
+    /// </summary>
+    public string ExitReason { get; set; } = string.Empty;
+
+    /// <summary>
     /// Actual hold duration in hours
     /// </summary>
     public decimal ActualHoldHours { get; set; }
@@ -97,6 +107,16 @@ public class SimulatedExecution
     /// Binary: was this position profitable?
     /// </summary>
     public bool WasProfitable { get; set; }
+
+    /// <summary>
+    /// Did this exit hit the profit target?
+    /// </summary>
+    public bool HitProfitTarget { get; set; }
+
+    /// <summary>
+    /// Did this exit hit the stop loss?
+    /// </summary>
+    public bool HitStopLoss { get; set; }
 
     // ===================================================================
     // PERFORMANCE METRICS

@@ -26,8 +26,8 @@ services:
   # Backend API - Real Mode (Port 8080)
   backend-real:
     build:
-      context: ./src/CryptoArbitrage.API
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: src/CryptoArbitrage.API/Dockerfile
     container_name: crypto-arbitrage-api-real
     restart: unless-stopped
     ports:
@@ -56,8 +56,8 @@ services:
   # Backend API - Demo Mode (Port 8081)
   backend-demo:
     build:
-      context: ./src/CryptoArbitrage.API
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: src/CryptoArbitrage.API/Dockerfile
     container_name: crypto-arbitrage-api-demo
     restart: unless-stopped
     ports:

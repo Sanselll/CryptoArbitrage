@@ -851,161 +851,394 @@ def export_to_onnx(model, feature_names, output_path):
 
 ## Model Deployment & Integration
 
-### **.NET ONNX Runtime Integration**
+### **Flask API Microservice Architecture**
 
-```xml
-<!-- Add to CryptoArbitrage.API.csproj -->
-<PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.16.3" />
+The ML models are deployed as an independent Flask REST API that runs alongside the C# backend. This approach provides:
+
+- ✅ **Simple Deployment**: No platform-specific Python DLL dependencies
+- ✅ **Easy Debugging**: Standard Flask logs and error messages
+- ✅ **Scalable**: Can run on separate server/container
+- ✅ **Language Agnostic**: Any language can call HTTP API
+
+### **Architecture Overview**
+
+```
+C# Backend (Port 5052)              Python ML API (Port 5250)
+┌─────────────────────┐             ┌────────────────────────┐
+│ OpportunityEnricher │             │   ml_api_server.py     │
+│        ↓            │             │          ↓             │
+│ OpportunityMLScorer │  HTTP POST  │    MLPredictor         │
+│        ↓            │────────────>│          ↓             │
+│ PythonMLApiClient   │             │   XGBoost Models       │
+└─────────────────────┘             └────────────────────────┘
 ```
 
-### **ML Inference Service (C#)**
+### **Step 1: Train Models**
+
+```bash
+cd /Users/sansel/Projects/CryptoArbitrage/ml_pipeline
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Train XGBoost models (creates .pkl files)
+./train.sh
+
+# Output:
+# models/xgboost/profit_model.pkl
+# models/xgboost/success_model.pkl
+# models/xgboost/duration_model.pkl
+# models/xgboost/scaler.pkl
+```
+
+### **Step 2: Start Flask ML API Server**
+
+```bash
+# Start server (runs on http://localhost:5250)
+python ml_api_server.py
+
+# Output:
+# Loading XGBoost models from models/xgboost...
+# ✅ Models loaded successfully
+#  * Running on http://0.0.0.0:5250
+```
+
+**ml_api_server.py** (already implemented):
+
+```python
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from src.csharp_bridge import MLPredictor
+
+app = Flask(__name__)
+CORS(app)
+
+predictor = MLPredictor(model_dir='models/xgboost')
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'service': 'ml-api',
+        'version': '1.0.0'
+    })
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    opportunity = request.get_json()
+    result = predictor.predict_single(opportunity)
+    return jsonify(result)
+
+@app.route('/predict/batch', methods=['POST'])
+def predict_batch():
+    opportunities = request.get_json()
+    results = predictor.predict_batch(opportunities)
+    return jsonify(results)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5250, debug=False)
+```
+
+### **Step 3: Test ML API**
+
+```bash
+# Health check
+curl http://localhost:5250/health
+
+# Single prediction
+curl -X POST http://localhost:5250/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "BTCUSDT",
+    "fundProfit8h": -0.0242,
+    "fundApr": -10.63,
+    "volume24h": 1500000000,
+    ...
+  }'
+
+# Response:
+{
+  "predicted_profit_pct": -2.42,
+  "success_probability": 0.049,
+  "predicted_hold_hours": 16.54,
+  "composite_score": 12.3,
+  "model_version": "xgboost_1.0.0"
+}
+```
+
+### **Step 4: C# HTTP Client Integration**
+
+**Services/ML/PythonMLApiClient.cs** (already implemented):
 
 ```csharp
-// Services/ML/OpportunityMLScorer.cs
-using Microsoft.ML.OnnxRuntime;
-using Microsoft.ML.OnnxRuntime.Tensors;
-
-public class OpportunityMLScorer : IDisposable
+public class PythonMLApiClient : IDisposable
 {
-    private readonly InferenceSession _profitModel;
-    private readonly InferenceSession _successModel;
-    private readonly InferenceSession _durationModel;
-    private readonly ILogger<OpportunityMLScorer> _logger;
+    private readonly HttpClient _httpClient;
+    private readonly string _baseUrl;
+    private readonly ILogger<PythonMLApiClient> _logger;
 
-    public OpportunityMLScorer(ILogger<OpportunityMLScorer> logger)
+    public PythonMLApiClient(
+        IConfiguration configuration,
+        ILogger<PythonMLApiClient> logger)
     {
         _logger = logger;
+        var host = configuration["MLApi:Host"] ?? "localhost";
+        var port = configuration["MLApi:Port"] ?? "5250";
+        _baseUrl = $"http://{host}:{port}";
 
-        // Load ONNX models
-        _profitModel = new InferenceSession("models/profit_model.onnx");
-        _successModel = new InferenceSession("models/success_model.onnx");
-        _durationModel = new InferenceSession("models/duration_model.onnx");
-    }
-
-    public MLPrediction ScoreOpportunity(ArbitrageOpportunityDto opportunity, decimal btcPrice, string marketRegime)
-    {
-        // 1. Extract features (same as Python feature engineering)
-        var features = ExtractFeatures(opportunity, btcPrice, marketRegime);
-
-        // 2. Create input tensor
-        var inputTensor = new DenseTensor<float>(features, new[] { 1, features.Length });
-        var inputs = new List<NamedOnnxValue>
+        _httpClient = new HttpClient
         {
-            NamedOnnxValue.CreateFromTensor("float_input", inputTensor)
-        };
-
-        // 3. Run inference
-        using var profitResults = _profitModel.Run(inputs);
-        using var successResults = _successModel.Run(inputs);
-        using var durationResults = _durationModel.Run(inputs);
-
-        // 4. Extract predictions
-        var predictedProfit = profitResults.First().AsEnumerable<float>().First();
-        var successProbability = successResults.First().AsEnumerable<float>().ElementAt(1); // Probability of class 1
-        var predictedDuration = durationResults.First().AsEnumerable<float>().First();
-
-        return new MLPrediction
-        {
-            PredictedProfitPercent = (decimal)predictedProfit,
-            SuccessProbability = (decimal)successProbability,
-            PredictedHoldHours = (decimal)predictedDuration,
-            ModelVersion = "1.0.0",
-            InferenceTimestamp = DateTime.UtcNow
+            BaseAddress = new Uri(_baseUrl),
+            Timeout = TimeSpan.FromSeconds(30)
         };
     }
 
-    private float[] ExtractFeatures(ArbitrageOpportunityDto opp, decimal btcPrice, string marketRegime)
+    public async Task<bool> HealthCheckAsync()
     {
-        // Must match EXACTLY the feature engineering in Python
-        var features = new List<float>
+        try
         {
-            // Raw features
-            (float)opp.FundProfit8h,
-            (float)opp.FundApr,
-            (float)(opp.FundProfit8h24hProj ?? 0),
-            (float)(opp.FundProfit8h3dProj ?? 0),
-            (float)(opp.BreakEvenTimeHours ?? 0),
-            (float)(opp.SpreadVolatilityCv ?? 0),
-            (float)opp.Volume24h,
-            (float)(opp.BidAskSpreadPercent ?? 0),
-            (float)(opp.OrderbookDepthUsd ?? 0),
-
-            // Engineered features (match Python exactly!)
-            (float)((opp.FundProfit8h - (opp.FundProfit8h24hProj ?? opp.FundProfit8h)) / (opp.FundProfit8h24hProj ?? 1)), // rate_momentum_24h
-            (float)((opp.FundProfit8h - (opp.FundProfit8h3dProj ?? opp.FundProfit8h)) / (opp.FundProfit8h3dProj ?? 1)), // rate_momentum_3d
-            // ... all other features
-        };
-
-        return features.ToArray();
+            var response = await _httpClient.GetAsync("/health");
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ML API health check failed");
+            return false;
+        }
     }
 
-    public void Dispose()
+    public async Task<MLPredictionResult> ScoreOpportunityAsync(
+        ArbitrageOpportunityDto opportunity)
     {
-        _profitModel?.Dispose();
-        _successModel?.Dispose();
-        _durationModel?.Dispose();
-    }
-}
+        var json = JsonSerializer.Serialize(opportunity, _jsonOptions);
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-public class MLPrediction
-{
-    public decimal PredictedProfitPercent { get; set; }
-    public decimal SuccessProbability { get; set; }
-    public decimal PredictedHoldHours { get; set; }
-    public string ModelVersion { get; set; }
-    public DateTime InferenceTimestamp { get; set; }
+        var response = await _httpClient.PostAsync("/predict", content);
+        response.EnsureSuccessStatusCode();
+
+        var responseJson = await response.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<MLPredictionResult>(responseJson, _jsonOptions);
+    }
+
+    public async Task<List<MLPredictionResult>> ScoreOpportunitiesBatchAsync(
+        IEnumerable<ArbitrageOpportunityDto> opportunities)
+    {
+        var json = JsonSerializer.Serialize(opportunities, _jsonOptions);
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        var response = await _httpClient.PostAsync("/predict/batch", content);
+        response.EnsureSuccessStatusCode();
+
+        var responseJson = await response.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<List<MLPredictionResult>>(responseJson, _jsonOptions);
+    }
 }
 ```
 
-### **Integration into OpportunityEnricher**
+### **Step 5: ML Scoring Service**
+
+**Services/ML/OpportunityMLScorer.cs** (already implemented):
 
 ```csharp
-// Services/Arbitrage/Detection/OpportunityEnricher.cs
-public class OpportunityEnricher : IHostedService
+public class OpportunityMLScorer
 {
-    private readonly OpportunityMLScorer _mlScorer; // NEW
+    private readonly PythonMLApiClient _mlApiClient;
+    private readonly ILogger<OpportunityMLScorer> _logger;
 
-    private async Task EnrichSingleOpportunityAsync(
-        ArbitrageOpportunityDto opportunity,
-        MarketDataSnapshot marketDataSnapshot,
-        IDictionary<string, LiquidityMetricsDto> liquidityMetricsDict)
+    public async Task<MLPredictionResult> ScoreOpportunityAsync(
+        ArbitrageOpportunityDto opportunity)
     {
-        // Existing enrichment
-        await EnrichVolumeAsync(opportunity, marketDataSnapshot);
-        await EnrichLiquidityAsync(opportunity, liquidityMetricsDict);
-        await EnrichSpreadMetricsAsync(opportunity, marketDataSnapshot);
-
-        // === NEW: ML-BASED SCORING ===
-        var btcPrice = marketDataSnapshot.PerpPrices["Binance"]["BTCUSDT"].Price;
-        var marketRegime = ClassifyMarketRegime(marketDataSnapshot);
-
-        var mlPrediction = _mlScorer.ScoreOpportunity(opportunity, btcPrice, marketRegime);
-
-        // Add ML predictions to opportunity
-        opportunity.MLPredictedProfitPercent = mlPrediction.PredictedProfitPercent;
-        opportunity.MLSuccessProbability = mlPrediction.SuccessProbability;
-        opportunity.MLPredictedHoldHours = mlPrediction.PredictedHoldHours;
-        opportunity.MLModelVersion = mlPrediction.ModelVersion;
-
-        // Calculate composite score (combine rule-based + ML)
-        opportunity.CompositeScore = CalculateCompositeScore(opportunity, mlPrediction);
+        try
+        {
+            return await _mlApiClient.ScoreOpportunityAsync(opportunity);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ML scoring failed for {Symbol}", opportunity.Symbol);
+            return GetDefaultPrediction();
+        }
     }
 
-    private decimal CalculateCompositeScore(
-        ArbitrageOpportunityDto opp,
-        MLPrediction ml)
+    public async Task<List<MLPredictionResult>> ScoreOpportunitiesBatchAsync(
+        IEnumerable<ArbitrageOpportunityDto> opportunities)
     {
-        // Hybrid: 70% ML, 30% rule-based
-        var mlScore = (
-            ml.PredictedProfitPercent * 0.4m +
-            ml.SuccessProbability * 100 * 0.6m
-        );
+        try
+        {
+            return await _mlApiClient.ScoreOpportunitiesBatchAsync(opportunities);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Batch ML scoring failed");
+            return opportunities.Select(_ => GetDefaultPrediction()).ToList();
+        }
+    }
 
-        var ruleBasedScore = CalculateRuleBasedScore(opp);
+    public async Task ScoreAndEnrichOpportunitiesAsync(
+        IEnumerable<ArbitrageOpportunityDto> opportunities)
+    {
+        var results = await ScoreOpportunitiesBatchAsync(opportunities);
 
-        return mlScore * 0.7m + ruleBasedScore * 0.3m;
+        var opportunitiesList = opportunities.ToList();
+        for (int i = 0; i < opportunitiesList.Count; i++)
+        {
+            var opp = opportunitiesList[i];
+            var result = results[i];
+
+            opp.MLPredictedProfitPercent = result.PredictedProfitPct;
+            opp.MLSuccessProbability = result.SuccessProbability;
+            opp.MLPredictedHoldHours = result.PredictedHoldHours;
+            opp.MLCompositeScore = result.CompositeScore;
+            opp.MLModelVersion = result.ModelVersion;
+        }
     }
 }
+```
+
+### **Step 6: Integration into OpportunityEnricher**
+
+**Services/Arbitrage/Detection/OpportunityEnricher.cs** (already implemented):
+
+```csharp
+public class OpportunityEnricher : BackgroundService
+{
+    private readonly OpportunityMLScorer _mlScorer;
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var opportunities = await _opportunityAggregator.GetOpportunitiesAsync();
+
+            // Enrich with market data
+            await EnrichWithMarketDataAsync(opportunities);
+
+            // Enrich with ML predictions
+            await _mlScorer.ScoreAndEnrichOpportunitiesAsync(opportunities);
+
+            // Broadcast enriched opportunities
+            await _broadcaster.BroadcastOpportunitiesAsync(opportunities);
+
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+        }
+    }
+}
+```
+
+### **Step 7: Configuration**
+
+**appsettings.json**:
+
+```json
+{
+  "MLApi": {
+    "Host": "localhost",
+    "Port": "5250"
+  }
+}
+```
+
+**Program.cs** (already configured):
+
+```csharp
+// Register ML services
+builder.Services.AddSingleton<PythonMLApiClient>();
+builder.Services.AddSingleton<OpportunityMLScorer>();
+
+// Health check on startup
+var mlApiClient = scope.ServiceProvider.GetRequiredService<PythonMLApiClient>();
+var isHealthy = await mlApiClient.HealthCheckAsync();
+if (isHealthy)
+{
+    logger.LogInformation("✅ Python ML API is available at http://localhost:5250");
+}
+else
+{
+    logger.LogWarning("⚠️ Python ML API is not available. ML predictions will be disabled.");
+}
+```
+
+### **Production Deployment Options**
+
+#### **Option 1: Systemd Service (Linux)**
+
+```ini
+# /etc/systemd/system/ml-api.service
+[Unit]
+Description=Crypto Arbitrage ML API
+After=network.target
+
+[Service]
+Type=simple
+User=appuser
+WorkingDirectory=/opt/crypto-arbitrage/ml_pipeline
+Environment="PATH=/opt/crypto-arbitrage/ml_pipeline/venv/bin"
+ExecStart=/opt/crypto-arbitrage/ml_pipeline/venv/bin/python ml_api_server.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable ml-api
+sudo systemctl start ml-api
+sudo systemctl status ml-api
+```
+
+#### **Option 2: Docker Container**
+
+```dockerfile
+# Dockerfile.ml-api
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY ml_pipeline/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY ml_pipeline/ .
+
+EXPOSE 5250
+CMD ["python", "ml_api_server.py"]
+```
+
+```bash
+docker build -f Dockerfile.ml-api -t crypto-arbitrage-ml-api .
+docker run -d -p 5250:5250 --name ml-api crypto-arbitrage-ml-api
+```
+
+#### **Option 3: Gunicorn (Production)**
+
+```bash
+# Install Gunicorn
+pip install gunicorn
+
+# Start with multiple workers
+gunicorn -w 4 -b 0.0.0.0:5250 ml_api_server:app
+
+# With logging
+gunicorn -w 4 -b 0.0.0.0:5250 \
+  --access-logfile /var/log/ml-api-access.log \
+  --error-logfile /var/log/ml-api-error.log \
+  ml_api_server:app
+```
+
+### **Monitoring & Troubleshooting**
+
+```bash
+# Check ML API health
+curl http://localhost:5250/health
+
+# View Flask logs
+tail -f /tmp/ml_api_server.log
+
+# Test single prediction
+curl -X POST http://localhost:5250/predict -H "Content-Type: application/json" -d @test_opportunity.json
+
+# Check if port is available
+lsof -i :5250
+
+# Kill process on port
+kill -9 $(lsof -t -i:5250)
 ```
 
 ---
