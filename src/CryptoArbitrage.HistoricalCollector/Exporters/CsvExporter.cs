@@ -80,19 +80,13 @@ public class CsvExporter
             Map(m => m.LongNextFundingTimeMinutes).Name("long_next_funding_minutes");
             Map(m => m.ShortNextFundingTimeMinutes).Name("short_next_funding_minutes");
 
-            // Price spread
-            Map(m => m.CurrentPriceSpreadPercent).Name("current_price_spread_pct");
-
             // Profitability projections
             Map(m => m.FundProfit8h).Name("fund_profit_8h");
             Map(m => m.FundApr).Name("fund_apr");
             Map(m => m.FundProfit8h24hProj).Name("fund_profit_8h_24h_proj");
             Map(m => m.FundApr24hProj).Name("fund_apr_24h_proj");
-            Map(m => m.FundBreakEvenTime24hProj).Name("fund_break_even_24h_proj");
             Map(m => m.FundProfit8h3dProj).Name("fund_profit_8h_3d_proj");
             Map(m => m.FundApr3dProj).Name("fund_apr_3d_proj");
-            Map(m => m.FundBreakEvenTime3dProj).Name("fund_break_even_3d_proj");
-            Map(m => m.BreakEvenTimeHours).Name("break_even_hours");
 
             // Price spread statistics
             Map(m => m.PriceSpread24hAvg).Name("price_spread_24h_avg");

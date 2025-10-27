@@ -1,8 +1,11 @@
 using CryptoArbitrage.API.Constants;
+using CryptoArbitrage.API.Data;
+using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.DataCollection.Events;
+using Microsoft.EntityFrameworkCore;
 
 namespace CryptoArbitrage.API.Services.Arbitrage.Detection;
 
@@ -18,6 +21,7 @@ public class OpportunityAggregator : IHostedService
     private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
     private readonly IDataRepository<MarketDataSnapshot> _marketPriceRepository;
     private readonly IOpportunityDetectionService _opportunityDetectionService;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
 
     // Track freshness of data sources
     private DateTime? _lastFundingRatesUpdate;
@@ -32,13 +36,15 @@ public class OpportunityAggregator : IHostedService
         IDataCollectionEventBus eventBus,
         IDataRepository<FundingRateDto> fundingRateRepository,
         IDataRepository<MarketDataSnapshot> marketPriceRepository,
-        IOpportunityDetectionService opportunityDetectionService)
+        IOpportunityDetectionService opportunityDetectionService,
+        IServiceScopeFactory serviceScopeFactory)
     {
         _logger = logger;
         _eventBus = eventBus;
         _fundingRateRepository = fundingRateRepository;
         _marketPriceRepository = marketPriceRepository;
         _opportunityDetectionService = opportunityDetectionService;
+        _serviceScopeFactory = serviceScopeFactory;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -170,23 +176,29 @@ public class OpportunityAggregator : IHostedService
 
             // Build complete MarketDataSnapshot
             var aggregatedSnapshot = BuildMarketSnapshot(fundingRatesDict, marketSnapshotsDict);
-            
+
 
             // Detect opportunities
-            var opportunities = await _opportunityDetectionService.DetectOpportunitiesAsync(aggregatedSnapshot);
+            var detectedOpportunities = await _opportunityDetectionService.DetectOpportunitiesAsync(aggregatedSnapshot);
+
+            // Get open position keys
+            var openPositionKeys = await GetOpenPositionKeysAsync();
+
+            // Mark opportunities that have existing positions
+            MarkExistingPositions(detectedOpportunities, openPositionKeys);
 
             var duration = DateTime.UtcNow - startTime;
-            
 
-            // Publish event with detected opportunities
+
+            // Publish event with detected opportunities (with position flags)
             await _eventBus.PublishAsync(new DataCollectionEvent<List<ArbitrageOpportunityDto>>
             {
                 EventType = DataCollectionConstants.EventTypes.OpportunitiesDetected,
-                Data = opportunities,
+                Data = detectedOpportunities,
                 Timestamp = DateTime.UtcNow,
                 CollectionDuration = duration,
                 Success = true,
-                ItemCount = opportunities.Count
+                ItemCount = detectedOpportunities.Count
             });
         }
         catch (Exception ex)
@@ -262,5 +274,84 @@ public class OpportunityAggregator : IHostedService
         }
 
         return snapshot;
+    }
+
+    /// <summary>
+    /// Gets position keys for all open positions (from all users)
+    /// Returns keys in format: "SYMBOL|LongExchange|ShortExchange"
+    /// </summary>
+    private async Task<HashSet<string>> GetOpenPositionKeysAsync()
+    {
+        var positionKeys = new HashSet<string>();
+
+        try
+        {
+            // Create a scope to get DbContext (since this is a singleton hosted service)
+            using var scope = _serviceScopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+
+            // Get ALL open positions (from all users)
+            var openPositions = await dbContext.Positions
+                .Where(p => p.Status == PositionStatus.Open)
+                .ToListAsync();
+
+            _logger.LogDebug("Found {Count} open positions", openPositions.Count);
+
+            // Group positions by execution to find pairs
+            var positionGroups = openPositions
+                .Where(p => p.ExecutionId.HasValue)
+                .GroupBy(p => p.ExecutionId!.Value)
+                .ToList();
+
+            foreach (var group in positionGroups)
+            {
+                var positions = group.ToList();
+                if (positions.Count != 2) continue; // Skip incomplete pairs
+
+                // Identify long and short positions
+                var longPosition = positions.FirstOrDefault(p => p.Side == PositionSide.Long);
+                var shortPosition = positions.FirstOrDefault(p => p.Side == PositionSide.Short);
+
+                if (longPosition == null || shortPosition == null) continue;
+
+                // Create position key
+                var key = $"{longPosition.Symbol}|{longPosition.Exchange}|{shortPosition.Exchange}";
+                positionKeys.Add(key);
+            }
+
+            _logger.LogInformation("Found {Count} active position pairs", positionKeys.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting open position keys");
+        }
+
+        return positionKeys;
+    }
+
+    /// <summary>
+    /// Marks detected opportunities that have existing open positions
+    /// Sets IsExistingPosition = true for matching opportunities
+    /// </summary>
+    private void MarkExistingPositions(
+        List<ArbitrageOpportunityDto> opportunities,
+        HashSet<string> positionKeys)
+    {
+        int markedCount = 0;
+
+        foreach (var opp in opportunities)
+        {
+            var key = $"{opp.Symbol}|{opp.LongExchange}|{opp.ShortExchange}";
+            if (positionKeys.Contains(key))
+            {
+                opp.IsExistingPosition = true;
+                markedCount++;
+            }
+        }
+
+        _logger.LogDebug(
+            "Marked {Marked} out of {Total} opportunities as existing positions",
+            markedCount,
+            opportunities.Count);
     }
 }
