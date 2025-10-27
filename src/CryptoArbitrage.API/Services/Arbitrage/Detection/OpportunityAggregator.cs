@@ -1,8 +1,11 @@
 using CryptoArbitrage.API.Constants;
+using CryptoArbitrage.API.Data;
+using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.DataCollection.Events;
+using Microsoft.EntityFrameworkCore;
 
 namespace CryptoArbitrage.API.Services.Arbitrage.Detection;
 
@@ -18,6 +21,7 @@ public class OpportunityAggregator : IHostedService
     private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
     private readonly IDataRepository<MarketDataSnapshot> _marketPriceRepository;
     private readonly IOpportunityDetectionService _opportunityDetectionService;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
 
     // Track freshness of data sources
     private DateTime? _lastFundingRatesUpdate;
@@ -32,13 +36,15 @@ public class OpportunityAggregator : IHostedService
         IDataCollectionEventBus eventBus,
         IDataRepository<FundingRateDto> fundingRateRepository,
         IDataRepository<MarketDataSnapshot> marketPriceRepository,
-        IOpportunityDetectionService opportunityDetectionService)
+        IOpportunityDetectionService opportunityDetectionService,
+        IServiceScopeFactory serviceScopeFactory)
     {
         _logger = logger;
         _eventBus = eventBus;
         _fundingRateRepository = fundingRateRepository;
         _marketPriceRepository = marketPriceRepository;
         _opportunityDetectionService = opportunityDetectionService;
+        _serviceScopeFactory = serviceScopeFactory;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -170,15 +176,21 @@ public class OpportunityAggregator : IHostedService
 
             // Build complete MarketDataSnapshot
             var aggregatedSnapshot = BuildMarketSnapshot(fundingRatesDict, marketSnapshotsDict);
-            
+
 
             // Detect opportunities
-            var opportunities = await _opportunityDetectionService.DetectOpportunitiesAsync(aggregatedSnapshot);
+            var detectedOpportunities = await _opportunityDetectionService.DetectOpportunitiesAsync(aggregatedSnapshot);
+
+            // Convert open positions to opportunities
+            var positionOpportunities = await ConvertOpenPositionsToOpportunitiesAsync(aggregatedSnapshot);
+
+            // Merge detected opportunities with open positions
+            var opportunities = MergeOpportunities(detectedOpportunities, positionOpportunities);
 
             var duration = DateTime.UtcNow - startTime;
-            
 
-            // Publish event with detected opportunities
+
+            // Publish event with merged opportunities (detected + positions)
             await _eventBus.PublishAsync(new DataCollectionEvent<List<ArbitrageOpportunityDto>>
             {
                 EventType = DataCollectionConstants.EventTypes.OpportunitiesDetected,
@@ -262,5 +274,150 @@ public class OpportunityAggregator : IHostedService
         }
 
         return snapshot;
+    }
+
+    /// <summary>
+    /// Converts open positions to opportunity format for display
+    /// NOTE: This is a simplified conversion - positions from ALL users are included
+    /// </summary>
+    private async Task<List<ArbitrageOpportunityDto>> ConvertOpenPositionsToOpportunitiesAsync(
+        MarketDataSnapshot snapshot)
+    {
+        var positionOpportunities = new List<ArbitrageOpportunityDto>();
+
+        try
+        {
+            // Create a scope to get DbContext (since this is a singleton hosted service)
+            using var scope = _serviceScopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+
+            // Get ALL open positions (from all users)
+            var openPositions = await dbContext.Positions
+                .Where(p => p.Status == PositionStatus.Open)
+                .ToListAsync();
+
+            _logger.LogDebug("Found {Count} open positions to convert to opportunities", openPositions.Count);
+
+            // Group positions by execution/symbol/exchange pair
+            // Each execution typically has 2 positions (long + short)
+            var positionGroups = openPositions
+                .Where(p => p.ExecutionId.HasValue)
+                .GroupBy(p => p.ExecutionId!.Value)
+                .ToList();
+
+            foreach (var group in positionGroups)
+            {
+                var positions = group.ToList();
+                if (positions.Count != 2) continue; // Skip incomplete pairs
+
+                // Identify long and short positions
+                var longPosition = positions.FirstOrDefault(p => p.Side == PositionSide.Long);
+                var shortPosition = positions.FirstOrDefault(p => p.Side == PositionSide.Short);
+
+                if (longPosition == null || shortPosition == null) continue;
+
+                var symbol = longPosition.Symbol;
+                var longExchange = longPosition.Exchange;
+                var shortExchange = shortPosition.Exchange;
+
+                // Get current funding rates and prices from snapshot
+                decimal? longFundingRate = null;
+                decimal? shortFundingRate = null;
+                decimal? longPrice = null;
+                decimal? shortPrice = null;
+
+                if (snapshot.FundingRates.TryGetValue(longExchange, out var longRates))
+                {
+                    longFundingRate = longRates.FirstOrDefault(r => r.Symbol == symbol)?.Rate;
+                }
+
+                if (snapshot.FundingRates.TryGetValue(shortExchange, out var shortRates))
+                {
+                    shortFundingRate = shortRates.FirstOrDefault(r => r.Symbol == symbol)?.Rate;
+                }
+
+                if (snapshot.PerpPrices.TryGetValue(longExchange, out var longPrices))
+                {
+                    longPrice = longPrices.TryGetValue(symbol, out var price) ? price.Price : null;
+                }
+
+                if (snapshot.PerpPrices.TryGetValue(shortExchange, out var shortPrices))
+                {
+                    shortPrice = shortPrices.TryGetValue(symbol, out var price) ? price.Price : null;
+                }
+
+                // Create opportunity DTO representing this position
+                var opportunity = new ArbitrageOpportunityDto
+                {
+                    Symbol = symbol,
+                    Strategy = ArbitrageStrategy.CrossExchange,
+                    SubType = StrategySubType.CrossExchangeFuturesFutures, // Assuming CFFF for now
+                    LongExchange = longExchange,
+                    ShortExchange = shortExchange,
+                    LongFundingRate = longFundingRate ?? 0,
+                    ShortFundingRate = shortFundingRate ?? 0,
+                    LongExchangePrice = longPrice,
+                    ShortExchangePrice = shortPrice,
+                    DetectedAt = longPosition.OpenedAt,
+                    IsExistingPosition = true,  // Mark as existing position
+                    Status = OpportunityStatus.Detected
+                };
+
+                // Calculate current metrics if we have the data
+                if (longFundingRate.HasValue && shortFundingRate.HasValue)
+                {
+                    var fundingDiff = Math.Abs(longFundingRate.Value - shortFundingRate.Value);
+                    opportunity.FundProfit8h = fundingDiff * 100m;
+                    opportunity.FundApr = (fundingDiff * 365m * 3m) * 100m; // Assuming 8h intervals
+                }
+
+                positionOpportunities.Add(opportunity);
+            }
+
+            _logger.LogInformation("Converted {Count} position pairs to opportunities", positionOpportunities.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting open positions to opportunities");
+        }
+
+        return positionOpportunities;
+    }
+
+    /// <summary>
+    /// Merges detected opportunities with opportunities from open positions
+    /// Deduplicates by (Symbol, LongExchange, ShortExchange)
+    /// Priority: Existing positions override newly detected opportunities
+    /// </summary>
+    private List<ArbitrageOpportunityDto> MergeOpportunities(
+        List<ArbitrageOpportunityDto> detectedOpportunities,
+        List<ArbitrageOpportunityDto> positionOpportunities)
+    {
+        // Create a dictionary for quick lookup
+        var merged = new Dictionary<string, ArbitrageOpportunityDto>();
+
+        // Add detected opportunities first
+        foreach (var opp in detectedOpportunities)
+        {
+            var key = $"{opp.Symbol}|{opp.LongExchange}|{opp.ShortExchange}";
+            merged[key] = opp;
+        }
+
+        // Add/override with position opportunities (these take priority)
+        foreach (var posOpp in positionOpportunities)
+        {
+            var key = $"{posOpp.Symbol}|{posOpp.LongExchange}|{posOpp.ShortExchange}";
+            merged[key] = posOpp; // Override if exists, add if not
+        }
+
+        var result = merged.Values.ToList();
+
+        _logger.LogDebug(
+            "Merged opportunities: {Detected} detected + {Positions} positions = {Total} total",
+            detectedOpportunities.Count,
+            positionOpportunities.Count,
+            result.Count);
+
+        return result;
     }
 }

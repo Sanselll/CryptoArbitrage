@@ -261,5 +261,10 @@ public enum ExitReason
     /// <summary>
     /// Insufficient data to continue simulation
     /// </summary>
-    INSUFFICIENT_DATA
+    INSUFFICIENT_DATA,
+
+    /// <summary>
+    /// Position exited at the optimal profit point identified by hindsight analysis
+    /// </summary>
+    OPTIMAL_HINDSIGHT
 }
