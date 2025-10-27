@@ -578,6 +578,11 @@ simulateCommand.SetHandler(async (opportunitiesFile, outputFile, durations) =>
     Console.WriteLine("Step 3: Exporting to CSV...");
     await exporter.ExportToCsv(simulations, outputFile);
 
+    // Step 4: Export position snapshots for exit prediction training
+    var snapshotsFile = outputFile.Replace(".csv", "_snapshots.csv");
+    Console.WriteLine($"Step 4: Exporting position snapshots for exit prediction...");
+    await exporter.ExportSnapshotsToCsv(simulations, snapshotsFile);
+
     Console.WriteLine();
     Console.WriteLine($"✅ Simulation complete!");
     Console.WriteLine($"   Total simulations: {simulations.Count:N0}");
@@ -689,6 +694,11 @@ fullCommand.SetHandler(async (startDate, endDate, interval, exchanges, symbols, 
 
     Console.WriteLine("Exporting training data to CSV...");
     await exporter.ExportToCsv(simulations, output);
+
+    // Export position snapshots for exit prediction training
+    var snapshotsFile = output.Replace(".csv", "_snapshots.csv");
+    Console.WriteLine("Exporting position snapshots for exit prediction...");
+    await exporter.ExportSnapshotsToCsv(simulations, snapshotsFile);
 
     // === SUMMARY ===
     Console.WriteLine();
