@@ -608,6 +608,9 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                 // Calculate historical price spread averages (24h and 3D)
                 var (avg24h, avg3d) = CalculateHistoricalPriceSpreadAsync(o.Symbol, o.LongExchange, o.ShortExchange).Result;
 
+                // Calculate 30-sample spread average and volatility metrics
+                var (spread30Avg, spreadStdDev, spreadCv) = CalculateSpread30SampleAvgAsync(o.Symbol, o.LongExchange, o.ShortExchange).Result;
+
                 // Update opportunity fields for CFPS
                 o.SubType = StrategySubType.CrossExchangeFuturesPriceSpread;
                 o.SpreadRate = netProfitPercent / 100m;
@@ -616,10 +619,13 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                 o.BreakEvenTimeHours = null; // Price arbitrage is one-time, no break-even concept
                 o.PriceSpread24hAvg = avg24h;
                 o.PriceSpread3dAvg = avg3d;
+                o.Spread30SampleAvg = spread30Avg;
+                o.SpreadVolatilityStdDev = spreadStdDev;
+                o.SpreadVolatilityCv = spreadCv;
 
                 return o;
             })
-            .Where(o => o.EstimatedProfitPercentage >= _config.MinPriceSpreadPercentage) // Filter after calculating net profit
+            .Where(o => o.Spread30SampleAvg.HasValue && o.Spread30SampleAvg.Value >= _config.MinPriceSpreadPercentage) // Filter by 30-sample average
             .OrderByDescending(o => o.EstimatedProfitPercentage)
             .ToList();
     }
@@ -702,6 +708,90 @@ public class OpportunityDetectionService : IOpportunityDetectionService
             _logger.LogError(ex, "Error calculating historical price spreads for {Symbol} ({LongEx} vs {ShortEx})",
                 symbol, longExchange, shortExchange);
             return (null, null);
+        }
+    }
+
+    /// <summary>
+    /// Calculate 30-sample spread average and volatility metrics for CFPS detection
+    /// </summary>
+    private async Task<(decimal? avg, decimal? stdDev, decimal? cv)> CalculateSpread30SampleAvgAsync(
+        string symbol,
+        string longExchange,
+        string shortExchange)
+    {
+        try
+        {
+            // Build cache keys for both exchanges
+            var longKey = $"{longExchange}:{symbol}";
+            var shortKey = $"{shortExchange}:{symbol}";
+
+            // Fetch historical prices from repository
+            var longPricesDict = await _historicalPriceRepository.GetAsync(longKey);
+            var shortPricesDict = await _historicalPriceRepository.GetAsync(shortKey);
+
+            if (longPricesDict == null || shortPricesDict == null)
+            {
+                return (null, null, null);
+            }
+
+            // Extract price lists from dictionaries
+            if (!longPricesDict.TryGetValue(longKey, out var longPrices) ||
+                !shortPricesDict.TryGetValue(shortKey, out var shortPrices))
+            {
+                return (null, null, null);
+            }
+
+            if (!longPrices.Any() || !shortPrices.Any())
+            {
+                return (null, null, null);
+            }
+
+            // Calculate spreads for each timestamp where we have data from both exchanges
+            var spreads = new List<decimal>();
+
+            foreach (var longPrice in longPrices.OrderByDescending(p => p.Timestamp).Take(30))
+            {
+                // Find corresponding short price at the same timestamp (within 1 minute tolerance)
+                var shortPrice = shortPrices.FirstOrDefault(sp =>
+                    Math.Abs((sp.Timestamp - longPrice.Timestamp).TotalMinutes) < 1);
+
+                if (shortPrice != null && longPrice.Price > 0)
+                {
+                    // Calculate spread: (Short - Long) / Long * 100
+                    decimal spread = ((shortPrice.Price - longPrice.Price) / longPrice.Price) * 100m;
+                    spreads.Add(spread);
+                }
+            }
+
+            if (spreads.Count < 5)  // Need at least 5 samples for meaningful statistics
+            {
+                return (null, null, null);
+            }
+
+            // Calculate average
+            decimal avg = spreads.Average();
+
+            // Calculate standard deviation
+            decimal sumSquaredDiff = spreads.Sum(s => (s - avg) * (s - avg));
+            decimal variance = sumSquaredDiff / spreads.Count;
+            decimal stdDev = (decimal)Math.Sqrt((double)variance);
+
+            // Calculate coefficient of variation (CV = stdDev / mean)
+            // Handle case where mean is zero or very small
+            decimal cv = Math.Abs(avg) > 0.0001m ? Math.Abs(stdDev / avg) : 0m;
+
+            _logger.LogDebug(
+                "Calculated 30-sample spread metrics for {Symbol} ({LongEx} vs {ShortEx}): " +
+                "Avg={Avg:F4}%, StdDev={StdDev:F6}%, CV={CV:F4} (n={Count})",
+                symbol, longExchange, shortExchange, avg, stdDev, cv, spreads.Count);
+
+            return (avg, stdDev, cv);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calculating 30-sample spread metrics for {Symbol} ({LongEx} vs {ShortEx})",
+                symbol, longExchange, shortExchange);
+            return (null, null, null);
         }
     }
 

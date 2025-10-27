@@ -172,21 +172,13 @@ class MLPredictor:
                 'long_next_funding_minutes': (pd.to_datetime(opp['longNextFundingTime']) - detected_at).total_seconds() / 60,
                 'short_next_funding_minutes': (pd.to_datetime(opp['shortNextFundingTime']) - detected_at).total_seconds() / 60,
 
-                # Price spread
-                'current_price_spread_pct': float(opp['currentPriceSpreadPercent']),
-
                 # Funding projections
                 'fund_profit_8h': opp['fundProfit8h'],
                 'fund_apr': opp['fundApr'],
                 'fund_profit_8h_24h_proj': opp.get('fundProfit8h24hProj', 0),
                 'fund_apr_24h_proj': opp.get('fundApr24hProj', 0),
-                'fund_break_even_24h_proj': opp.get('fundBreakEvenTime24hProj', 999),
                 'fund_profit_8h_3d_proj': opp.get('fundProfit8h3dProj', 0),
                 'fund_apr_3d_proj': opp.get('fundApr3dProj', 0),
-                'fund_break_even_3d_proj': opp.get('priceSpread3dAvg', 0),  # Using as proxy
-
-                # Break-even
-                'break_even_hours': opp.get('breakEvenTimeHours', 0),
 
                 # Price spread statistics
                 'price_spread_24h_avg': opp.get('priceSpread24hAvg', 0),
@@ -201,6 +193,10 @@ class MLPredictor:
                 # Target flags (set to 0 since these are unknown at detection time)
                 'hit_profit_target': 0,
                 'hit_stop_loss': 0,
+
+                # Metadata (unknown at detection time, added for consistency with training data)
+                'strategy_name': '',
+                'exit_reason': '',
             }
 
             rows.append(row)

@@ -96,7 +96,8 @@
       "Bash(git log:*)",
       "Bash(git reset:*)",
       "Bash(git ls-tree:*)",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "Bash(git lfs:*)"
     ],
     "deny": [],
     "ask": []
