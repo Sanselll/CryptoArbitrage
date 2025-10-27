@@ -181,24 +181,24 @@ public class OpportunityAggregator : IHostedService
             // Detect opportunities
             var detectedOpportunities = await _opportunityDetectionService.DetectOpportunitiesAsync(aggregatedSnapshot);
 
-            // Convert open positions to opportunities
-            var positionOpportunities = await ConvertOpenPositionsToOpportunitiesAsync(aggregatedSnapshot);
+            // Get open position keys
+            var openPositionKeys = await GetOpenPositionKeysAsync();
 
-            // Merge detected opportunities with open positions
-            var opportunities = MergeOpportunities(detectedOpportunities, positionOpportunities);
+            // Mark opportunities that have existing positions
+            MarkExistingPositions(detectedOpportunities, openPositionKeys);
 
             var duration = DateTime.UtcNow - startTime;
 
 
-            // Publish event with merged opportunities (detected + positions)
+            // Publish event with detected opportunities (with position flags)
             await _eventBus.PublishAsync(new DataCollectionEvent<List<ArbitrageOpportunityDto>>
             {
                 EventType = DataCollectionConstants.EventTypes.OpportunitiesDetected,
-                Data = opportunities,
+                Data = detectedOpportunities,
                 Timestamp = DateTime.UtcNow,
                 CollectionDuration = duration,
                 Success = true,
-                ItemCount = opportunities.Count
+                ItemCount = detectedOpportunities.Count
             });
         }
         catch (Exception ex)
@@ -277,13 +277,12 @@ public class OpportunityAggregator : IHostedService
     }
 
     /// <summary>
-    /// Converts open positions to opportunity format for display
-    /// NOTE: This is a simplified conversion - positions from ALL users are included
+    /// Gets position keys for all open positions (from all users)
+    /// Returns keys in format: "SYMBOL|LongExchange|ShortExchange"
     /// </summary>
-    private async Task<List<ArbitrageOpportunityDto>> ConvertOpenPositionsToOpportunitiesAsync(
-        MarketDataSnapshot snapshot)
+    private async Task<HashSet<string>> GetOpenPositionKeysAsync()
     {
-        var positionOpportunities = new List<ArbitrageOpportunityDto>();
+        var positionKeys = new HashSet<string>();
 
         try
         {
@@ -296,10 +295,9 @@ public class OpportunityAggregator : IHostedService
                 .Where(p => p.Status == PositionStatus.Open)
                 .ToListAsync();
 
-            _logger.LogDebug("Found {Count} open positions to convert to opportunities", openPositions.Count);
+            _logger.LogDebug("Found {Count} open positions", openPositions.Count);
 
-            // Group positions by execution/symbol/exchange pair
-            // Each execution typically has 2 positions (long + short)
+            // Group positions by execution to find pairs
             var positionGroups = openPositions
                 .Where(p => p.ExecutionId.HasValue)
                 .GroupBy(p => p.ExecutionId!.Value)
@@ -316,108 +314,44 @@ public class OpportunityAggregator : IHostedService
 
                 if (longPosition == null || shortPosition == null) continue;
 
-                var symbol = longPosition.Symbol;
-                var longExchange = longPosition.Exchange;
-                var shortExchange = shortPosition.Exchange;
-
-                // Get current funding rates and prices from snapshot
-                decimal? longFundingRate = null;
-                decimal? shortFundingRate = null;
-                decimal? longPrice = null;
-                decimal? shortPrice = null;
-
-                if (snapshot.FundingRates.TryGetValue(longExchange, out var longRates))
-                {
-                    longFundingRate = longRates.FirstOrDefault(r => r.Symbol == symbol)?.Rate;
-                }
-
-                if (snapshot.FundingRates.TryGetValue(shortExchange, out var shortRates))
-                {
-                    shortFundingRate = shortRates.FirstOrDefault(r => r.Symbol == symbol)?.Rate;
-                }
-
-                if (snapshot.PerpPrices.TryGetValue(longExchange, out var longPrices))
-                {
-                    longPrice = longPrices.TryGetValue(symbol, out var price) ? price.Price : null;
-                }
-
-                if (snapshot.PerpPrices.TryGetValue(shortExchange, out var shortPrices))
-                {
-                    shortPrice = shortPrices.TryGetValue(symbol, out var price) ? price.Price : null;
-                }
-
-                // Create opportunity DTO representing this position
-                var opportunity = new ArbitrageOpportunityDto
-                {
-                    Symbol = symbol,
-                    Strategy = ArbitrageStrategy.CrossExchange,
-                    SubType = StrategySubType.CrossExchangeFuturesFutures, // Assuming CFFF for now
-                    LongExchange = longExchange,
-                    ShortExchange = shortExchange,
-                    LongFundingRate = longFundingRate ?? 0,
-                    ShortFundingRate = shortFundingRate ?? 0,
-                    LongExchangePrice = longPrice,
-                    ShortExchangePrice = shortPrice,
-                    DetectedAt = longPosition.OpenedAt,
-                    IsExistingPosition = true,  // Mark as existing position
-                    Status = OpportunityStatus.Detected
-                };
-
-                // Calculate current metrics if we have the data
-                if (longFundingRate.HasValue && shortFundingRate.HasValue)
-                {
-                    var fundingDiff = Math.Abs(longFundingRate.Value - shortFundingRate.Value);
-                    opportunity.FundProfit8h = fundingDiff * 100m;
-                    opportunity.FundApr = (fundingDiff * 365m * 3m) * 100m; // Assuming 8h intervals
-                }
-
-                positionOpportunities.Add(opportunity);
+                // Create position key
+                var key = $"{longPosition.Symbol}|{longPosition.Exchange}|{shortPosition.Exchange}";
+                positionKeys.Add(key);
             }
 
-            _logger.LogInformation("Converted {Count} position pairs to opportunities", positionOpportunities.Count);
+            _logger.LogInformation("Found {Count} active position pairs", positionKeys.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error converting open positions to opportunities");
+            _logger.LogError(ex, "Error getting open position keys");
         }
 
-        return positionOpportunities;
+        return positionKeys;
     }
 
     /// <summary>
-    /// Merges detected opportunities with opportunities from open positions
-    /// Deduplicates by (Symbol, LongExchange, ShortExchange)
-    /// Priority: Existing positions override newly detected opportunities
+    /// Marks detected opportunities that have existing open positions
+    /// Sets IsExistingPosition = true for matching opportunities
     /// </summary>
-    private List<ArbitrageOpportunityDto> MergeOpportunities(
-        List<ArbitrageOpportunityDto> detectedOpportunities,
-        List<ArbitrageOpportunityDto> positionOpportunities)
+    private void MarkExistingPositions(
+        List<ArbitrageOpportunityDto> opportunities,
+        HashSet<string> positionKeys)
     {
-        // Create a dictionary for quick lookup
-        var merged = new Dictionary<string, ArbitrageOpportunityDto>();
+        int markedCount = 0;
 
-        // Add detected opportunities first
-        foreach (var opp in detectedOpportunities)
+        foreach (var opp in opportunities)
         {
             var key = $"{opp.Symbol}|{opp.LongExchange}|{opp.ShortExchange}";
-            merged[key] = opp;
+            if (positionKeys.Contains(key))
+            {
+                opp.IsExistingPosition = true;
+                markedCount++;
+            }
         }
-
-        // Add/override with position opportunities (these take priority)
-        foreach (var posOpp in positionOpportunities)
-        {
-            var key = $"{posOpp.Symbol}|{posOpp.LongExchange}|{posOpp.ShortExchange}";
-            merged[key] = posOpp; // Override if exists, add if not
-        }
-
-        var result = merged.Values.ToList();
 
         _logger.LogDebug(
-            "Merged opportunities: {Detected} detected + {Positions} positions = {Total} total",
-            detectedOpportunities.Count,
-            positionOpportunities.Count,
-            result.Count);
-
-        return result;
+            "Marked {Marked} out of {Total} opportunities as existing positions",
+            markedCount,
+            opportunities.Count);
     }
 }
