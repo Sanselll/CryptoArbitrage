@@ -92,6 +92,9 @@ public class ArbitrageOpportunityDto
     public OpportunityStatus Status { get; set; }
     public DateTime DetectedAt { get; set; }
 
+    // Position tracking
+    public bool IsExistingPosition { get; set; } = false;  // true if this represents an open position
+
     // ML Predictions
     public decimal? MLPredictedProfitPercent { get; set; }      // Predicted actual profit %
     public decimal? MLSuccessProbability { get; set; }          // Probability of being profitable (0-1)

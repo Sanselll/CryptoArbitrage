@@ -106,15 +106,6 @@ class FeaturePreprocessor:
         """
         df = df.copy()
 
-        # Fill NaN values in break-even columns with a large value (indicates no break-even point)
-        # This is more meaningful than 0 (which would indicate instant break-even)
-        if 'fund_break_even_24h_proj' in df.columns:
-            df['fund_break_even_24h_proj'] = df['fund_break_even_24h_proj'].fillna(999)
-        if 'fund_break_even_3d_proj' in df.columns:
-            df['fund_break_even_3d_proj'] = df['fund_break_even_3d_proj'].fillna(999)
-        if 'break_even_hours' in df.columns:
-            df['break_even_hours'] = df['break_even_hours'].fillna(999)
-
         # === TEMPORAL FEATURES ===
 
         # Market session (Asian/European/US hours)
@@ -223,15 +214,6 @@ class FeaturePreprocessor:
             np.where(df['spread_volatility_cv'] < 0.5, 0.5, 0.0)  # Medium vs High risk
         )
 
-        # === BREAK-EVEN FEATURES ===
-
-        # Break-even feasibility (can we break even within 24 hours?)
-        df['break_even_feasibility'] = np.where(
-            (df['break_even_hours'].notna()) & (df['break_even_hours'] < 24),
-            1.0,
-            0.0
-        )
-
         # === INTERACTION FEATURES ===
 
         # Risk-adjusted return (profit divided by volatility)
@@ -239,13 +221,6 @@ class FeaturePreprocessor:
             (df['spread_volatility_cv'].notna()) & (df['spread_volatility_cv'] > 0),
             df['fund_apr'] / (1 + df['spread_volatility_cv']),
             df['fund_apr']
-        )
-
-        # Break-even efficiency (inverse of break-even time)
-        df['breakeven_efficiency'] = np.where(
-            (df['break_even_hours'].notna()) & (df['break_even_hours'] > 0),
-            100 / df['break_even_hours'],
-            0
         )
 
         # === SPREAD METRICS ===
@@ -315,11 +290,8 @@ class FeaturePreprocessor:
             'long_funding_rate', 'short_funding_rate',
 
             # Spread features
-            'current_price_spread_pct', 'price_spread_24h_avg', 'price_spread_3d_avg',
+            'price_spread_24h_avg', 'price_spread_3d_avg',
             'spread_30sample_avg', 'spread_volatility_stddev', 'spread_volatility_cv',
-
-            # Break-even features
-            'break_even_hours', 'fund_break_even_24h_proj', 'fund_break_even_3d_proj',
 
             # Volume
             'volume_24h',
@@ -331,7 +303,7 @@ class FeaturePreprocessor:
             'rate_momentum_24h', 'rate_momentum_3d', 'rate_acceleration', 'rate_stability',
 
             # Other engineered features
-            'risk_adjusted_return', 'breakeven_efficiency', 'spread_consistency',
+            'risk_adjusted_return', 'spread_consistency',
 
             # Temporal features (cyclical encodings don't need scaling)
             'hours_until_long_funding', 'hours_until_short_funding', 'hours_until_next_funding'

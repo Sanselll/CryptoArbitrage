@@ -27,17 +27,15 @@ public class PositionSimulator
     }
 
     /// <summary>
-    /// Simulate positions for all opportunities using realistic exit strategies
+    /// Simulate positions for all opportunities using optimal hindsight
     /// </summary>
     public async Task<List<SimulatedExecution>> SimulateAllPositions(
         List<HistoricalMarketSnapshot> snapshots,
         List<ExitStrategyConfig>? customStrategies = null)
     {
-        var strategies = customStrategies ?? _exitStrategies;
-
         _logger.LogInformation(
-            "Starting position simulation for {SnapshotCount} snapshots with {StrategyCount} exit strategies",
-            snapshots.Count, strategies.Count);
+            "Starting optimal hindsight position simulation for {SnapshotCount} snapshots",
+            snapshots.Count);
 
         var simulations = new List<SimulatedExecution>();
 
@@ -56,11 +54,11 @@ public class PositionSimulator
             totalTimeCoverage, firstSnapshotTime.ToString("yyyy-MM-dd HH:mm"),
             lastSnapshotTime.ToString("yyyy-MM-dd HH:mm"));
 
-        _logger.LogInformation("Exit strategies: {Strategies}",
-            string.Join(", ", strategies.Select(s => s.Name)));
+        _logger.LogInformation("Using optimal hindsight simulation (5-minute checkpoints, 72h max hold)");
 
-        // Track per-strategy statistics
-        var strategyStats = strategies.ToDictionary(s => s.Name, s => new StrategyStats());
+        // Track statistics
+        var totalOpportunities = 0;
+        var skipped = 0;
 
         // Process ALL snapshots
         for (int i = 0; i < snapshots.Count; i++)
@@ -70,53 +68,34 @@ public class PositionSimulator
             // For each opportunity detected at this time
             foreach (var opportunity in entrySnapshot.Opportunities)
             {
-                // Simulate each exit strategy
-                foreach (var strategy in strategies)
+                totalOpportunities++;
+
+                // Check if we have enough future data (need at least 5 minutes)
+                var minRequiredExitTime = entrySnapshot.Timestamp.AddMinutes(5);
+                if (minRequiredExitTime > lastSnapshotTime)
                 {
-                    // Check if we have enough future data for this strategy's max hold time
-                    var requiredExitTime = entrySnapshot.Timestamp.AddHours((double)strategy.MaxHoldHours);
-                    if (requiredExitTime > lastSnapshotTime)
+                    // Not enough future data
+                    skipped++;
+                    continue;
+                }
+
+                try
+                {
+                    var simulation = SimulateWithOptimalHindsight(
+                        opportunity,
+                        snapshots,
+                        i);
+
+                    if (simulation != null)
                     {
-                        // Not enough future data for this strategy
-                        strategyStats[strategy.Name].Skipped++;
-                        continue;
+                        simulations.Add(simulation);
                     }
-
-                    try
-                    {
-                        var simulation = SimulatePositionWithStrategy(
-                            opportunity,
-                            snapshots,
-                            i,
-                            strategy);
-
-                        if (simulation != null)
-                        {
-                            simulations.Add(simulation);
-                            var stats = strategyStats[strategy.Name];
-                            stats.Total++;
-
-                            if (simulation.WasProfitable)
-                                stats.Profitable++;
-
-                            if (simulation.HitProfitTarget)
-                                stats.HitProfitTarget++;
-
-                            if (simulation.HitStopLoss)
-                                stats.HitStopLoss++;
-
-                            // Track exit reasons
-                            if (!stats.ExitReasons.ContainsKey(simulation.ExitReason))
-                                stats.ExitReasons[simulation.ExitReason] = 0;
-                            stats.ExitReasons[simulation.ExitReason]++;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex,
-                            "Failed to simulate position for {Symbol} at {Time} with {Strategy} strategy",
-                            opportunity.Symbol, entrySnapshot.Timestamp, strategy.Name);
-                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to simulate position for {Symbol} at {Time}",
+                        opportunity.Symbol, entrySnapshot.Timestamp);
                 }
             }
 
@@ -133,43 +112,29 @@ public class PositionSimulator
         var profitablePercent = simulations.Any() ? (profitableCount * 100.0 / simulations.Count) : 0;
 
         _logger.LogInformation(
-            "Simulation complete: {Total} simulations generated, {Profitable} profitable ({Percent:F1}%)",
-            simulations.Count, profitableCount, profitablePercent);
+            "Simulation complete: {Total} simulations generated from {Opportunities} opportunities ({Skipped} skipped)",
+            simulations.Count, totalOpportunities, skipped);
 
-        // Log per-strategy statistics
-        _logger.LogInformation("\nResults by strategy:");
-        foreach (var strategy in strategies)
-        {
-            var stats = strategyStats[strategy.Name];
-            var winRate = stats.Total > 0 ? (stats.Profitable * 100.0 / stats.Total) : 0;
-            var targetHitRate = stats.Total > 0 ? (stats.HitProfitTarget * 100.0 / stats.Total) : 0;
-            var stopLossRate = stats.Total > 0 ? (stats.HitStopLoss * 100.0 / stats.Total) : 0;
-
-            _logger.LogInformation(
-                "  {Strategy}: {Count} simulations ({Skipped} skipped)",
-                strategy.Name, stats.Total, stats.Skipped);
-            _logger.LogInformation(
-                "    Win rate: {WinRate:F1}%, Profit target: {TargetRate:F1}%, Stop loss: {StopRate:F1}%",
-                winRate, targetHitRate, stopLossRate);
-
-            // Log exit reason distribution
-            if (stats.ExitReasons.Any())
-            {
-                var reasonStr = string.Join(", ", stats.ExitReasons
-                    .OrderByDescending(kvp => kvp.Value)
-                    .Select(kvp => $"{kvp.Key}: {kvp.Value}"));
-                _logger.LogInformation("    Exit reasons: {Reasons}", reasonStr);
-            }
-        }
+        _logger.LogInformation(
+            "Profitable: {Profitable} ({Percent:F1}%)",
+            profitableCount, profitablePercent);
 
         if (simulations.Any())
         {
             var avgProfit = simulations.Average(s => s.ActualProfitPercent);
+            var avgHoldHours = simulations.Average(s => s.ActualHoldHours);
+
             _logger.LogInformation(
-                "\nOverall: Average profit: {AvgProfit:F3}%, Min: {Min:F3}%, Max: {Max:F3}%",
+                "Profit stats: Avg: {AvgProfit:F3}%, Min: {Min:F3}%, Max: {Max:F3}%",
                 avgProfit,
                 simulations.Min(s => s.ActualProfitPercent),
                 simulations.Max(s => s.ActualProfitPercent));
+
+            _logger.LogInformation(
+                "Hold time stats: Avg: {AvgHours:F1}h, Min: {MinHours:F1}h, Max: {MaxHours:F1}h",
+                avgHoldHours,
+                simulations.Min(s => s.ActualHoldHours),
+                simulations.Max(s => s.ActualHoldHours));
         }
 
         return simulations;
@@ -183,6 +148,202 @@ public class PositionSimulator
         public int HitProfitTarget { get; set; }
         public int HitStopLoss { get; set; }
         public Dictionary<string, int> ExitReasons { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Simulate a single position using optimal hindsight
+    /// Evaluates profit every 5 minutes for up to 72 hours and selects the best exit point
+    /// </summary>
+    private SimulatedExecution? SimulateWithOptimalHindsight(
+        ArbitrageOpportunityDto opportunity,
+        List<HistoricalMarketSnapshot> snapshots,
+        int entryIndex)
+    {
+        var entrySnapshot = snapshots[entryIndex];
+        var entryTime = entrySnapshot.Timestamp;
+
+        // Calculate entry prices with slippage
+        var entryPrices = CalculateEntryPrices(opportunity, entrySnapshot);
+
+        // Constants for optimal hindsight simulation
+        const decimal MAX_HOLD_HOURS = 72m;
+        const decimal SAMPLE_INTERVAL_HOURS = 0.0833m; // 5 minutes
+        var maxExitTime = entryTime.AddHours((double)MAX_HOLD_HOURS);
+
+        // Track best exit point
+        decimal bestProfit = decimal.MinValue;
+        int bestExitIndex = -1;
+        decimal peakProfit = decimal.MinValue;
+        decimal maxDrawdown = 0m;
+        int checkpointsEvaluated = 0;
+
+        // Sample every 5 minutes from entry to 72h (or until data runs out)
+        var currentTime = entryTime.AddHours((double)SAMPLE_INTERVAL_HOURS);
+
+        while (currentTime <= maxExitTime)
+        {
+            // Find snapshot closest to current time
+            var snapshotIndex = FindSnapshotIndexClosestTo(snapshots, currentTime, entryIndex);
+            if (snapshotIndex == -1 || snapshotIndex >= snapshots.Count)
+            {
+                // No more data available
+                break;
+            }
+
+            var snapshot = snapshots[snapshotIndex];
+            checkpointsEvaluated++;
+
+            // Calculate current unrealized P&L
+            var currentLongPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol);
+            var currentShortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol);
+
+            if (currentLongPrice == 0 || currentShortPrice == 0)
+            {
+                currentTime = currentTime.AddHours((double)SAMPLE_INTERVAL_HOURS);
+                continue;
+            }
+
+            // Calculate unrealized PnL (percentage)
+            var longPnl = (currentLongPrice - entryPrices.LongPrice) / entryPrices.LongPrice;
+            var shortPnl = (entryPrices.ShortPrice - currentShortPrice) / entryPrices.ShortPrice;
+            var unrealizedPnl = ((longPnl + shortPnl) / 2) * 100;
+
+            // Update peak and drawdown tracking
+            peakProfit = Math.Max(peakProfit, unrealizedPnl);
+            maxDrawdown = Math.Min(maxDrawdown, unrealizedPnl);
+
+            // Track best exit point (highest profit, even if negative)
+            if (unrealizedPnl > bestProfit)
+            {
+                bestProfit = unrealizedPnl;
+                bestExitIndex = snapshotIndex;
+            }
+
+            // Move to next checkpoint
+            currentTime = currentTime.AddHours((double)SAMPLE_INTERVAL_HOURS);
+        }
+
+        // If no valid exit point was found, return null
+        if (bestExitIndex == -1)
+            return null;
+
+        var exitSnapshot = snapshots[bestExitIndex];
+        var hoursHeld = (decimal)(exitSnapshot.Timestamp - entryTime).TotalHours;
+
+        // Calculate exit prices with slippage
+        var exitPrices = CalculateExitPrices(opportunity, exitSnapshot);
+
+        // Simulate funding payments during hold period
+        var fundingPayments = SimulateFundingPayments(
+            opportunity,
+            snapshots,
+            entryIndex,
+            bestExitIndex);
+
+        // Calculate total PnL
+        var pnl = CalculatePnL(
+            opportunity,
+            entryPrices,
+            exitPrices,
+            fundingPayments,
+            DEFAULT_POSITION_SIZE);
+
+        // Calculate total fees
+        var totalFeesUsd = DEFAULT_POSITION_SIZE * (opportunity.PositionCostPercent / 100);
+
+        // Determine if this was a "good" exit based on profitability
+        var hitProfitTarget = pnl.TotalProfitPercent > 0.5m; // Consider >0.5% as hitting profit target
+
+        // Build simulation result
+        return new SimulatedExecution
+        {
+            // Snapshot
+            OpportunitySnapshotJson = JsonSerializer.Serialize(opportunity),
+            EntryTime = entrySnapshot.Timestamp,
+            ExitTime = exitSnapshot.Timestamp,
+            HourOfDay = entrySnapshot.Timestamp.Hour,
+            DayOfWeek = (int)entrySnapshot.Timestamp.DayOfWeek,
+
+            // Market context
+            BtcPriceAtEntry = entrySnapshot.BtcPrice,
+            MarketRegimeAtEntry = entrySnapshot.MarketRegime,
+
+            // Opportunity features
+            Symbol = opportunity.Symbol,
+            Strategy = opportunity.SubType.ToString(),
+            LongExchange = opportunity.LongExchange,
+            ShortExchange = opportunity.ShortExchange,
+
+            // Funding rate details
+            LongFundingRate = opportunity.LongFundingRate,
+            ShortFundingRate = opportunity.ShortFundingRate,
+            LongFundingIntervalHours = opportunity.LongFundingIntervalHours,
+            ShortFundingIntervalHours = opportunity.ShortFundingIntervalHours,
+            LongNextFundingTimeMinutes = opportunity.LongNextFundingTime.HasValue
+                ? (decimal?)(opportunity.LongNextFundingTime.Value - entrySnapshot.Timestamp).TotalMinutes
+                : null,
+            ShortNextFundingTimeMinutes = opportunity.ShortNextFundingTime.HasValue
+                ? (decimal?)(opportunity.ShortNextFundingTime.Value - entrySnapshot.Timestamp).TotalMinutes
+                : null,
+
+            // Price spread
+            CurrentPriceSpreadPercent = opportunity.CurrentPriceSpreadPercent,
+
+            // Profitability metrics
+            FundProfit8h = opportunity.FundProfit8h,
+            FundApr = opportunity.FundApr,
+            FundProfit8h24hProj = opportunity.FundProfit8h24hProj,
+            FundApr24hProj = opportunity.FundApr24hProj,
+            FundBreakEvenTime24hProj = opportunity.FundBreakEvenTime24hProj,
+            FundProfit8h3dProj = opportunity.FundProfit8h3dProj,
+            FundApr3dProj = opportunity.FundApr3dProj,
+            FundBreakEvenTime3dProj = opportunity.FundBreakEvenTime3dProj,
+            BreakEvenTimeHours = opportunity.BreakEvenTimeHours,
+
+            // Price spread statistics
+            PriceSpread24hAvg = opportunity.PriceSpread24hAvg,
+            PriceSpread3dAvg = opportunity.PriceSpread3dAvg,
+
+            // Risk metrics
+            SpreadVolatilityCv = opportunity.SpreadVolatilityCv,
+            SpreadVolatilityStdDev = opportunity.SpreadVolatilityStdDev,
+            Spread30SampleAvg = opportunity.Spread30SampleAvg,
+
+            Volume24h = opportunity.Volume24h,
+            LongVolume24h = opportunity.LongVolume24h,
+            ShortVolume24h = opportunity.ShortVolume24h,
+            BidAskSpreadPercent = opportunity.BidAskSpreadPercent,
+            OrderbookDepthUsd = opportunity.OrderbookDepthUsd,
+            LiquidityStatus = opportunity.LiquidityStatus?.ToString(),
+
+            PositionCostPercent = opportunity.PositionCostPercent,
+            PositionSizeUsd = DEFAULT_POSITION_SIZE,
+
+            // Target variables (optimal hindsight)
+            StrategyName = "OptimalHindsight",
+            ExitReason = ExitReason.OPTIMAL_HINDSIGHT.ToString(),
+            ActualHoldHours = hoursHeld,
+            ActualProfitPercent = pnl.TotalProfitPercent,
+            ActualProfitUsd = pnl.TotalProfitUsd,
+            WasProfitable = pnl.TotalProfitPercent > 0,
+            HitProfitTarget = hitProfitTarget,
+            HitStopLoss = false, // Not applicable for optimal hindsight
+
+            // Performance metrics
+            PeakUnrealizedProfitPercent = peakProfit,
+            MaxDrawdownPercent = maxDrawdown,
+            FundingPaymentsCount = fundingPayments.Count,
+            TotalFundingEarnedUsd = fundingPayments.Sum(f => f.Amount),
+
+            // Execution quality
+            TotalFeesUsd = totalFeesUsd,
+
+            // Prices (already include slippage)
+            EntryLongPrice = entryPrices.LongPrice,
+            EntryShortPrice = entryPrices.ShortPrice,
+            ExitLongPrice = exitPrices.LongPrice,
+            ExitShortPrice = exitPrices.ShortPrice
+        };
     }
 
     /// <summary>
