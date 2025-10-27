@@ -38,6 +38,7 @@ EOF
 
 # Extract owner and pull images
 REPO_OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f1 | tr '[:upper:]' '[:lower:]')
+docker pull ghcr.io/$REPO_OWNER/crypto-arbitrage/ml-api:latest || true
 docker pull ghcr.io/$REPO_OWNER/crypto-arbitrage/api:latest || true
 docker pull ghcr.io/$REPO_OWNER/crypto-arbitrage/web:latest || true
 
