@@ -55,12 +55,14 @@ def train_model_ensemble(
     print("Preprocessing features...")
     X_train = preprocessor.fit_transform(train_df.drop(columns=[
         'actual_hold_hours', 'actual_profit_pct', 'was_profitable',
-        'exit_time', 'peak_profit_pct', 'max_drawdown_pct'
+        'exit_time', 'peak_profit_pct', 'max_drawdown_pct',
+        'hit_profit_target', 'hit_stop_loss'  # TARGET VARIABLES - outcome indicators
     ], errors='ignore'))
 
     X_val = preprocessor.transform(val_df.drop(columns=[
         'actual_hold_hours', 'actual_profit_pct', 'was_profitable',
-        'exit_time', 'peak_profit_pct', 'max_drawdown_pct'
+        'exit_time', 'peak_profit_pct', 'max_drawdown_pct',
+        'hit_profit_target', 'hit_stop_loss'  # TARGET VARIABLES - outcome indicators
     ], errors='ignore'))
 
     # Extract targets
@@ -182,7 +184,8 @@ def main():
 
         X_test = preprocessor.transform(test_df.drop(columns=[
             'actual_hold_hours', 'actual_profit_pct', 'was_profitable',
-            'exit_time', 'peak_profit_pct', 'max_drawdown_pct'
+            'exit_time', 'peak_profit_pct', 'max_drawdown_pct',
+            'hit_profit_target', 'hit_stop_loss'  # TARGET VARIABLES - outcome indicators
         ], errors='ignore'))
 
         # Clip test targets too for consistent evaluation
