@@ -34,9 +34,10 @@ USER mluser
 # Expose port
 EXPOSE 5250
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:5250/health || exit 1
+# Health check - disabled in favor of docker-compose healthcheck
+# which has proper timeouts for slow model loading
+# HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+#     CMD curl -f http://localhost:5250/health || exit 1
 
 # Run the ML API server
 CMD ["python", "ml_api_server.py"]
