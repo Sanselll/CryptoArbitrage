@@ -17,6 +17,11 @@ jobs:
         with:
           lfs: true
 
+      - name: Pull LFS files
+        run: |
+          git lfs pull
+          git lfs ls-files
+
       - name: Free up disk space
         run: |
           echo "Disk space before cleanup:"
@@ -43,6 +48,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify LFS files
+        run: |
+          echo "Checking LFS files..."
+          ls -lh ml_pipeline/models/xgboost/*.pkl
+          echo "Total size of models:"
+          du -sh ml_pipeline/models/
 
       - name: Build and push ML API image
         uses: docker/build-push-action@v5
