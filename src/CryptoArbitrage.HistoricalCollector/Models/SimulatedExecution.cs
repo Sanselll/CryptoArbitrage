@@ -164,4 +164,16 @@ public class SimulatedExecution
     public decimal EntryShortPrice { get; set; }
     public decimal ExitLongPrice { get; set; }
     public decimal ExitShortPrice { get; set; }
+
+    // ===================================================================
+    // TIME-SERIES SNAPSHOTS
+    // ===================================================================
+
+    /// <summary>
+    /// Position snapshots taken during the position lifecycle.
+    /// Sampled every 5 minutes from entry to exit.
+    /// Used for training exit prediction models.
+    /// Empty for entry-only training data (backward compatibility).
+    /// </summary>
+    public List<PositionSnapshot> Snapshots { get; set; } = new();
 }
