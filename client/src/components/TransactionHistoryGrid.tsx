@@ -170,6 +170,7 @@ export const TransactionHistoryGrid = () => {
             <TableHead className="sticky left-[120px] z-40 bg-binance-bg-secondary border-r border-binance-border">Type</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Asset</TableHead>
+            <TableHead>Symbol</TableHead>
             <TableHead
               className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
               onClick={() => handleSort('amount')}
@@ -183,6 +184,7 @@ export const TransactionHistoryGrid = () => {
             </TableHead>
             <TableHead className="text-right">Fee</TableHead>
             <TableHead>Fee Asset</TableHead>
+            <TableHead className="text-right">Signed Fee</TableHead>
             <TableHead
               className="cursor-pointer hover:bg-binance-bg-hover transition-colors"
               onClick={() => handleSort('createdAt')}
@@ -211,6 +213,11 @@ export const TransactionHistoryGrid = () => {
                   {transaction.asset}
                 </span>
               </TableCell>
+              <TableCell className="font-medium text-gray-300">
+                <span className="text-[11px]">
+                  {transaction.symbol || '-'}
+                </span>
+              </TableCell>
               <TableCell className="text-right font-mono">
                 <span className={`text-[11px] ${
                   transaction.type === TransactionType.Deposit ||
@@ -233,6 +240,19 @@ export const TransactionHistoryGrid = () => {
               <TableCell className="text-sm text-gray-300">
                 <span className="text-[11px]">
                   {transaction.feeAsset || '-'}
+                </span>
+              </TableCell>
+              <TableCell className="text-right font-mono">
+                <span className={`text-[11px] ${
+                  transaction.signedFee == null
+                    ? 'text-gray-300'
+                    : transaction.signedFee > 0
+                    ? 'text-green-400'
+                    : transaction.signedFee < 0
+                    ? 'text-red-400'
+                    : 'text-gray-300'
+                }`}>
+                  {transaction.signedFee != null ? transaction.signedFee.toFixed(8) : '-'}
                 </span>
               </TableCell>
               <TableCell className="text-sm text-gray-400">

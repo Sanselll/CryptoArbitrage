@@ -393,6 +393,8 @@ export interface Transaction {
   amount: number;
   fee?: number;
   feeAsset?: string;
+  symbol?: string;
+  signedFee?: number;
   fromAddress?: string;
   toAddress?: string;
   txHash?: string;
