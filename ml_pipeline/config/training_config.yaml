@@ -22,11 +22,11 @@ features:
 # XGBoost Hyperparameters (From tuned_config.yaml - Optimized via hyperparameter tuning)
 xgboost:
   profit_predictor:
-    n_estimators: 4500
-    max_depth: 14
-    learning_rate: 0.009998851845883639
+    n_estimators: 1500  # Reduced from 4500 - early stopping was kicking in at ~1500 anyway
+    max_depth: 12  # Reduced from 14 - shallower trees
+    learning_rate: 0.015  # Increased from 0.01 - learn faster
     min_child_weight: 10
-    subsample: 0.9980341806326457
+    subsample: 0.95  # Reduced from 0.998 - simpler trees
     colsample_bytree: 0.7390278059058913
     gamma: 0.18660209052539536
     reg_alpha: 0.10404086524316918
@@ -34,7 +34,7 @@ xgboost:
     objective: 'reg:squarederror'
     eval_metric: 'rmse'
     tree_method: 'hist'
-    early_stopping_rounds: 150
+    early_stopping_rounds: 100  # Reduced from 150
 
   success_classifier:
     n_estimators: 1500
@@ -53,11 +53,11 @@ xgboost:
     early_stopping_rounds: 150
 
   duration_predictor:
-    n_estimators: 3000
-    max_depth: 14
-    learning_rate: 0.006694755548534381
+    n_estimators: 1000  # Reduced from 3000 - fewer trees
+    max_depth: 12  # Reduced from 14 - shallower trees
+    learning_rate: 0.015  # Increased from 0.0067 - learn faster, need fewer trees
     min_child_weight: 10
-    subsample: 0.9996958651049216
+    subsample: 0.95  # Reduced from 0.9997 - less data per tree = simpler trees
     colsample_bytree: 0.7344606289549767
     gamma: 0.053723598184720445
     reg_alpha: 0.046829834272052326
@@ -65,7 +65,7 @@ xgboost:
     objective: 'reg:squarederror'
     eval_metric: 'rmse'
     tree_method: 'hist'
-    early_stopping_rounds: 150
+    early_stopping_rounds: 100  # Reduced from 150 - stop earlier if not improving
 
 # LightGBM Hyperparameters
 lightgbm:
