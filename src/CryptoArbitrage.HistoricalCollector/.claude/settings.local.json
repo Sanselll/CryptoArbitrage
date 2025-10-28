@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(find:*)",
+      "Bash(dotnet run:*)",
+      "Bash(timeout 90 dotnet run:*)",
+      "Bash(pkill:*)",
+      "Read(//private/tmp/**)",
+      "Bash(npm run build:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

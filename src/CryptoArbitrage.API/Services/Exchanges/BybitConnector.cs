@@ -1560,16 +1560,32 @@ public class BybitConnector : IExchangeConnector
             {
                 transactions = result.Data.List.Select(t =>
                 {
+                    // Funding fee amount (negative = paid, positive = received)
+                    var funding = t.Funding ?? 0m;
                     // Use cashflow for the amount when available (more accurate for PnL)
-                    var amount = t.Cashflow ?? t.Change ?? t.Quantity ?? t.Size ?? 0;
+                    // IMPORTANT: Use funding if all cashflow fields are 0 (not just null)
+                    var cashflowAmount = t.Cashflow ?? t.Change ?? t.Quantity ?? t.Size ?? 0;
+                    var amount = cashflowAmount != 0 ? cashflowAmount : funding;
                     // Fee is negative in the API, so take absolute value
                     var fee = t.Fee.HasValue ? Math.Abs(t.Fee.Value) : 0m;
+
+                    var transactionType = MapBybitTransactionType(t.Type, t.SubType, funding, fee, t.TradeId);
+
+                    // Calculate signed fee: negative for costs, positive for income
+                    decimal? signedFee = transactionType switch
+                    {
+                        Models.TransactionType.Trade => fee > 0 ? -fee : null, // Trading fee (commission) - always negative
+                        Models.TransactionType.Commission => -fee, // Commission - always negative
+                        Models.TransactionType.FundingFee => funding, // Funding fee - can be +/- (income/cost)
+                        Models.TransactionType.Rebate => fee > 0 ? fee : null, // Rebate - always positive
+                        _ => null
+                    };
 
                     return new TransactionDto
                     {
                         Exchange = ExchangeName,
                         TransactionId = t.Id ?? string.Empty,
-                        Type = MapBybitTransactionType(t.Type),
+                        Type = transactionType,
                         Asset = t.Asset ?? string.Empty,
                         Amount = amount,
                         Status = TransactionStatus.Confirmed, // Bybit transaction history only shows confirmed
@@ -1577,19 +1593,41 @@ public class BybitConnector : IExchangeConnector
                         TradeId = t.TradeId,
                         Fee = fee,
                         FeeAsset = fee > 0 ? t.Asset : null,
-                        Info = $"{t.Type} - {t.SubType}",
+                        SignedFee = signedFee,
+                        SubType = t.SubType,
+                        Info = $"{t.Type} - {t.SubType}" + (funding != 0 ? $" (Funding: {funding})" : ""),
                         CreatedAt = t.TransactionTime,
                         ConfirmedAt = t.TransactionTime
                     };
                 })
-                .Where(tx => tx.Amount != 0 || tx.Fee > 0) // Filter out empty transactions (both amount=0 and fee=0)
+                .Where(tx => tx.Amount != 0 || tx.Fee > 0) // Filter out empty transactions
                 .ToList();
 
-                _logger.LogInformation("Fetched {Count} transactions from Bybit (trades: {TradeCount}, settlements: {SettlementCount}, fees with amount: {FeeCount})",
+                // Log detailed breakdown
+                var tradeCount = transactions.Count(t => t.Type == Models.TransactionType.Trade);
+                var pnlCount = transactions.Count(t => t.Type == Models.TransactionType.RealizedPnL);
+                var fundingCount = transactions.Count(t => t.Type == Models.TransactionType.FundingFee);
+                var commissionCount = transactions.Count(t => t.Type == Models.TransactionType.Commission);
+                var otherCount = transactions.Count(t => t.Type == Models.TransactionType.Other);
+
+                _logger.LogInformation("Fetched {Count} transactions from Bybit (trades: {TradeCount}, realized PnL: {PnLCount}, funding fees: {FundingCount}, commissions: {CommissionCount}, other: {OtherCount})",
                     transactions.Count,
-                    transactions.Count(t => t.Type == Models.TransactionType.Trade),
-                    transactions.Count(t => t.Type == Models.TransactionType.RealizedPnL),
-                    transactions.Count(t => t.Fee > 0));
+                    tradeCount,
+                    pnlCount,
+                    fundingCount,
+                    commissionCount,
+                    otherCount);
+
+                // Debug logging: log a few sample transactions to verify field-based detection
+                if (transactions.Any())
+                {
+                    _logger.LogDebug("Sample Bybit transactions for verification:");
+                    foreach (var sample in transactions.Take(3))
+                    {
+                        _logger.LogDebug("  [{Type}] Symbol: {Symbol}, Amount: {Amount}, Fee: {Fee}, Info: {Info}",
+                            sample.Type, sample.Symbol, sample.Amount, sample.Fee, sample.Info);
+                    }
+                }
             }
             else
             {
@@ -1628,24 +1666,109 @@ public class BybitConnector : IExchangeConnector
         };
     }
 
-    private Models.TransactionType MapBybitTransactionType(Bybit.Net.Enums.TransactionLogType bybitType)
+    private Models.TransactionType MapBybitTransactionType(
+        Bybit.Net.Enums.TransactionLogType bybitType,
+        string? subType = null,
+        decimal funding = 0,
+        decimal fee = 0,
+        string? tradeId = null)
     {
+        // CRITICAL: Bybit returns Type=TRADE or Type=SETTLEMENT for most transactions
+        // We must use field-based detection instead of relying on Type/SubType alone
+
+        // Priority 1: Check Funding field - if it has a value, it's a funding fee
+        if (funding != 0)
+        {
+            return Models.TransactionType.FundingFee;
+        }
+
+        // Priority 2: For Type=SETTLEMENT without funding, it's realized PnL
+        if (bybitType == Bybit.Net.Enums.TransactionLogType.Settlement)
+        {
+            // Settlement transactions are for realized PnL from closed positions
+            return Models.TransactionType.RealizedPnL;
+        }
+
+        // Priority 3: For Type=TRADE, differentiate between actual trades and commissions
+        if (bybitType == Bybit.Net.Enums.TransactionLogType.Trade)
+        {
+            // If it has a TradeId, it's an actual trade (buy/sell execution)
+            if (!string.IsNullOrEmpty(tradeId))
+            {
+                return Models.TransactionType.Trade;
+            }
+
+            // If it has a fee but no TradeId, it's a commission-only entry
+            if (fee > 0)
+            {
+                return Models.TransactionType.Commission;
+            }
+
+            // Default to Trade for Type=TRADE
+            return Models.TransactionType.Trade;
+        }
+
+        // Priority 4: Check SubType if available (though usually empty)
+        if (!string.IsNullOrEmpty(subType))
+        {
+            if (subType.Contains("FUNDING", StringComparison.OrdinalIgnoreCase))
+                return Models.TransactionType.FundingFee;
+            if (subType.Contains("FEE", StringComparison.OrdinalIgnoreCase) ||
+                subType.Contains("COMMISSION", StringComparison.OrdinalIgnoreCase))
+                return Models.TransactionType.Commission;
+        }
+
+        // Priority 5: Map based on primary Type for all other cases
         return bybitType switch
         {
+            // Asset Movement
             Bybit.Net.Enums.TransactionLogType.TransferIn => Models.TransactionType.Transfer,
             Bybit.Net.Enums.TransactionLogType.TransferOut => Models.TransactionType.Transfer,
-            Bybit.Net.Enums.TransactionLogType.Trade => Models.TransactionType.Trade,
-            Bybit.Net.Enums.TransactionLogType.Settlement => Models.TransactionType.RealizedPnL,
+
+            // Trading & Settlement (fallback)
             Bybit.Net.Enums.TransactionLogType.Delivery => Models.TransactionType.Delivery,
             Bybit.Net.Enums.TransactionLogType.Liquidation => Models.TransactionType.Liquidation,
             Bybit.Net.Enums.TransactionLogType.Adl => Models.TransactionType.Adl,
+            Bybit.Net.Enums.TransactionLogType.FeeRefund => Models.TransactionType.Rebate,
+
+            // Rewards & Bonuses
             Bybit.Net.Enums.TransactionLogType.Airdrop => Models.TransactionType.Airdrop,
             Bybit.Net.Enums.TransactionLogType.Bonus => Models.TransactionType.Bonus,
             Bybit.Net.Enums.TransactionLogType.BonusTransferIn => Models.TransactionType.Bonus,
             Bybit.Net.Enums.TransactionLogType.BonusTransferOut => Models.TransactionType.Bonus,
-            Bybit.Net.Enums.TransactionLogType.FeeRefund => Models.TransactionType.Rebate,
-            _ => Models.TransactionType.Other
+            Bybit.Net.Enums.TransactionLogType.BonusRecollect => Models.TransactionType.Bonus,
+
+            // Currency Operations
+            Bybit.Net.Enums.TransactionLogType.CurrencyBuy => Models.TransactionType.Trade,
+            Bybit.Net.Enums.TransactionLogType.CurrencySell => Models.TransactionType.Trade,
+            Bybit.Net.Enums.TransactionLogType.Interest => Models.TransactionType.Commission,
+
+            // Investment Products
+            Bybit.Net.Enums.TransactionLogType.TokensSubscription => Models.TransactionType.Transfer,
+            Bybit.Net.Enums.TransactionLogType.TokensRedemption => Models.TransactionType.Transfer,
+            Bybit.Net.Enums.TransactionLogType.FlexibleStakingSubscription => Models.TransactionType.Transfer,
+            Bybit.Net.Enums.TransactionLogType.FlexibleStakingRedemption => Models.TransactionType.Transfer,
+            Bybit.Net.Enums.TransactionLogType.FixedStakingSubscription => Models.TransactionType.Transfer,
+
+            // Internal Transfers
+            Bybit.Net.Enums.TransactionLogType.TransferInInsLoan => Models.TransactionType.InternalTransfer,
+            Bybit.Net.Enums.TransactionLogType.TransferOutInsLoan => Models.TransactionType.InternalTransfer,
+
+            // Log unmapped types for monitoring
+            _ => LogUnmappedType(bybitType, subType, funding, fee, tradeId)
         };
+    }
+
+    private Models.TransactionType LogUnmappedType(
+        Bybit.Net.Enums.TransactionLogType bybitType,
+        string? subType,
+        decimal funding,
+        decimal fee,
+        string? tradeId)
+    {
+        _logger.LogWarning("Unmapped Bybit transaction - Type: {Type}, SubType: {SubType}, Funding: {Funding}, Fee: {Fee}, TradeId: {TradeId}",
+            bybitType, subType ?? "null", funding, fee, tradeId ?? "null");
+        return Models.TransactionType.Other;
     }
 }
 

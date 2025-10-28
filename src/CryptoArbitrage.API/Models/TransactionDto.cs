@@ -15,8 +15,13 @@ public class TransactionDto
     public string? Info { get; set; }
     public string? Symbol { get; set; }
     public string? TradeId { get; set; }
+    public string? SubType { get; set; }
     public decimal Fee { get; set; }
     public string? FeeAsset { get; set; }
+    /// <summary>
+    /// All fees with proper sign: negative for fees paid (commissions), positive for fees received (funding income), negative for funding costs
+    /// </summary>
+    public decimal? SignedFee { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? ConfirmedAt { get; set; }
 }
