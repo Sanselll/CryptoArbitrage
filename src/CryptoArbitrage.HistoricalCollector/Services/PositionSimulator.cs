@@ -189,6 +189,12 @@ public class PositionSimulator
         // Collect checkpoint data for snapshot generation
         var checkpoints = new List<SnapshotGenerator.CheckpointData>();
 
+        // Track cumulative funding for accurate P&L
+        decimal cumulativeFunding = 0m;
+        var fundingIntervalHours = Math.Min(
+            opportunity.LongFundingIntervalHours ?? 8m,
+            opportunity.ShortFundingIntervalHours ?? 8m);
+
         // Sample every 5 minutes from entry to 72h (or until data runs out)
         var currentTime = entryTime.AddHours((double)SAMPLE_INTERVAL_HOURS);
 
@@ -215,24 +221,43 @@ public class PositionSimulator
                 continue;
             }
 
-            // Calculate unrealized PnL (percentage)
+            // Calculate price-based PnL (percentage)
             var longPnl = (currentLongPrice - entryPrices.LongPrice) / entryPrices.LongPrice;
             var shortPnl = (entryPrices.ShortPrice - currentShortPrice) / entryPrices.ShortPrice;
-            var unrealizedPnl = ((longPnl + shortPnl) / 2) * 100;
+            var pricePnl = ((longPnl + shortPnl) / 2) * 100;
 
-            // Update peak and drawdown tracking
-            peakProfit = Math.Max(peakProfit, unrealizedPnl);
-            maxDrawdown = Math.Min(maxDrawdown, unrealizedPnl);
+            // Calculate cumulative funding up to this checkpoint
+            var (currentLongRate, currentShortRate) = GetFundingRatesAt(snapshot, opportunity);
+            var hoursElapsed = (decimal)(snapshot.Timestamp - entryTime).TotalHours;
 
-            // Track best exit point (highest profit, even if negative)
-            if (unrealizedPnl > bestProfit)
+            // Estimate funding payments received (simple approximation based on hours elapsed)
+            // More accurate than nothing, accounts for time-weighted funding accumulation
+            var fundingPaymentsCount = Math.Floor(hoursElapsed / fundingIntervalHours);
+            if (fundingPaymentsCount > 0)
             {
-                bestProfit = unrealizedPnl;
+                // Average funding rate differential over the period
+                var avgFundingDiff = (opportunity.ShortFundingRate - opportunity.LongFundingRate +
+                                     (currentShortRate - currentLongRate)) / 2;
+                cumulativeFunding = avgFundingDiff * fundingPaymentsCount;
+            }
+
+            // Calculate NET unrealized P&L including all costs
+            // Price P&L + Cumulative Funding - Exit Fees (entry fees are sunk cost)
+            var exitFeePercent = opportunity.PositionCostPercent / 2; // Half of total cost is exit
+            var netUnrealizedPnl = pricePnl + (cumulativeFunding * 100) - exitFeePercent;
+
+            // Update peak and drawdown tracking (use NET P&L)
+            peakProfit = Math.Max(peakProfit, netUnrealizedPnl);
+            maxDrawdown = Math.Min(maxDrawdown, netUnrealizedPnl);
+
+            // Track best exit point (highest NET profit, even if negative)
+            if (netUnrealizedPnl > bestProfit)
+            {
+                bestProfit = netUnrealizedPnl;
                 bestExitIndex = snapshotIndex;
             }
 
             // Collect checkpoint data for snapshot generation
-            var (currentLongRate, currentShortRate) = GetFundingRatesAt(snapshot, opportunity);
             var currentSpread = Math.Abs(((currentShortPrice - currentLongPrice) / currentLongPrice) * 100);
             var currentVolume = snapshot.BtcVolume24h; // Use BTC volume as proxy for now
 
@@ -240,13 +265,14 @@ public class PositionSimulator
             {
                 Index = checkpointsEvaluated - 1,
                 Time = snapshot.Timestamp,
-                UnrealizedPnLPercent = unrealizedPnl,
+                UnrealizedPnLPercent = netUnrealizedPnl, // Store NET P&L
                 LongPrice = currentLongPrice,
                 ShortPrice = currentShortPrice,
                 LongFundingRate = currentLongRate,
                 ShortFundingRate = currentShortRate,
                 SpreadPercent = currentSpread,
-                Volume24h = currentVolume
+                Volume24h = currentVolume,
+                CumulativeFundingPercent = cumulativeFunding * 100
             });
 
             // Move to next checkpoint
@@ -260,14 +286,27 @@ public class PositionSimulator
         var exitSnapshot = snapshots[bestExitIndex];
         var hoursHeld = (decimal)(exitSnapshot.Timestamp - entryTime).TotalHours;
 
+        // Find optimal exit index in checkpoint data
+        var optimalExitIndex = checkpoints.FindIndex(c => c.Time == exitSnapshot.Timestamp);
+
+        // Determine intelligent exit reason based on market conditions and P&L
+        var exitReason = DetermineExitReason(
+            bestProfit,
+            peakProfit,
+            hoursHeld,
+            opportunity,
+            checkpoints,
+            optimalExitIndex
+        );
+
         // Generate position snapshots from checkpoint data
         var positionSnapshots = _snapshotGenerator.GenerateSnapshots(
             executionId: _executionIdCounter++,
             opportunity: opportunity,
             entrySnapshot: entrySnapshot,
             checkpoints: checkpoints,
-            optimalExitIndex: checkpoints.FindIndex(c => c.Time == exitSnapshot.Timestamp),
-            exitReason: ExitReason.OPTIMAL_HINDSIGHT.ToString(),
+            optimalExitIndex: optimalExitIndex,
+            exitReason: exitReason,
             optimalExitPnL: bestProfit
         );
 
@@ -1001,6 +1040,88 @@ public class PositionSimulator
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// Determine the actual exit reason based on market conditions and P&L outcomes
+    /// </summary>
+    private string DetermineExitReason(
+        decimal bestProfit,
+        decimal peakProfit,
+        decimal hoursHeld,
+        ArbitrageOpportunityDto opportunity,
+        List<SnapshotGenerator.CheckpointData> checkpoints,
+        int optimalExitIndex)
+    {
+        // Priority 1: STOP_LOSS - negative P&L
+        if (bestProfit < 0)
+        {
+            _logger.LogDebug("Exit reason: STOP_LOSS (P&L: {PnL}%)", bestProfit);
+            return ExitReason.STOP_LOSS.ToString();
+        }
+
+        // Priority 2: MAX_HOLD_TIME - held for max duration (72 hours)
+        if (hoursHeld >= 72m)
+        {
+            _logger.LogDebug("Exit reason: MAX_HOLD_TIME (held: {Hours}h)", hoursHeld);
+            return ExitReason.MAX_HOLD_TIME.ToString();
+        }
+
+        // Priority 3: TRAILING_STOP - significant drawback from peak
+        // If peak was significantly higher than exit (e.g., >0.3% drawback)
+        var drawbackFromPeak = peakProfit - bestProfit;
+        if (drawbackFromPeak > 0.3m && peakProfit > 0.5m)
+        {
+            _logger.LogDebug("Exit reason: TRAILING_STOP (peak: {Peak}%, exit: {Exit}%, drawback: {Drawback}%)",
+                peakProfit, bestProfit, drawbackFromPeak);
+            return ExitReason.TRAILING_STOP.ToString();
+        }
+
+        // Priority 4: FUNDING_REVERSAL - funding differential dropped significantly
+        if (optimalExitIndex >= 0 && optimalExitIndex < checkpoints.Count)
+        {
+            var exitCheckpoint = checkpoints[optimalExitIndex];
+            var entryFundingDiff = opportunity.ShortFundingRate - opportunity.LongFundingRate;
+            var exitFundingDiff = exitCheckpoint.ShortFundingRate - exitCheckpoint.LongFundingRate;
+
+            // Check if funding reversed by >50%
+            if (entryFundingDiff != 0)
+            {
+                var fundingChangeRatio = exitFundingDiff / entryFundingDiff;
+                if (fundingChangeRatio < 0.5m)
+                {
+                    _logger.LogDebug("Exit reason: FUNDING_REVERSAL (entry: {Entry}%, exit: {Exit}%, ratio: {Ratio})",
+                        entryFundingDiff, exitFundingDiff, fundingChangeRatio);
+                    return ExitReason.FUNDING_REVERSAL.ToString();
+                }
+            }
+
+            // Priority 5: VOLATILITY_SPIKE - spread volatility increased significantly
+            var entryVolatility = opportunity.SpreadVolatilityStdDev ?? 0m;
+            var exitSpread = exitCheckpoint.SpreadPercent;
+            var entrySpread = opportunity.CurrentPriceSpreadPercent ?? 0m;
+            var spreadChange = Math.Abs(exitSpread - entrySpread);
+
+            // If spread changed dramatically (>2x the entry volatility), consider it a volatility spike
+            if (entryVolatility > 0 && spreadChange > entryVolatility * 2)
+            {
+                _logger.LogDebug("Exit reason: VOLATILITY_SPIKE (spread change: {Change}%, entry vol: {Vol}%)",
+                    spreadChange, entryVolatility);
+                return ExitReason.VOLATILITY_SPIKE.ToString();
+            }
+        }
+
+        // Priority 6: PROFIT_TARGET - exiting with good profit
+        if (bestProfit >= 0.5m)
+        {
+            _logger.LogDebug("Exit reason: PROFIT_TARGET (P&L: {PnL}%)", bestProfit);
+            return ExitReason.PROFIT_TARGET.ToString();
+        }
+
+        // Fallback: OPTIMAL_HINDSIGHT - other scenarios
+        _logger.LogDebug("Exit reason: OPTIMAL_HINDSIGHT (P&L: {PnL}%, peak: {Peak}%, hours: {Hours})",
+            bestProfit, peakProfit, hoursHeld);
+        return ExitReason.OPTIMAL_HINDSIGHT.ToString();
     }
 
     private class FundingPayment

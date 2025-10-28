@@ -31,6 +31,7 @@ public class SnapshotGenerator
         public decimal ShortFundingRate { get; set; }
         public decimal SpreadPercent { get; set; }
         public decimal Volume24h { get; set; }
+        public decimal CumulativeFundingPercent { get; set; }
     }
 
     /// <summary>
