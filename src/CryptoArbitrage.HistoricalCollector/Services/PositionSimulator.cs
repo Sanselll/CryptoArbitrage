@@ -13,6 +13,7 @@ namespace CryptoArbitrage.HistoricalCollector.Services;
 public class PositionSimulator
 {
     private readonly ILogger<PositionSimulator> _logger;
+    private readonly SnapshotGenerator _snapshotGenerator;
 
     // Exit strategies to simulate (instead of fixed durations)
     private readonly List<ExitStrategyConfig> _exitStrategies;
@@ -20,10 +21,18 @@ public class PositionSimulator
     // Default position size for simulation
     private const decimal DEFAULT_POSITION_SIZE = 1000m;
 
+    // Counter for unique execution IDs
+    private int _executionIdCounter = 0;
+
     public PositionSimulator(ILogger<PositionSimulator> logger, List<ExitStrategyConfig>? customStrategies = null)
     {
         _logger = logger;
         _exitStrategies = customStrategies ?? ExitStrategyConfig.Presets.Recommended;
+
+        // Create snapshot generator
+        var snapshotLoggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+        var snapshotLogger = snapshotLoggerFactory.CreateLogger<SnapshotGenerator>();
+        _snapshotGenerator = new SnapshotGenerator(snapshotLogger);
     }
 
     /// <summary>
@@ -177,6 +186,9 @@ public class PositionSimulator
         decimal maxDrawdown = 0m;
         int checkpointsEvaluated = 0;
 
+        // Collect checkpoint data for snapshot generation
+        var checkpoints = new List<SnapshotGenerator.CheckpointData>();
+
         // Sample every 5 minutes from entry to 72h (or until data runs out)
         var currentTime = entryTime.AddHours((double)SAMPLE_INTERVAL_HOURS);
 
@@ -219,6 +231,24 @@ public class PositionSimulator
                 bestExitIndex = snapshotIndex;
             }
 
+            // Collect checkpoint data for snapshot generation
+            var (currentLongRate, currentShortRate) = GetFundingRatesAt(snapshot, opportunity);
+            var currentSpread = Math.Abs(((currentShortPrice - currentLongPrice) / currentLongPrice) * 100);
+            var currentVolume = snapshot.BtcVolume24h; // Use BTC volume as proxy for now
+
+            checkpoints.Add(new SnapshotGenerator.CheckpointData
+            {
+                Index = checkpointsEvaluated - 1,
+                Time = snapshot.Timestamp,
+                UnrealizedPnLPercent = unrealizedPnl,
+                LongPrice = currentLongPrice,
+                ShortPrice = currentShortPrice,
+                LongFundingRate = currentLongRate,
+                ShortFundingRate = currentShortRate,
+                SpreadPercent = currentSpread,
+                Volume24h = currentVolume
+            });
+
             // Move to next checkpoint
             currentTime = currentTime.AddHours((double)SAMPLE_INTERVAL_HOURS);
         }
@@ -229,6 +259,17 @@ public class PositionSimulator
 
         var exitSnapshot = snapshots[bestExitIndex];
         var hoursHeld = (decimal)(exitSnapshot.Timestamp - entryTime).TotalHours;
+
+        // Generate position snapshots from checkpoint data
+        var positionSnapshots = _snapshotGenerator.GenerateSnapshots(
+            executionId: _executionIdCounter++,
+            opportunity: opportunity,
+            entrySnapshot: entrySnapshot,
+            checkpoints: checkpoints,
+            optimalExitIndex: checkpoints.FindIndex(c => c.Time == exitSnapshot.Timestamp),
+            exitReason: ExitReason.OPTIMAL_HINDSIGHT.ToString(),
+            optimalExitPnL: bestProfit
+        );
 
         // Calculate exit prices with slippage
         var exitPrices = CalculateExitPrices(opportunity, exitSnapshot);
@@ -342,7 +383,10 @@ public class PositionSimulator
             EntryLongPrice = entryPrices.LongPrice,
             EntryShortPrice = entryPrices.ShortPrice,
             ExitLongPrice = exitPrices.LongPrice,
-            ExitShortPrice = exitPrices.ShortPrice
+            ExitShortPrice = exitPrices.ShortPrice,
+
+            // Position snapshots (for exit prediction ML training)
+            Snapshots = positionSnapshots
         };
     }
 
