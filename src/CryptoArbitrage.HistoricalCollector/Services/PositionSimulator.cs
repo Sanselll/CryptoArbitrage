@@ -3,6 +3,7 @@ using CryptoArbitrage.HistoricalCollector.Models;
 using CryptoArbitrage.HistoricalCollector.Config;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace CryptoArbitrage.HistoricalCollector.Services;
 
@@ -24,6 +25,63 @@ public class PositionSimulator
     // Counter for unique execution IDs
     private int _executionIdCounter = 0;
 
+    // PERFORMANCE OPTIMIZATION: Thread-safe cache for indexed snapshot lookups (for parallel processing)
+    private readonly ConcurrentDictionary<int, SnapshotCache> _snapshotCaches = new();
+
+    /// <summary>
+    /// Performance optimization: Pre-indexed cache for fast snapshot data lookups
+    /// Replaces O(n) linear searches with O(1) dictionary lookups
+    /// </summary>
+    private class SnapshotCache
+    {
+        private readonly Dictionary<string, Dictionary<string, decimal>> _fundingRateCache;
+        private readonly Dictionary<(string exchange, string symbol), decimal> _priceCache;
+
+        public SnapshotCache(HistoricalMarketSnapshot snapshot)
+        {
+            // Pre-index funding rates by exchange+symbol for O(1) lookup
+            _fundingRateCache = new Dictionary<string, Dictionary<string, decimal>>();
+            foreach (var kvp in snapshot.FundingRates)
+            {
+                var dict = new Dictionary<string, decimal>();
+                foreach (var rate in kvp.Value)
+                {
+                    dict[rate.Symbol] = rate.Rate;
+                }
+                _fundingRateCache[kvp.Key] = dict;
+            }
+
+            // Pre-index prices by (exchange, symbol) for O(1) lookup
+            _priceCache = new Dictionary<(string, string), decimal>();
+            foreach (var exchangeKvp in snapshot.PerpPrices)
+            {
+                foreach (var symbolKvp in exchangeKvp.Value)
+                {
+                    _priceCache[(exchangeKvp.Key, symbolKvp.Key)] = symbolKvp.Value.Price;
+                }
+            }
+        }
+
+        public decimal GetFundingRate(string exchange, string symbol)
+        {
+            if (_fundingRateCache.TryGetValue(exchange, out var dict) &&
+                dict.TryGetValue(symbol, out var rate))
+            {
+                return rate;
+            }
+            return 0;
+        }
+
+        public decimal GetPrice(string exchange, string symbol)
+        {
+            if (_priceCache.TryGetValue((exchange, symbol), out var price))
+            {
+                return price;
+            }
+            return 0;
+        }
+    }
+
     public PositionSimulator(ILogger<PositionSimulator> logger, List<ExitStrategyConfig>? customStrategies = null)
     {
         _logger = logger;
@@ -33,6 +91,33 @@ public class PositionSimulator
         var snapshotLoggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
         var snapshotLogger = snapshotLoggerFactory.CreateLogger<SnapshotGenerator>();
         _snapshotGenerator = new SnapshotGenerator(snapshotLogger);
+    }
+
+    /// <summary>
+    /// PERFORMANCE OPTIMIZATION: Calculate adaptive sampling interval based on volatility
+    /// High volatility needs more frequent samples, low volatility can use fewer samples
+    /// </summary>
+    private decimal GetAdaptiveSampleInterval(ArbitrageOpportunityDto opportunity)
+    {
+        var spreadVolatility = opportunity.SpreadVolatilityCv ?? 0.03m;
+
+        // Adaptive intervals based on volatility:
+        // - High volatility (>5%): Sample every 15 minutes to catch rapid changes
+        // - Medium volatility (2-5%): Sample every 30 minutes
+        // - Low volatility (<2%): Sample every 60 minutes to save computation
+
+        if (spreadVolatility > 0.05m)
+        {
+            return 0.25m; // 15 minutes for high volatility
+        }
+        else if (spreadVolatility > 0.02m)
+        {
+            return 0.5m; // 30 minutes for medium volatility
+        }
+        else
+        {
+            return 1.0m; // 60 minutes for low volatility
+        }
     }
 
     /// <summary>
@@ -46,12 +131,13 @@ public class PositionSimulator
             "Starting optimal hindsight position simulation for {SnapshotCount} snapshots",
             snapshots.Count);
 
-        var simulations = new List<SimulatedExecution>();
+        // PERFORMANCE OPTIMIZATION: Use thread-safe collection for parallel processing
+        var simulations = new ConcurrentBag<SimulatedExecution>();
 
         if (!snapshots.Any())
         {
             _logger.LogWarning("No snapshots provided for simulation");
-            return simulations;
+            return simulations.ToList();
         }
 
         var firstSnapshotTime = snapshots.First().Timestamp;
@@ -63,37 +149,49 @@ public class PositionSimulator
             totalTimeCoverage, firstSnapshotTime.ToString("yyyy-MM-dd HH:mm"),
             lastSnapshotTime.ToString("yyyy-MM-dd HH:mm"));
 
-        _logger.LogInformation("Using optimal hindsight simulation (5-minute checkpoints, 72h max hold)");
+        _logger.LogInformation("Using optimal hindsight simulation (adaptive checkpoints, 72h max hold)");
+        _logger.LogInformation("PARALLEL PROCESSING: Using {ProcessorCount} cores", Environment.ProcessorCount);
 
-        // Track statistics
-        var totalOpportunities = 0;
-        var skipped = 0;
-
-        // Process ALL snapshots
+        // PERFORMANCE OPTIMIZATION: Pre-filter snapshots to only include those with enough future data
+        // This avoids processing snapshots that will definitely be skipped (need at least 5 minutes of future data)
+        var validSnapshotIndices = new List<int>();
         for (int i = 0; i < snapshots.Count; i++)
         {
-            var entrySnapshot = snapshots[i];
+            var minRequiredExitTime = snapshots[i].Timestamp.AddMinutes(5);
+            if (minRequiredExitTime <= lastSnapshotTime)
+            {
+                validSnapshotIndices.Add(i);
+            }
+        }
+
+        _logger.LogInformation(
+            "Pre-filtered snapshots: {ValidCount}/{TotalCount} snapshots have sufficient future data",
+            validSnapshotIndices.Count, snapshots.Count);
+
+        // Track statistics (thread-safe counters)
+        var totalOpportunities = 0;
+        var processed = 0;
+
+        // PERFORMANCE OPTIMIZATION: Process only valid snapshots in parallel
+        Parallel.For(0, validSnapshotIndices.Count, new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount
+        }, i =>
+        {
+            var snapshotIndex = validSnapshotIndices[i];
+            var entrySnapshot = snapshots[snapshotIndex];
 
             // For each opportunity detected at this time
             foreach (var opportunity in entrySnapshot.Opportunities)
             {
-                totalOpportunities++;
-
-                // Check if we have enough future data (need at least 5 minutes)
-                var minRequiredExitTime = entrySnapshot.Timestamp.AddMinutes(5);
-                if (minRequiredExitTime > lastSnapshotTime)
-                {
-                    // Not enough future data
-                    skipped++;
-                    continue;
-                }
+                Interlocked.Increment(ref totalOpportunities);
 
                 try
                 {
                     var simulation = SimulateWithOptimalHindsight(
                         opportunity,
                         snapshots,
-                        i);
+                        snapshotIndex);
 
                     if (simulation != null)
                     {
@@ -108,21 +206,24 @@ public class PositionSimulator
                 }
             }
 
-            if ((i + 1) % 100 == 0 || i == snapshots.Count - 1)
+            // Thread-safe progress logging
+            var currentProcessed = Interlocked.Increment(ref processed);
+            if (currentProcessed % 100 == 0 || currentProcessed == validSnapshotIndices.Count)
             {
-                var percentComplete = ((i + 1) * 100.0) / snapshots.Count;
+                var percentComplete = (currentProcessed * 100.0) / validSnapshotIndices.Count;
                 _logger.LogInformation(
-                    "Progress: {Percent:F1}% - Processed {Current}/{Total} snapshots ({Simulations} simulations generated)",
-                    percentComplete, i + 1, snapshots.Count, simulations.Count);
+                    "Progress: {Percent:F1}% - Processed {Current}/{Total} valid snapshots ({Simulations} simulations generated)",
+                    percentComplete, currentProcessed, validSnapshotIndices.Count, simulations.Count);
             }
-        }
+        });
 
         var profitableCount = simulations.Count(s => s.WasProfitable);
         var profitablePercent = simulations.Any() ? (profitableCount * 100.0 / simulations.Count) : 0;
+        var skippedSnapshots = snapshots.Count - validSnapshotIndices.Count;
 
         _logger.LogInformation(
-            "Simulation complete: {Total} simulations generated from {Opportunities} opportunities ({Skipped} skipped)",
-            simulations.Count, totalOpportunities, skipped);
+            "Simulation complete: {Total} simulations generated from {Opportunities} opportunities ({SkippedSnapshots} snapshots pre-filtered)",
+            simulations.Count, totalOpportunities, skippedSnapshots);
 
         _logger.LogInformation(
             "Profitable: {Profitable} ({Percent:F1}%)",
@@ -146,7 +247,7 @@ public class PositionSimulator
                 simulations.Max(s => s.ActualHoldHours));
         }
 
-        return simulations;
+        return simulations.ToList();
     }
 
     private class StrategyStats
@@ -172,31 +273,36 @@ public class PositionSimulator
         var entryTime = entrySnapshot.Timestamp;
 
         // Calculate entry prices with slippage
-        var entryPrices = CalculateEntryPrices(opportunity, entrySnapshot);
+        var entryPrices = CalculateEntryPrices(opportunity, entrySnapshot, entryIndex);
 
         // Constants for optimal hindsight simulation
         const decimal MAX_HOLD_HOURS = 72m;
-        const decimal SAMPLE_INTERVAL_HOURS = 0.0833m; // 5 minutes
+
+        // PERFORMANCE OPTIMIZATION: Use adaptive sampling interval based on volatility
+        // High volatility = more frequent samples, Low volatility = fewer samples
+        var sampleIntervalHours = GetAdaptiveSampleInterval(opportunity);
+
         var maxExitTime = entryTime.AddHours((double)MAX_HOLD_HOURS);
 
-        // Track best exit point
-        decimal bestProfit = decimal.MinValue;
+        // PERFORMANCE OPTIMIZATION: Use double for intermediate calculations (1.5-2x faster than decimal)
+        // Convert to decimal only for final storage
+        double bestProfit = double.MinValue;
         int bestExitIndex = -1;
-        decimal peakProfit = decimal.MinValue;
-        decimal maxDrawdown = 0m;
+        double peakProfit = double.MinValue;
+        double maxDrawdown = 0.0;
         int checkpointsEvaluated = 0;
 
         // Collect checkpoint data for snapshot generation
         var checkpoints = new List<SnapshotGenerator.CheckpointData>();
 
-        // Track cumulative funding for accurate P&L
-        decimal cumulativeFunding = 0m;
-        var fundingIntervalHours = Math.Min(
+        // Track cumulative funding for accurate P&L (use double for speed)
+        double cumulativeFunding = 0.0;
+        var fundingIntervalHours = (double)Math.Min(
             opportunity.LongFundingIntervalHours ?? 8m,
             opportunity.ShortFundingIntervalHours ?? 8m);
 
-        // Sample every 5 minutes from entry to 72h (or until data runs out)
-        var currentTime = entryTime.AddHours((double)SAMPLE_INTERVAL_HOURS);
+        // Sample adaptively from entry to 72h (or until data runs out)
+        var currentTime = entryTime.AddHours((double)sampleIntervalHours);
 
         while (currentTime <= maxExitTime)
         {
@@ -212,23 +318,24 @@ public class PositionSimulator
             checkpointsEvaluated++;
 
             // Calculate current unrealized P&L
-            var currentLongPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol);
-            var currentShortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol);
+            var currentLongPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol, snapshotIndex);
+            var currentShortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol, snapshotIndex);
 
             if (currentLongPrice == 0 || currentShortPrice == 0)
             {
-                currentTime = currentTime.AddHours((double)SAMPLE_INTERVAL_HOURS);
+                currentTime = currentTime.AddHours((double)sampleIntervalHours);
                 continue;
             }
 
+            // PERFORMANCE: Use double arithmetic for calculations (1.5-2x faster)
             // Calculate price-based PnL (percentage)
-            var longPnl = (currentLongPrice - entryPrices.LongPrice) / entryPrices.LongPrice;
-            var shortPnl = (entryPrices.ShortPrice - currentShortPrice) / entryPrices.ShortPrice;
-            var pricePnl = ((longPnl + shortPnl) / 2) * 100;
+            var longPnl = (double)((currentLongPrice - entryPrices.LongPrice) / entryPrices.LongPrice);
+            var shortPnl = (double)((entryPrices.ShortPrice - currentShortPrice) / entryPrices.ShortPrice);
+            var pricePnl = ((longPnl + shortPnl) / 2.0) * 100.0;
 
             // Calculate cumulative funding up to this checkpoint
-            var (currentLongRate, currentShortRate) = GetFundingRatesAt(snapshot, opportunity);
-            var hoursElapsed = (decimal)(snapshot.Timestamp - entryTime).TotalHours;
+            var (currentLongRate, currentShortRate) = GetFundingRatesAt(snapshot, opportunity, snapshotIndex);
+            var hoursElapsed = (snapshot.Timestamp - entryTime).TotalHours;
 
             // Estimate funding payments received (simple approximation based on hours elapsed)
             // More accurate than nothing, accounts for time-weighted funding accumulation
@@ -236,15 +343,15 @@ public class PositionSimulator
             if (fundingPaymentsCount > 0)
             {
                 // Average funding rate differential over the period
-                var avgFundingDiff = (opportunity.ShortFundingRate - opportunity.LongFundingRate +
-                                     (currentShortRate - currentLongRate)) / 2;
+                var avgFundingDiff = (double)((opportunity.ShortFundingRate - opportunity.LongFundingRate +
+                                     (currentShortRate - currentLongRate)) / 2m);
                 cumulativeFunding = avgFundingDiff * fundingPaymentsCount;
             }
 
             // Calculate NET unrealized P&L including all costs
             // Price P&L + Cumulative Funding - Exit Fees (entry fees are sunk cost)
-            var exitFeePercent = opportunity.PositionCostPercent / 2; // Half of total cost is exit
-            var netUnrealizedPnl = pricePnl + (cumulativeFunding * 100) - exitFeePercent;
+            var exitFeePercent = (double)(opportunity.PositionCostPercent / 2m); // Half of total cost is exit
+            var netUnrealizedPnl = pricePnl + (cumulativeFunding * 100.0) - exitFeePercent;
 
             // Update peak and drawdown tracking (use NET P&L)
             peakProfit = Math.Max(peakProfit, netUnrealizedPnl);
@@ -258,25 +365,26 @@ public class PositionSimulator
             }
 
             // Collect checkpoint data for snapshot generation
-            var currentSpread = Math.Abs(((currentShortPrice - currentLongPrice) / currentLongPrice) * 100);
+            // PERFORMANCE: Use double for spread calculation
+            var currentSpread = Math.Abs(((double)((currentShortPrice - currentLongPrice) / currentLongPrice)) * 100.0);
             var currentVolume = snapshot.BtcVolume24h; // Use BTC volume as proxy for now
 
             checkpoints.Add(new SnapshotGenerator.CheckpointData
             {
                 Index = checkpointsEvaluated - 1,
                 Time = snapshot.Timestamp,
-                UnrealizedPnLPercent = netUnrealizedPnl, // Store NET P&L
+                UnrealizedPnLPercent = (decimal)netUnrealizedPnl, // Convert double back to decimal for storage
                 LongPrice = currentLongPrice,
                 ShortPrice = currentShortPrice,
                 LongFundingRate = currentLongRate,
                 ShortFundingRate = currentShortRate,
-                SpreadPercent = currentSpread,
+                SpreadPercent = (decimal)currentSpread, // Convert double back to decimal for storage
                 Volume24h = currentVolume,
-                CumulativeFundingPercent = cumulativeFunding * 100
+                CumulativeFundingPercent = (decimal)(cumulativeFunding * 100.0) // Convert double back to decimal for storage
             });
 
-            // Move to next checkpoint
-            currentTime = currentTime.AddHours((double)SAMPLE_INTERVAL_HOURS);
+            // Move to next checkpoint (using adaptive interval)
+            currentTime = currentTime.AddHours((double)sampleIntervalHours);
         }
 
         // If no valid exit point was found, return null
@@ -290,28 +398,29 @@ public class PositionSimulator
         var optimalExitIndex = checkpoints.FindIndex(c => c.Time == exitSnapshot.Timestamp);
 
         // Determine intelligent exit reason based on market conditions and P&L
+        // Convert double values to decimal for method call
         var exitReason = DetermineExitReason(
-            bestProfit,
-            peakProfit,
+            (decimal)bestProfit,
+            (decimal)peakProfit,
             hoursHeld,
             opportunity,
             checkpoints,
             optimalExitIndex
         );
 
-        // Generate position snapshots from checkpoint data
+        // Generate position snapshots from checkpoint data (thread-safe ID generation)
         var positionSnapshots = _snapshotGenerator.GenerateSnapshots(
-            executionId: _executionIdCounter++,
+            executionId: Interlocked.Increment(ref _executionIdCounter),
             opportunity: opportunity,
             entrySnapshot: entrySnapshot,
             checkpoints: checkpoints,
             optimalExitIndex: optimalExitIndex,
             exitReason: exitReason,
-            optimalExitPnL: bestProfit
+            optimalExitPnL: (decimal)bestProfit // Convert double to decimal
         );
 
         // Calculate exit prices with slippage
-        var exitPrices = CalculateExitPrices(opportunity, exitSnapshot);
+        var exitPrices = CalculateExitPrices(opportunity, exitSnapshot, bestExitIndex);
 
         // Simulate funding payments during hold period
         var fundingPayments = SimulateFundingPayments(
@@ -409,9 +518,9 @@ public class PositionSimulator
             HitProfitTarget = hitProfitTarget,
             HitStopLoss = false, // Not applicable for optimal hindsight
 
-            // Performance metrics
-            PeakUnrealizedProfitPercent = peakProfit,
-            MaxDrawdownPercent = maxDrawdown,
+            // Performance metrics (convert double back to decimal for storage)
+            PeakUnrealizedProfitPercent = (decimal)peakProfit,
+            MaxDrawdownPercent = (decimal)maxDrawdown,
             FundingPaymentsCount = fundingPayments.Count,
             TotalFundingEarnedUsd = fundingPayments.Sum(f => f.Amount),
 
@@ -441,7 +550,7 @@ public class PositionSimulator
         var entrySnapshot = snapshots[entryIndex];
 
         // Calculate entry prices with slippage
-        var entryPrices = CalculateEntryPrices(opportunity, entrySnapshot);
+        var entryPrices = CalculateEntryPrices(opportunity, entrySnapshot, entryIndex);
 
         // Store entry funding differential for reversal detection
         var entryFundingDifferential = Math.Abs(opportunity.ShortFundingRate - opportunity.LongFundingRate);
@@ -463,7 +572,7 @@ public class PositionSimulator
         var exitSnapshot = snapshots[exitResult.ExitSnapshotIndex];
 
         // Calculate exit prices with slippage
-        var exitPrices = CalculateExitPrices(opportunity, exitSnapshot);
+        var exitPrices = CalculateExitPrices(opportunity, exitSnapshot, exitResult.ExitSnapshotIndex);
 
         // Simulate funding payments during hold period
         var fundingPayments = SimulateFundingPayments(
@@ -626,8 +735,8 @@ public class PositionSimulator
             var hoursHeld = (decimal)(snapshot.Timestamp - entryTime).TotalHours;
 
             // Calculate current unrealized P&L
-            var currentLongPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol);
-            var currentShortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol);
+            var currentLongPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol, snapshotIndex);
+            var currentShortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol, snapshotIndex);
 
             if (currentLongPrice == 0 || currentShortPrice == 0)
             {
@@ -741,7 +850,7 @@ public class PositionSimulator
                 if (strategy.FundingReversalThreshold.HasValue)
                 {
                     // Get current funding rates
-                    var (currentLongRate, currentShortRate) = GetFundingRatesAt(snapshot, opportunity);
+                    var (currentLongRate, currentShortRate) = GetFundingRatesAt(snapshot, opportunity, snapshotIndex);
                     var currentDifferential = Math.Abs(currentShortRate - currentLongRate);
 
                     // Exit if differential dropped significantly
@@ -774,8 +883,8 @@ public class PositionSimulator
             return null;
 
         var finalSnapshot = snapshots[finalIndex];
-        var finalLongPrice = GetPrice(finalSnapshot, opportunity.LongExchange, opportunity.Symbol);
-        var finalShortPrice = GetPrice(finalSnapshot, opportunity.ShortExchange, opportunity.Symbol);
+        var finalLongPrice = GetPrice(finalSnapshot, opportunity.LongExchange, opportunity.Symbol, finalIndex);
+        var finalShortPrice = GetPrice(finalSnapshot, opportunity.ShortExchange, opportunity.Symbol, finalIndex);
 
         var finalLongPnl = (finalLongPrice - entryPrices.LongPrice) / entryPrices.LongPrice;
         var finalShortPnl = (entryPrices.ShortPrice - finalShortPrice) / entryPrices.ShortPrice;
@@ -811,11 +920,12 @@ public class PositionSimulator
 
     private (decimal LongPrice, decimal ShortPrice, decimal LongSlippage, decimal ShortSlippage) CalculateEntryPrices(
         ArbitrageOpportunityDto opportunity,
-        HistoricalMarketSnapshot snapshot)
+        HistoricalMarketSnapshot snapshot,
+        int snapshotIndex)
     {
         // Get current market prices
-        var longPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol);
-        var shortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol);
+        var longPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol, snapshotIndex);
+        var shortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol, snapshotIndex);
 
         // Estimate slippage based on volume and liquidity
         var longSlippage = EstimateSlippage(
@@ -839,10 +949,11 @@ public class PositionSimulator
 
     private (decimal LongPrice, decimal ShortPrice, decimal LongSlippage, decimal ShortSlippage) CalculateExitPrices(
         ArbitrageOpportunityDto opportunity,
-        HistoricalMarketSnapshot snapshot)
+        HistoricalMarketSnapshot snapshot,
+        int snapshotIndex)
     {
-        var longPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol);
-        var shortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol);
+        var longPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol, snapshotIndex);
+        var shortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol, snapshotIndex);
 
         var longSlippage = EstimateSlippage(
             DEFAULT_POSITION_SIZE,
@@ -917,7 +1028,7 @@ public class PositionSimulator
             var snapshot = snapshots[snapshotIndex];
 
             // Get funding rates at this time
-            var (longRate, shortRate) = GetFundingRatesAt(snapshot, opportunity);
+            var (longRate, shortRate) = GetFundingRatesAt(snapshot, opportunity, snapshotIndex);
 
             // Calculate funding payment
             // Long position: we PAY if rate is positive, RECEIVE if negative
@@ -958,24 +1069,13 @@ public class PositionSimulator
 
     private (decimal longRate, decimal shortRate) GetFundingRatesAt(
         HistoricalMarketSnapshot snapshot,
-        ArbitrageOpportunityDto opportunity)
+        ArbitrageOpportunityDto opportunity,
+        int snapshotIndex)
     {
-        var longRate = 0m;
-        var shortRate = 0m;
-
-        if (snapshot.FundingRates.ContainsKey(opportunity.LongExchange))
-        {
-            var rate = snapshot.FundingRates[opportunity.LongExchange]
-                .FirstOrDefault(r => r.Symbol == opportunity.Symbol);
-            longRate = rate?.Rate ?? 0;
-        }
-
-        if (snapshot.FundingRates.ContainsKey(opportunity.ShortExchange))
-        {
-            var rate = snapshot.FundingRates[opportunity.ShortExchange]
-                .FirstOrDefault(r => r.Symbol == opportunity.Symbol);
-            shortRate = rate?.Rate ?? 0;
-        }
+        // PERFORMANCE OPTIMIZATION: Thread-safe cached lookup O(1) instead of FirstOrDefault() O(n)
+        var cache = _snapshotCaches.GetOrAdd(snapshotIndex, _ => new SnapshotCache(snapshot));
+        var longRate = cache.GetFundingRate(opportunity.LongExchange, opportunity.Symbol);
+        var shortRate = cache.GetFundingRate(opportunity.ShortExchange, opportunity.Symbol);
 
         return (longRate, shortRate);
     }
@@ -1016,15 +1116,11 @@ public class PositionSimulator
         return (totalPnlPercent, totalPnlUsd);
     }
 
-    private decimal GetPrice(HistoricalMarketSnapshot snapshot, string exchange, string symbol)
+    private decimal GetPrice(HistoricalMarketSnapshot snapshot, string exchange, string symbol, int snapshotIndex)
     {
-        if (snapshot.PerpPrices.ContainsKey(exchange) &&
-            snapshot.PerpPrices[exchange].ContainsKey(symbol))
-        {
-            return snapshot.PerpPrices[exchange][symbol].Price;
-        }
-
-        return 0;
+        // PERFORMANCE OPTIMIZATION: Thread-safe cached lookup O(1) instead of double dictionary lookup
+        var cache = _snapshotCaches.GetOrAdd(snapshotIndex, _ => new SnapshotCache(snapshot));
+        return cache.GetPrice(exchange, symbol);
     }
 
     private int FindClosestSnapshotIndex(
