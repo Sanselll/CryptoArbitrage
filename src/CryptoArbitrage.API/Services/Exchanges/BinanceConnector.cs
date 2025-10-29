@@ -1588,17 +1588,35 @@ public class BinanceConnector : IExchangeConnector
                 transactions = result.Data.Select(t =>
                 {
                     var incomeType = t.IncomeType ?? Binance.Net.Enums.IncomeType.Transfer;
+                    var transactionType = MapBinanceIncomeType(incomeType);
+
                     // For commission transactions, the income value (negative) represents the fee paid
                     var fee = incomeType == Binance.Net.Enums.IncomeType.Commission
                         ? Math.Abs(t.Income)
                         : 0m;
+
+                    // Calculate signed fee: negative for costs, positive for income
+                    decimal? signedFee = transactionType switch
+                    {
+                        Models.TransactionType.Commission => fee > 0 ? -Math.Abs(fee) : 0m, // Always negative (cost)
+                        Models.TransactionType.FundingFee => t.Income, // Can be +/- (income/cost)
+                        Models.TransactionType.Rebate => Math.Abs(t.Income), // Always positive (income)
+                        Models.TransactionType.ReferralKickback => Math.Abs(t.Income), // Always positive
+                        Models.TransactionType.CommissionRebate => Math.Abs(t.Income), // Always positive
+                        Models.TransactionType.RealizedPnL => 0m, // P&L is in amount, not fee
+                        Models.TransactionType.InsuranceClear => 0m, // Insurance is in amount
+                        Models.TransactionType.Transfer => null, // No fee for transfers
+                        Models.TransactionType.Deposit => null, // No fee concept for deposits
+                        Models.TransactionType.Withdrawal => null, // Withdrawal handled separately
+                        _ => null // For other types where fee doesn't apply
+                    };
 
                     return new TransactionDto
                     {
                         Exchange = ExchangeName,
                         TransactionId = t.TransactionId?.ToString() ?? t.Timestamp.Ticks.ToString(),
                         TxHash = t.TransactionId?.ToString(),
-                        Type = MapBinanceIncomeType(incomeType),
+                        Type = transactionType,
                         Asset = t.Asset ?? string.Empty,
                         Amount = t.Income,
                         Status = Models.TransactionStatus.Confirmed,
@@ -1610,6 +1628,7 @@ public class BinanceConnector : IExchangeConnector
                         TradeId = t.TradeId?.ToString(),
                         Fee = fee,
                         FeeAsset = fee > 0 ? t.Asset : null,
+                        SignedFee = signedFee,
                         CreatedAt = t.Timestamp,
                         ConfirmedAt = t.Timestamp
                     };

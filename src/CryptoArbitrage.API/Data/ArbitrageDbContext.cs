@@ -13,6 +13,7 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
 
     public DbSet<Execution> Executions { get; set; }
     public DbSet<Position> Positions { get; set; }
+    public DbSet<PositionTransaction> PositionTransactions { get; set; }
     public DbSet<PerformanceMetric> PerformanceMetrics { get; set; }
     public DbSet<UserExchangeApiKey> UserExchangeApiKeys { get; set; }
 
@@ -70,9 +71,8 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(e => e.InitialMargin).HasPrecision(18, 8);
             entity.Property(e => e.RealizedPnL).HasPrecision(18, 8);
             entity.Property(e => e.UnrealizedPnL).HasPrecision(18, 8);
-            entity.Property(e => e.TotalFundingFeePaid).HasPrecision(18, 8);
-            entity.Property(e => e.TotalFundingFeeReceived).HasPrecision(18, 8);
             entity.Property(e => e.OrderId).HasMaxLength(100);
+            entity.Property(e => e.CloseOrderId).HasMaxLength(100);
 
             // Optional foreign key to Execution (nullable)
             entity.HasOne(e => e.Execution)
@@ -85,6 +85,31 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
                 .WithMany(u => u.Positions)
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Relationship with PositionTransactions
+            entity.HasMany(e => e.Transactions)
+                .WithOne(t => t.Position)
+                .HasForeignKey(t => t.PositionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // PositionTransaction configuration
+        modelBuilder.Entity<PositionTransaction>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.PositionId);
+            entity.HasIndex(e => new { e.TransactionId, e.Exchange });
+            entity.HasIndex(e => e.OrderId);
+
+            entity.Property(e => e.TransactionId).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Exchange).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Symbol).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.Amount).HasPrecision(18, 8);
+            entity.Property(e => e.Fee).HasPrecision(18, 8);
+            entity.Property(e => e.SignedFee).HasPrecision(18, 8);
+            entity.Property(e => e.AllocationPercentage).HasPrecision(5, 4);
+            entity.Property(e => e.OrderId).HasMaxLength(100);
+            entity.Property(e => e.Asset).HasMaxLength(20);
         });
 
         // Configure relationships for multi-user support

@@ -24,6 +24,8 @@ using CryptoArbitrage.API.Services.Exchanges;
 using CryptoArbitrage.API.Services.Notifications;
 using CryptoArbitrage.API.Services.Streaming;
 using CryptoArbitrage.API.Services.ML;
+using CryptoArbitrage.API.Services.Reconciliation;
+using CryptoArbitrage.API.Services.Reconciliation.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -254,6 +256,14 @@ builder.Services.AddSingleton(sp =>
     return config;
 });
 
+// Position Reconciliation Configuration
+builder.Services.AddSingleton(sp =>
+{
+    var config = new PositionReconciliationConfiguration();
+    builder.Configuration.GetSection("PositionReconciliation").Bind(config);
+    return config;
+});
+
 // Repositories
 builder.Services.AddSingleton<IDataRepository<FundingRateDto>, FundingRateRepository>();
 builder.Services.AddSingleton<IDataRepository<MarketDataSnapshot>, MarketDataRepository>();
@@ -292,6 +302,9 @@ builder.Services.AddHostedService<OrderHistoryCollectionBackgroundService>();
 builder.Services.AddHostedService<TradeHistoryCollectionBackgroundService>();
 builder.Services.AddHostedService<TransactionHistoryCollectionBackgroundService>();
 builder.Services.AddHostedService<HistoricalPriceCollectionBackgroundService>();
+
+// Background Services - Reconciliation (Layer 2: Post-Collection Processing)
+builder.Services.AddHostedService<PositionReconciliationBackgroundService>();
 
 // Background Services - Aggregation (Layer 3: Aggregators)
 builder.Services.AddHostedService<OpportunityAggregator>();
@@ -341,6 +354,7 @@ builder.Services.AddScoped<KrakenConnector>();
 builder.Services.AddSingleton<ConnectorManager>();
 builder.Services.AddScoped<ArbitrageExecutionService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<PositionReconciliationService>();
 
 // DISABLED: ArbitrageEngineService - Now using event-driven data collection services
 // The new architecture uses FundingRateCollectionBackgroundService, MarketPriceCollectionBackgroundService,

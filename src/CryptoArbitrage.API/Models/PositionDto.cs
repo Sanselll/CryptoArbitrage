@@ -21,6 +21,9 @@ public class PositionDto
     public decimal TotalFundingFeePaid { get; set; }
     public decimal TotalFundingFeeReceived { get; set; }
     public decimal NetFundingFee => TotalFundingFeeReceived - TotalFundingFeePaid;
+    public decimal TradingFeePaid { get; set; }
+    public ReconciliationStatus ReconciliationStatus { get; set; }
+    public DateTime? ReconciliationCompletedAt { get; set; }
     public DateTime OpenedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
     public int? ActiveOpportunityId { get; set; }
