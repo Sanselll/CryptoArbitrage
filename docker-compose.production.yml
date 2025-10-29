@@ -32,16 +32,16 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:5250/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 60s
+      retries: 10
+      start_period: 300s
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 768M
+          cpus: '0.3'
+          memory: 700M
         reservations:
-          cpus: '0.2'
-          memory: 256M
+          cpus: '0.1'
+          memory: 400M
 
   # Backend API - Real Mode (Production)
   backend-real:
@@ -77,11 +77,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.8'
-          memory: 1G
+          cpus: '0.25'
+          memory: 400M
         reservations:
-          cpus: '0.2'
-          memory: 256M
+          cpus: '0.1'
+          memory: 200M
 
   # Backend API - Demo Mode (Production)
   backend-demo:
@@ -117,11 +117,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.8'
-          memory: 1G
+          cpus: '0.25'
+          memory: 400M
         reservations:
-          cpus: '0.2'
-          memory: 256M
+          cpus: '0.1'
+          memory: 200M
 
   # Frontend (Production)
   frontend:
@@ -145,10 +145,10 @@ services:
       resources:
         limits:
           cpus: '0.2'
-          memory: 512M
+          memory: 200M
         reservations:
-          cpus: '0.1'
-          memory: 128M
+          cpus: '0.05'
+          memory: 100M
 
 volumes:
   postgres_data:

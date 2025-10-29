@@ -33,14 +33,16 @@ public class Position
     public decimal RealizedPnL { get; set; }
     public decimal UnrealizedPnL { get; set; }
 
-    // Funding fee tracking
-    public decimal TotalFundingFeePaid { get; set; }
-    public decimal TotalFundingFeeReceived { get; set; }
-    public decimal NetFundingFee => TotalFundingFeeReceived - TotalFundingFeePaid;
+    // Fee tracking: Calculated on-the-fly from PositionTransaction table (no storage needed)
 
     // Order/Position references
-    public string? OrderId { get; set; }  // Spot order ID or Perpetual order ID
+    public string? OrderId { get; set; }  // Opening order ID (Spot buy or Perpetual short/long)
+    public string? CloseOrderId { get; set; }  // Closing order ID
     public string? ExchangePositionId { get; set; }  // Exchange's position ID for perpetual positions (used to close positions)
+
+    // Transaction reconciliation
+    public ReconciliationStatus ReconciliationStatus { get; set; } = ReconciliationStatus.Preliminary;
+    public DateTime? ReconciliationCompletedAt { get; set; }
 
     // Timestamps
     public DateTime OpenedAt { get; set; } = DateTime.UtcNow;
@@ -48,4 +50,7 @@ public class Position
 
     // Optional notes
     public string? Notes { get; set; }
+
+    // Navigation properties
+    public ICollection<PositionTransaction> Transactions { get; set; } = new List<PositionTransaction>();
 }

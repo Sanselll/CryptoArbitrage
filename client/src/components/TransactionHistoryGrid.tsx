@@ -170,6 +170,7 @@ export const TransactionHistoryGrid = () => {
             <TableHead className="sticky left-[120px] z-40 bg-binance-bg-secondary border-r border-binance-border">Type</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Asset</TableHead>
+            <TableHead>Symbol</TableHead>
             <TableHead
               className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
               onClick={() => handleSort('amount')}
@@ -181,8 +182,8 @@ export const TransactionHistoryGrid = () => {
                 )}
               </div>
             </TableHead>
-            <TableHead className="text-right">Fee</TableHead>
-            <TableHead>Fee Asset</TableHead>
+            <TableHead className="text-right">Commission</TableHead>
+            <TableHead className="text-right">Funding Fee</TableHead>
             <TableHead
               className="cursor-pointer hover:bg-binance-bg-hover transition-colors"
               onClick={() => handleSort('createdAt')}
@@ -211,6 +212,11 @@ export const TransactionHistoryGrid = () => {
                   {transaction.asset}
                 </span>
               </TableCell>
+              <TableCell className="font-medium text-gray-300">
+                <span className="text-[11px]">
+                  {transaction.symbol || '-'}
+                </span>
+              </TableCell>
               <TableCell className="text-right font-mono">
                 <span className={`text-[11px] ${
                   transaction.type === TransactionType.Deposit ||
@@ -225,14 +231,32 @@ export const TransactionHistoryGrid = () => {
                   {transaction.amount != null ? transaction.amount.toFixed(8) : '-'}
                 </span>
               </TableCell>
-              <TableCell className="text-right font-mono text-sm">
-                <span className="text-[11px]">
-                  {transaction.fee != null ? transaction.fee.toFixed(8) : '-'}
+              <TableCell className="text-right font-mono">
+                <span className={`text-[11px] ${
+                  transaction.type === TransactionType.Commission ||
+                  transaction.type === TransactionType.Trade
+                    ? 'text-red-400'
+                    : 'text-gray-500'
+                }`}>
+                  {transaction.type === TransactionType.Commission ||
+                   transaction.type === TransactionType.Trade
+                    ? (transaction.signedFee != null ? transaction.signedFee.toFixed(8) :
+                       transaction.fee != null ? `-${transaction.fee.toFixed(8)}` : '-')
+                    : '-'}
                 </span>
               </TableCell>
-              <TableCell className="text-sm text-gray-300">
-                <span className="text-[11px]">
-                  {transaction.feeAsset || '-'}
+              <TableCell className="text-right font-mono">
+                <span className={`text-[11px] ${
+                  transaction.type === TransactionType.FundingFee
+                    ? transaction.signedFee && transaction.signedFee > 0
+                      ? 'text-green-400'
+                      : 'text-red-400'
+                    : 'text-gray-500'
+                }`}>
+                  {transaction.type === TransactionType.FundingFee
+                    ? (transaction.signedFee != null ? transaction.signedFee.toFixed(8) :
+                       transaction.amount != null ? transaction.amount.toFixed(8) : '-')
+                    : '-'}
                 </span>
               </TableCell>
               <TableCell className="text-sm text-gray-400">

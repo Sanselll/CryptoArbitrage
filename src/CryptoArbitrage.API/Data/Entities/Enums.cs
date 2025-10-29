@@ -40,3 +40,11 @@ public enum FundingDirection
     LongPaysShort = 0,   // Positive funding rate - longs pay shorts
     ShortPaysLong = 1    // Negative funding rate - shorts pay longs
 }
+
+public enum ReconciliationStatus
+{
+    Preliminary = 0,         // Just closed, waiting for transactions
+    PartiallyReconciled = 1, // Some transactions found, but not all
+    FullyReconciled = 2,     // All expected transactions found
+    StaleUnreconciled = 3    // >24 hours old, still incomplete (flag for manual review)
+}

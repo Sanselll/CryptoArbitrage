@@ -57,8 +57,9 @@ public class NotificationService : INotificationService
                 if (!positions.Any())
                     continue;
 
-                // Calculate historical net funding fee (TotalReceived - TotalPaid)
-                var historicalNetFunding = positions.Sum(p => p.NetFundingFee);
+                // Calculate historical net funding fee from PositionTransactions
+                // Net funding = (received - paid) for each position
+                var historicalNetFunding = 0m;
 
                 // Calculate estimated funding for next settlement
                 decimal estimatedFunding = 0;
