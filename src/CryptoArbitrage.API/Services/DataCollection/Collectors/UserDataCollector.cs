@@ -102,9 +102,8 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                         return ((string?)null, (UserDataSnapshot?)null);
                     }
 
-                    // Fetch balance, positions, and fees
+                    // Fetch balance and fees
                     var balance = await connector.GetAccountBalanceAsync();
-                    var positions = await connector.GetOpenPositionsAsync();
 
                     // Fetch fee information
                     FeeInfoDto? feeInfo = null;
@@ -121,8 +120,8 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                             apiKey.UserId, apiKey.ExchangeName);
                     }
 
-                    // Enrich positions with database data (Id and ExecutionId)
-                    await EnrichPositionsWithDatabaseDataAsync(positions, apiKey.UserId, apiKey.ExchangeName, cancellationToken);
+                    // Fetch positions from DATABASE (source of truth), not exchange API
+                    var positions = await GetPositionsFromDatabaseAsync(apiKey.UserId, apiKey.ExchangeName, connector, cancellationToken);
 
                     // Store count before using in snapshot to avoid dynamic in log call
                     int positionCount = positions.Count;
@@ -199,83 +198,121 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
     }
 
     /// <summary>
-    /// Enriches exchange positions with database data (Id and ExecutionId)
-    /// Matches positions by Symbol and Side to find the corresponding database record
+    /// Fetches positions from database (source of truth) and optionally updates unrealizedPnL from exchange
     /// </summary>
-    private async Task EnrichPositionsWithDatabaseDataAsync(
-        List<PositionDto> exchangePositions,
+    private async Task<List<PositionDto>> GetPositionsFromDatabaseAsync(
         string userId,
         string exchangeName,
+        IExchangeConnector connector,
         CancellationToken cancellationToken)
     {
+        var positionDtos = new List<PositionDto>();
+
         try
         {
-            if (!exchangePositions.Any())
-            {
-                return;
-            }
-
-            // Query database for open positions for this user and exchange using a scoped DbContext
-            List<Position> dbPositions;
             using (var scope = _serviceProvider.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
-                dbPositions = await dbContext.Positions
+
+                // Fetch positions from DATABASE (source of truth)
+                var dbPositions = await dbContext.Positions
                     .Where(p => p.UserId == userId &&
                                 p.Exchange == exchangeName &&
                                 p.Status == PositionStatus.Open)
                     .ToListAsync(cancellationToken);
-            }
 
-            if (!dbPositions.Any())
-            {
-                _logger.LogDebug("No database positions found for user {UserId} on {Exchange}", userId, exchangeName);
-                return;
-            }
-
-            // Match and enrich each exchange position
-            int enrichedCount = 0;
-            foreach (var exchangePosition in exchangePositions)
-            {
-                // Find matching database position by Symbol and Side
-                var dbPosition = dbPositions.FirstOrDefault(p =>
-                    p.Symbol == exchangePosition.Symbol &&
-                    p.Side == exchangePosition.Side);
-
-                if (dbPosition != null)
+                if (!dbPositions.Any())
                 {
-                    // Copy Id and ExecutionId from database
-                    exchangePosition.Id = dbPosition.Id;
-                    exchangePosition.ExecutionId = dbPosition.ExecutionId;
-                    enrichedCount++;
-
-                    _logger.LogDebug(
-                        "Enriched position {Symbol} {Side} with Id={Id}, ExecutionId={ExecutionId}",
-                        exchangePosition.Symbol,
-                        exchangePosition.Side,
-                        dbPosition.Id,
-                        dbPosition.ExecutionId);
+                    _logger.LogDebug("No open positions in database for user {UserId} on {Exchange}", userId, exchangeName);
+                    return positionDtos;
                 }
-                else
+
+                // Get all position IDs to fetch transactions in one query
+                var positionIds = dbPositions.Select(p => p.Id).ToList();
+                var allTransactions = await dbContext.PositionTransactions
+                    .Where(pt => positionIds.Contains(pt.PositionId))
+                    .ToListAsync(cancellationToken);
+
+                // Optionally fetch real-time unrealizedPnL from exchange
+                Dictionary<string, decimal> exchangePnLMap = new();
+                try
                 {
-                    _logger.LogDebug(
-                        "No database match found for exchange position {Symbol} {Side}",
-                        exchangePosition.Symbol,
-                        exchangePosition.Side);
+                    var exchangePositions = await connector.GetOpenPositionsAsync();
+                    foreach (var exPos in exchangePositions)
+                    {
+                        var key = $"{exPos.Symbol}_{exPos.Side}";
+                        exchangePnLMap[key] = exPos.UnrealizedPnL;
+                    }
                 }
-            }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to fetch real-time P&L from exchange for {Exchange}, using database values", exchangeName);
+                }
 
-            _logger.LogInformation(
-                "Enriched {EnrichedCount}/{TotalCount} exchange positions with database data for user {UserId} on {Exchange}",
-                enrichedCount,
-                exchangePositions.Count,
-                userId,
-                exchangeName);
+                // Convert database positions to DTOs
+                foreach (var dbPos in dbPositions)
+                {
+                    var positionTransactions = allTransactions.Where(pt => pt.PositionId == dbPos.Id).ToList();
+
+                    // Calculate fees from PositionTransaction (single source of truth)
+                    var tradingFeePaid = positionTransactions
+                        .Where(pt => pt.TransactionType == TransactionType.Commission || pt.TransactionType == TransactionType.Trade)
+                        .Sum(pt => pt.Fee);
+
+                    var totalFundingFeePaid = positionTransactions
+                        .Where(pt => pt.TransactionType == TransactionType.FundingFee && pt.SignedFee < 0)
+                        .Sum(pt => Math.Abs(pt.SignedFee ?? 0));
+
+                    var totalFundingFeeReceived = positionTransactions
+                        .Where(pt => pt.TransactionType == TransactionType.FundingFee && pt.SignedFee > 0)
+                        .Sum(pt => pt.SignedFee ?? 0);
+
+                    // Try to get real-time unrealizedPnL from exchange, fallback to database
+                    var pnlKey = $"{dbPos.Symbol}_{dbPos.Side}";
+                    var unrealizedPnL = exchangePnLMap.ContainsKey(pnlKey) ? exchangePnLMap[pnlKey] : dbPos.UnrealizedPnL;
+
+                    var dto = new PositionDto
+                    {
+                        Id = dbPos.Id,
+                        ExecutionId = dbPos.ExecutionId,
+                        Exchange = dbPos.Exchange,
+                        Symbol = dbPos.Symbol,
+                        Type = dbPos.Type,
+                        Side = dbPos.Side,
+                        Status = dbPos.Status,
+                        EntryPrice = dbPos.EntryPrice,
+                        ExitPrice = dbPos.ExitPrice,
+                        Quantity = dbPos.Quantity,
+                        Leverage = dbPos.Leverage,
+                        InitialMargin = dbPos.InitialMargin,
+                        RealizedPnL = dbPos.RealizedPnL,
+                        UnrealizedPnL = unrealizedPnL, // Real-time from exchange or database fallback
+                        TradingFeePaid = tradingFeePaid,
+                        TotalFundingFeePaid = totalFundingFeePaid,
+                        TotalFundingFeeReceived = totalFundingFeeReceived,
+                        ReconciliationStatus = dbPos.ReconciliationStatus,
+                        ReconciliationCompletedAt = dbPos.ReconciliationCompletedAt,
+                        OpenedAt = dbPos.OpenedAt, // Correct timestamp from database
+                        ClosedAt = dbPos.ClosedAt,
+                        ActiveOpportunityId = dbPos.ExecutionId
+                    };
+
+                    positionDtos.Add(dto);
+                }
+
+                _logger.LogInformation(
+                    "Loaded {Count} open positions from database for user {UserId} on {Exchange}",
+                    positionDtos.Count,
+                    userId,
+                    exchangeName);
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error enriching positions with database data for user {UserId} on {Exchange}",
+            _logger.LogError(ex, "Error loading positions from database for user {UserId} on {Exchange}",
                 userId, exchangeName);
         }
+
+        return positionDtos;
     }
 }

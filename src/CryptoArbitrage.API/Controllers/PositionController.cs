@@ -51,9 +51,25 @@ public class PositionController : BaseController
                 query = query.Where(p => p.Status == positionStatus);
             }
 
-            var positions = await query
+            // Load positions from database
+            var dbPositions = await query
                 .OrderByDescending(p => p.OpenedAt)
-                .Select(p => new PositionDto
+                .ToListAsync();
+
+            // Get all position IDs to load transactions
+            var positionIds = dbPositions.Select(p => p.Id).ToList();
+
+            // Load all PositionTransactions for these positions (single query)
+            var allTransactions = await _context.PositionTransactions
+                .Where(pt => positionIds.Contains(pt.PositionId))
+                .ToListAsync();
+
+            // Map to DTOs and calculate fees in memory
+            var positions = dbPositions.Select(p =>
+            {
+                var positionTransactions = allTransactions.Where(pt => pt.PositionId == p.Id).ToList();
+
+                return new PositionDto
                 {
                     Id = p.Id,
                     ExecutionId = p.ExecutionId,
@@ -69,13 +85,23 @@ public class PositionController : BaseController
                     InitialMargin = p.InitialMargin,
                     RealizedPnL = p.RealizedPnL,
                     UnrealizedPnL = p.UnrealizedPnL,
-                    TotalFundingFeePaid = p.TotalFundingFeePaid,
-                    TotalFundingFeeReceived = p.TotalFundingFeeReceived,
+                    // Calculate fees from PositionTransaction (single source of truth)
+                    TotalFundingFeePaid = positionTransactions
+                        .Where(pt => pt.TransactionType == TransactionType.FundingFee && pt.SignedFee < 0)
+                        .Sum(pt => Math.Abs(pt.SignedFee ?? 0m)),
+                    TotalFundingFeeReceived = positionTransactions
+                        .Where(pt => pt.TransactionType == TransactionType.FundingFee && pt.SignedFee > 0)
+                        .Sum(pt => pt.SignedFee ?? 0m),
+                    TradingFeePaid = positionTransactions
+                        .Where(pt => pt.TransactionType == TransactionType.Commission || pt.TransactionType == TransactionType.Trade)
+                        .Sum(pt => pt.Fee),
+                    ReconciliationStatus = p.ReconciliationStatus,
+                    ReconciliationCompletedAt = p.ReconciliationCompletedAt,
                     OpenedAt = p.OpenedAt,
                     ClosedAt = p.ClosedAt,
                     ActiveOpportunityId = p.ExecutionId
-                })
-                .ToListAsync();
+                };
+            }).ToList();
 
             Logger.LogDebug("User {UserId} retrieved {Count} positions", _currentUser.UserId, positions.Count);
             return positions;
@@ -106,6 +132,11 @@ public class PositionController : BaseController
                 return NotFound(new { errorMessage = $"Position {id} not found" });
             }
 
+            // Load PositionTransactions to calculate fees
+            var positionTransactions = await _context.PositionTransactions
+                .Where(pt => pt.PositionId == position.Id)
+                .ToListAsync();
+
             var positionDto = new PositionDto
             {
                 Id = position.Id,
@@ -122,8 +153,18 @@ public class PositionController : BaseController
                 InitialMargin = position.InitialMargin,
                 RealizedPnL = position.RealizedPnL,
                 UnrealizedPnL = position.UnrealizedPnL,
-                TotalFundingFeePaid = position.TotalFundingFeePaid,
-                TotalFundingFeeReceived = position.TotalFundingFeeReceived,
+                // Calculate fees from PositionTransaction (single source of truth)
+                TotalFundingFeePaid = positionTransactions
+                    .Where(pt => pt.TransactionType == TransactionType.FundingFee && pt.SignedFee < 0)
+                    .Sum(pt => Math.Abs(pt.SignedFee ?? 0m)),
+                TotalFundingFeeReceived = positionTransactions
+                    .Where(pt => pt.TransactionType == TransactionType.FundingFee && pt.SignedFee > 0)
+                    .Sum(pt => pt.SignedFee ?? 0m),
+                TradingFeePaid = positionTransactions
+                    .Where(pt => pt.TransactionType == TransactionType.Commission || pt.TransactionType == TransactionType.Trade)
+                    .Sum(pt => pt.Fee),
+                ReconciliationStatus = position.ReconciliationStatus,
+                ReconciliationCompletedAt = position.ReconciliationCompletedAt,
                 OpenedAt = position.OpenedAt,
                 ClosedAt = position.ClosedAt,
                 ActiveOpportunityId = position.ExecutionId

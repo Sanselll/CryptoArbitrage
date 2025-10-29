@@ -1,4 +1,4 @@
-import { Layers, StopCircle, TrendingUp, TrendingDown } from 'lucide-react';
+import { Layers, StopCircle, TrendingUp, TrendingDown, Clock } from 'lucide-react';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 import { PositionSide, PositionStatus, PositionType, StrategySubType } from '../types/index';
 import { Badge } from './ui/Badge';
@@ -67,27 +67,75 @@ const formatExecutionTime = (openedAt: string) => {
   return `${hours}h ${minutes}m ${seconds}s`;
 };
 
+// Helper function to calculate next funding time (8-hour intervals)
+const getNextFundingTime = (): Date => {
+  const now = new Date();
+  const utcHours = now.getUTCHours();
+  const fundingHours = [0, 8, 16];
+  let nextFunding = new Date(now);
+
+  for (const hour of fundingHours) {
+    if (utcHours < hour) {
+      nextFunding.setUTCHours(hour, 0, 0, 0);
+      return nextFunding;
+    }
+  }
+
+  nextFunding.setUTCDate(nextFunding.getUTCDate() + 1);
+  nextFunding.setUTCHours(0, 0, 0, 0);
+  return nextFunding;
+};
+
+// Helper function to get exchange-specific time until next funding
+const getExchangeFundingTime = (nextFundingTimeStr?: string): string => {
+  if (!nextFundingTimeStr) {
+    return formatTimeUntil(getNextFundingTime());
+  }
+  const nextFundingDate = new Date(nextFundingTimeStr);
+  return formatTimeUntil(nextFundingDate);
+};
+
+const formatTimeUntil = (targetDate: Date) => {
+  const now = new Date();
+  const diff = targetDate.getTime() - now.getTime();
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+  return `${hours}h ${minutes}m ${seconds}s`;
+};
+
 export const PositionsGrid = () => {
   const { positions, opportunities, fundingRates } = useArbitrageStore();
   const [isClosing, setIsClosing] = useState(false);
   const [executionTimes, setExecutionTimes] = useState<{ [key: number]: string }>({});
+  const [fundingTimes, setFundingTimes] = useState<{ [key: string]: string }>({});
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const { alertState, showSuccess, showError, closeAlert, confirmState, showConfirm, closeConfirm } = useDialog();
 
   useEffect(() => {
     const interval = setInterval(() => {
       const newExecutionTimes: { [key: number]: string } = {};
+      const newFundingTimes: { [key: string]: string } = {};
 
       openPositions.forEach((position) => {
         if (position.executionId && position.openedAt) {
           newExecutionTimes[position.executionId] = formatExecutionTime(position.openedAt);
         }
+
+        // Calculate funding time for each position
+        const fundingRate = fundingRates.find(fr =>
+          fr.symbol === position.symbol && fr.exchange === position.exchange
+        );
+        const fundingKey = `${position.exchange}-${position.symbol}`;
+        newFundingTimes[fundingKey] = getExchangeFundingTime(fundingRate?.nextFundingTime);
       });
+
       setExecutionTimes(newExecutionTimes);
+      setFundingTimes(newFundingTimes);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [positions]);
+  }, [positions, fundingRates]);
 
   const openPositions = positions.filter((p) => p.status === PositionStatus.Open);
 
@@ -217,18 +265,17 @@ export const PositionsGrid = () => {
             <TableHeader className="sticky top-0 z-30">
               <TableRow hover={false}>
                 <TableHead className="sticky left-0 z-40 bg-binance-bg-secondary border-r border-binance-border">Symbol</TableHead>
-                <TableHead className="py-1">Strategy</TableHead>
                 <TableHead className="py-1">Exchange</TableHead>
-                <TableHead className="py-1">Type</TableHead>
                 <TableHead className="py-1">Side</TableHead>
+                <TableHead className="text-right min-w-[100px]" title="countdown to next funding payment">Next Funding</TableHead>
                 <TableHead className="text-right">Entry</TableHead>
                 <TableHead className="text-right">Size</TableHead>
                 <TableHead className="text-right">Value</TableHead>
                 <TableHead className="text-right">Lev</TableHead>
-                <TableHead className="text-right">Position P&L</TableHead>
+                <TableHead className="text-right">Price P&L</TableHead>
                 <TableHead className="text-right">Est. Fund</TableHead>
-                <TableHead className="text-right">P&L</TableHead>
-                <TableHead className="text-right">Fund P&L</TableHead>
+                <TableHead className="text-right">Funding</TableHead>
+                <TableHead className="text-right">Fees</TableHead>
                 <TableHead className="text-right">Total P&L</TableHead>
                 <TableHead className="text-right">Time</TableHead>
                 <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right">Actions</TableHead>
@@ -281,17 +328,20 @@ export const PositionsGrid = () => {
                 // Calculate combined P&L for the pair
                 let combinedUnrealizedPnL = 0;
                 let combinedFunding = 0;
+                let combinedFees = 0;
 
                 if (isCrossFut) {
                   combinedUnrealizedPnL = (longPerpPosition?.unrealizedPnL || 0) + (shortPerpPosition?.unrealizedPnL || 0);
                   combinedFunding = (longPerpPosition?.netFundingFee || 0) + (shortPerpPosition?.netFundingFee || 0);
+                  combinedFees = (longPerpPosition?.tradingFeePaid || 0) + (shortPerpPosition?.tradingFeePaid || 0);
                 } else {
                   combinedUnrealizedPnL = (perpPosition?.unrealizedPnL || 0) + (spotPosition?.unrealizedPnL || 0);
                   combinedFunding = (perpPosition?.netFundingFee || 0) + (spotPosition?.netFundingFee || 0);
+                  combinedFees = (perpPosition?.tradingFeePaid || 0) + (spotPosition?.tradingFeePaid || 0);
                 }
 
-                // Total P&L = unrealized P&L from price changes + historical funding already paid/received + estimated funding for next settlement
-                const totalPairPnL = combinedUnrealizedPnL + combinedFunding + estimatedFunding;
+                // Total P&L = Price P&L + Est. Fund + Funding - Fees
+                const totalPairPnL = combinedUnrealizedPnL + combinedFunding + estimatedFunding - combinedFees;
 
                 // For Cross-Fut: render both long and short perp rows
                 if (isCrossFut && longPerpPosition && shortPerpPosition) {
@@ -321,19 +371,8 @@ export const PositionsGrid = () => {
                       onMouseLeave={() => setHoveredRow(null)}
                     >
                       <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{pair.symbol}</TableCell>
-                      <TableCell rowSpan={2} className="py-1">
-                        <Badge
-                          size="sm"
-                          className={`text-[10px] ${strategyLabel.color}`}
-                        >
-                          {strategyLabel.text}
-                        </Badge>
-                      </TableCell>
                       <TableCell className="py-1">
                         <ExchangeBadge exchange={longPerpPosition.exchange} />
-                      </TableCell>
-                      <TableCell className="py-1">
-                        <Badge variant="info" size="sm" className="text-[10px]">Perpetual</Badge>
                       </TableCell>
                       <TableCell className="py-1">
                         <Badge
@@ -344,6 +383,14 @@ export const PositionsGrid = () => {
                           <TrendingUp className="w-2.5 h-2.5" />
                           Long
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Clock className="w-2.5 h-2.5 text-binance-text-secondary" />
+                          <span className="font-mono text-[11px] text-binance-text-secondary">
+                            {fundingTimes[`${longPerpPosition.exchange}-${pair.symbol}`] || '--'}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${longPerpPosition.entryPrice.toFixed(2)}</span>
@@ -393,28 +440,20 @@ export const PositionsGrid = () => {
                           {longEstimatedFunding.toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right" rowSpan={2}>
+                      <TableCell className="text-right font-mono">
                         <span
-                          className={`font-mono text-[11px] font-bold ${
-                            combinedUnrealizedPnL >= 0
-                              ? 'text-binance-green'
-                              : 'text-binance-red'
+                          className={`text-[11px] ${
+                            longPerpPosition.netFundingFee >= 0 ? 'text-binance-green' : 'text-binance-red'
                           }`}
                         >
-                          {combinedUnrealizedPnL >= 0 ? '+' : ''}$
-                          {combinedUnrealizedPnL.toFixed(2)}
+                          {longPerpPosition.netFundingFee !== 0
+                            ? `${longPerpPosition.netFundingFee >= 0 ? '+' : ''}$${longPerpPosition.netFundingFee.toFixed(2)}`
+                            : '-'}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right" rowSpan={2}>
-                        <span
-                          className={`font-mono text-[11px] font-bold ${
-                            (combinedFunding + estimatedFunding) >= 0
-                              ? 'text-binance-green'
-                              : 'text-binance-red'
-                          }`}
-                        >
-                          {(combinedFunding + estimatedFunding) >= 0 ? '+' : ''}$
-                          {(combinedFunding + estimatedFunding).toFixed(2)}
+                      <TableCell className="text-right font-mono">
+                        <span className="text-[11px] text-red-400">
+                          {longPerpPosition.tradingFeePaid != null ? `-$${longPerpPosition.tradingFeePaid.toFixed(2)}` : '-'}
                         </span>
                       </TableCell>
                       <TableCell className="text-right" rowSpan={2}>
@@ -481,9 +520,6 @@ export const PositionsGrid = () => {
                         <ExchangeBadge exchange={shortPerpPosition.exchange} />
                       </TableCell>
                       <TableCell className="py-1">
-                        <Badge variant="info" size="sm" className="text-[10px]">Perpetual</Badge>
-                      </TableCell>
-                      <TableCell className="py-1">
                         <Badge
                           variant="danger"
                           size="sm"
@@ -492,6 +528,14 @@ export const PositionsGrid = () => {
                           <TrendingDown className="w-2.5 h-2.5" />
                           Short
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Clock className="w-2.5 h-2.5 text-binance-text-secondary" />
+                          <span className="font-mono text-[11px] text-binance-text-secondary">
+                            {fundingTimes[`${shortPerpPosition.exchange}-${pair.symbol}`] || '--'}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${shortPerpPosition.entryPrice.toFixed(2)}</span>
@@ -541,6 +585,22 @@ export const PositionsGrid = () => {
                           {shortEstimatedFunding.toFixed(2)}
                         </span>
                       </TableCell>
+                      <TableCell className="text-right font-mono">
+                        <span
+                          className={`text-[11px] ${
+                            shortPerpPosition.netFundingFee >= 0 ? 'text-binance-green' : 'text-binance-red'
+                          }`}
+                        >
+                          {shortPerpPosition.netFundingFee !== 0
+                            ? `${shortPerpPosition.netFundingFee >= 0 ? '+' : ''}$${shortPerpPosition.netFundingFee.toFixed(2)}`
+                            : '-'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        <span className="text-[11px] text-red-400">
+                          {shortPerpPosition.tradingFeePaid != null ? `-$${shortPerpPosition.tradingFeePaid.toFixed(2)}` : '-'}
+                        </span>
+                      </TableCell>
                     </TableRow>
                   );
                 }
@@ -564,18 +624,7 @@ export const PositionsGrid = () => {
                     >
                       <TableCell className={`sticky left-0 z-20 border-r border-binance-border font-bold text-xs ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>{pair.symbol}</TableCell>
                       <TableCell rowSpan={2} className="py-1">
-                        <Badge
-                          size="sm"
-                          className={`text-[10px] ${strategyLabel.color}`}
-                        >
-                          {strategyLabel.text}
-                        </Badge>
-                      </TableCell>
-                      <TableCell rowSpan={2} className="py-1">
                         <ExchangeBadge exchange={pair.exchange} />
-                      </TableCell>
-                      <TableCell className="py-1">
-                        <Badge variant="info" size="sm" className="text-[10px]">Perpetual</Badge>
                       </TableCell>
                       <TableCell className="py-1">
                         <Badge
@@ -590,6 +639,14 @@ export const PositionsGrid = () => {
                           )}
                           {perpPosition.side === PositionSide.Long ? 'Long' : 'Short'}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Clock className="w-2.5 h-2.5 text-binance-text-secondary" />
+                          <span className="font-mono text-[11px] text-binance-text-secondary">
+                            {fundingTimes[`${pair.exchange}-${pair.symbol}`] || '--'}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${perpPosition.entryPrice.toFixed(2)}</span>
@@ -639,28 +696,20 @@ export const PositionsGrid = () => {
                           {estimatedFunding.toFixed(2)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right" rowSpan={2}>
+                      <TableCell className="text-right font-mono">
                         <span
-                          className={`font-mono text-[11px] font-bold ${
-                            combinedUnrealizedPnL >= 0
-                              ? 'text-binance-green'
-                              : 'text-binance-red'
+                          className={`text-[11px] ${
+                            perpPosition.netFundingFee >= 0 ? 'text-binance-green' : 'text-binance-red'
                           }`}
                         >
-                          {combinedUnrealizedPnL >= 0 ? '+' : ''}$
-                          {combinedUnrealizedPnL.toFixed(2)}
+                          {perpPosition.netFundingFee !== 0
+                            ? `${perpPosition.netFundingFee >= 0 ? '+' : ''}$${perpPosition.netFundingFee.toFixed(2)}`
+                            : '-'}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right" rowSpan={2}>
-                        <span
-                          className={`font-mono text-[11px] font-bold ${
-                            (combinedFunding + estimatedFunding) >= 0
-                              ? 'text-binance-green'
-                              : 'text-binance-red'
-                          }`}
-                        >
-                          {(combinedFunding + estimatedFunding) >= 0 ? '+' : ''}$
-                          {(combinedFunding + estimatedFunding).toFixed(2)}
+                      <TableCell className="text-right font-mono">
+                        <span className="text-[11px] text-red-400">
+                          {perpPosition.tradingFeePaid != null ? `-$${perpPosition.tradingFeePaid.toFixed(2)}` : '-'}
                         </span>
                       </TableCell>
                       <TableCell className="text-right" rowSpan={2}>
@@ -721,9 +770,6 @@ export const PositionsGrid = () => {
                       onMouseLeave={() => setHoveredRow(null)}
                     >
                       <TableCell className="py-1">
-                        <Badge variant="secondary" size="sm" className="text-[10px]">Spot</Badge>
-                      </TableCell>
-                      <TableCell className="py-1">
                         <Badge
                           variant={spotPosition.side === PositionSide.Long ? 'success' : 'danger'}
                           size="sm"
@@ -736,6 +782,9 @@ export const PositionsGrid = () => {
                           )}
                           {spotPosition.side === PositionSide.Long ? 'Long' : 'Short'}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
                       </TableCell>
                       <TableCell className="text-right">
                         <span className="font-mono text-[11px]">${spotPosition.entryPrice.toFixed(2)}</span>
@@ -777,6 +826,14 @@ export const PositionsGrid = () => {
                       </TableCell>
                       <TableCell className="text-right">
                         <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        <span className="text-[11px] text-gray-500">--</span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        <span className="text-[11px] text-red-400">
+                          {spotPosition.tradingFeePaid != null ? `-$${spotPosition.tradingFeePaid.toFixed(2)}` : '-'}
+                        </span>
                       </TableCell>
                     </TableRow>
                   );
