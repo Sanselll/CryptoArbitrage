@@ -634,8 +634,6 @@ public class ArbitrageExecutionService
                     InitialMargin = p.InitialMargin,
                     RealizedPnL = p.RealizedPnL,
                     UnrealizedPnL = p.UnrealizedPnL,
-                    TotalFundingFeePaid = p.TotalFundingFeePaid,
-                    TotalFundingFeeReceived = p.TotalFundingFeeReceived,
                     OpenedAt = p.OpenedAt,
                     ClosedAt = p.ClosedAt
                 }).ToList();
@@ -1038,8 +1036,6 @@ public class ArbitrageExecutionService
                     InitialMargin = p.InitialMargin,
                     RealizedPnL = p.RealizedPnL,
                     UnrealizedPnL = p.UnrealizedPnL,
-                    TotalFundingFeePaid = p.TotalFundingFeePaid,
-                    TotalFundingFeeReceived = p.TotalFundingFeeReceived,
                     OpenedAt = p.OpenedAt,
                     ClosedAt = p.ClosedAt
                 }).ToList();
@@ -1299,7 +1295,18 @@ public class ArbitrageExecutionService
             {
                 position.Status = PositionStatus.Closed;
                 position.ClosedAt = DateTime.UtcNow;
-                // ExitPrice will be set if available from the exchange
+
+                // Store close order ID
+                if (position.Type == PositionType.Spot && !string.IsNullOrEmpty(spotSellOrderId))
+                {
+                    position.CloseOrderId = spotSellOrderId;
+                }
+                // For perpetual positions, we don't get an order ID from ClosePositionAsync (it's a market close)
+
+                // Set reconciliation status to Preliminary (waiting for transactions)
+                position.ReconciliationStatus = ReconciliationStatus.Preliminary;
+
+                // ExitPrice will be set by reconciliation service when transactions arrive
             }
 
             await _dbContext.SaveChangesAsync();
@@ -1330,8 +1337,8 @@ public class ArbitrageExecutionService
                     InitialMargin = p.InitialMargin,
                     RealizedPnL = p.RealizedPnL,
                     UnrealizedPnL = p.UnrealizedPnL,
-                    TotalFundingFeePaid = p.TotalFundingFeePaid,
-                    TotalFundingFeeReceived = p.TotalFundingFeeReceived,
+                    ReconciliationStatus = p.ReconciliationStatus,
+                    ReconciliationCompletedAt = p.ReconciliationCompletedAt,
                     OpenedAt = p.OpenedAt,
                     ClosedAt = p.ClosedAt,
                     ExecutionId = p.ExecutionId
@@ -1447,7 +1454,12 @@ public class ArbitrageExecutionService
         {
             position.Status = PositionStatus.Closed;
             position.ClosedAt = DateTime.UtcNow;
-            // ExitPrice will be set if available from the exchange
+
+            // Set reconciliation status to Preliminary (waiting for transactions)
+            position.ReconciliationStatus = ReconciliationStatus.Preliminary;
+
+            // ExitPrice and CloseOrderId will be set by reconciliation service when transactions arrive
+            // For cross-exchange, ClosePositionAsync doesn't return order IDs
         }
 
         await _dbContext.SaveChangesAsync();
@@ -1478,8 +1490,8 @@ public class ArbitrageExecutionService
                 InitialMargin = p.InitialMargin,
                 RealizedPnL = p.RealizedPnL,
                 UnrealizedPnL = p.UnrealizedPnL,
-                TotalFundingFeePaid = p.TotalFundingFeePaid,
-                TotalFundingFeeReceived = p.TotalFundingFeeReceived,
+                ReconciliationStatus = p.ReconciliationStatus,
+                ReconciliationCompletedAt = p.ReconciliationCompletedAt,
                 OpenedAt = p.OpenedAt,
                 ClosedAt = p.ClosedAt,
                 ExecutionId = p.ExecutionId

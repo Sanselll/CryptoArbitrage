@@ -1574,11 +1574,17 @@ public class BybitConnector : IExchangeConnector
                     // Calculate signed fee: negative for costs, positive for income
                     decimal? signedFee = transactionType switch
                     {
-                        Models.TransactionType.Trade => fee > 0 ? -fee : null, // Trading fee (commission) - always negative
-                        Models.TransactionType.Commission => -fee, // Commission - always negative
+                        Models.TransactionType.Trade => fee > 0 ? -fee : 0m, // Trading fee (commission) - always negative
+                        Models.TransactionType.Commission => fee > 0 ? -fee : 0m, // Commission - always negative
                         Models.TransactionType.FundingFee => funding, // Funding fee - can be +/- (income/cost)
-                        Models.TransactionType.Rebate => fee > 0 ? fee : null, // Rebate - always positive
-                        _ => null
+                        Models.TransactionType.Rebate => fee > 0 ? fee : 0m, // Rebate - always positive
+                        Models.TransactionType.RealizedPnL => 0m, // P&L is in amount, not fee
+                        Models.TransactionType.Settlement => 0m, // Settlement is in amount
+                        Models.TransactionType.Liquidation => fee > 0 ? -fee : 0m, // Liquidation fee
+                        Models.TransactionType.Deposit => null, // No fee concept for deposits
+                        Models.TransactionType.Withdrawal => fee > 0 ? -fee : 0m, // Withdrawal fee
+                        Models.TransactionType.Transfer => null, // No fee for transfers
+                        _ => null // For other types where fee doesn't apply
                     };
 
                     return new TransactionDto
@@ -1591,6 +1597,10 @@ public class BybitConnector : IExchangeConnector
                         Status = TransactionStatus.Confirmed, // Bybit transaction history only shows confirmed
                         Symbol = t.Symbol,
                         TradeId = t.TradeId,
+                        OrderId = t.OrderId,
+                        ClientOrderId = t.ClientOrderId,
+                        Side = t.Side.ToString(),
+                        TradePrice = t.TradePrice,
                         Fee = fee,
                         FeeAsset = fee > 0 ? t.Asset : null,
                         SignedFee = signedFee,

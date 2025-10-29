@@ -15,6 +15,10 @@ public class TransactionDto
     public string? Info { get; set; }
     public string? Symbol { get; set; }
     public string? TradeId { get; set; }
+    public string? OrderId { get; set; }
+    public string? ClientOrderId { get; set; }
+    public string? Side { get; set; }
+    public decimal? TradePrice { get; set; }
     public string? SubType { get; set; }
     public decimal Fee { get; set; }
     public string? FeeAsset { get; set; }

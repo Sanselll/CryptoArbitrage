@@ -47,6 +47,9 @@ export interface Position {
   totalFundingFeePaid: number;
   totalFundingFeeReceived: number;
   netFundingFee: number;
+  tradingFeePaid: number;
+  reconciliationStatus: number;
+  reconciliationCompletedAt?: string;
   openedAt: string;
   closedAt?: string;
   activeOpportunityId?: number;
@@ -395,6 +398,10 @@ export interface Transaction {
   feeAsset?: string;
   symbol?: string;
   signedFee?: number;
+  orderId?: string;
+  clientOrderId?: string;
+  side?: string;
+  tradePrice?: number;
   fromAddress?: string;
   toAddress?: string;
   txHash?: string;

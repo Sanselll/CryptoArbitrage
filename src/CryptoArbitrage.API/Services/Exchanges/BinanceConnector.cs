@@ -1598,12 +1598,17 @@ public class BinanceConnector : IExchangeConnector
                     // Calculate signed fee: negative for costs, positive for income
                     decimal? signedFee = transactionType switch
                     {
-                        Models.TransactionType.Commission => -Math.Abs(fee), // Always negative (cost)
+                        Models.TransactionType.Commission => fee > 0 ? -Math.Abs(fee) : 0m, // Always negative (cost)
                         Models.TransactionType.FundingFee => t.Income, // Can be +/- (income/cost)
                         Models.TransactionType.Rebate => Math.Abs(t.Income), // Always positive (income)
                         Models.TransactionType.ReferralKickback => Math.Abs(t.Income), // Always positive
                         Models.TransactionType.CommissionRebate => Math.Abs(t.Income), // Always positive
-                        _ => null
+                        Models.TransactionType.RealizedPnL => 0m, // P&L is in amount, not fee
+                        Models.TransactionType.InsuranceClear => 0m, // Insurance is in amount
+                        Models.TransactionType.Transfer => null, // No fee for transfers
+                        Models.TransactionType.Deposit => null, // No fee concept for deposits
+                        Models.TransactionType.Withdrawal => null, // Withdrawal handled separately
+                        _ => null // For other types where fee doesn't apply
                     };
 
                     return new TransactionDto
