@@ -136,6 +136,9 @@ public class CsvExporter
             // Volume/liquidity
             Map(m => m.Volume24h).Name("volume_24h");
 
+            // Fixed-duration prediction feature
+            Map(m => m.TargetHoldHours).Name("target_hold_hours");
+
             // ========================================
             // === TARGET VARIABLES (y) - What We Predict ===
             // ========================================

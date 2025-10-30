@@ -44,6 +44,18 @@ class DataLoader:
         print(f"   Columns: {len(df.columns)}")
         print(f"   Date range: {df['entry_time'].min()} to {df['entry_time'].max()}")
 
+        # Filter out unrealistic profit simulations
+        # Keep only samples with realistic arbitrage profits (-10% to +10%)
+        if 'actual_profit_pct' in df.columns:
+            before_count = len(df)
+            df = df[(df['actual_profit_pct'] >= -10) & (df['actual_profit_pct'] <= 10)].copy()
+            after_count = len(df)
+            filtered_count = before_count - after_count
+
+            if filtered_count > 0:
+                print(f"   Filtered {filtered_count:,} samples with unrealistic profits (>{filtered_count/before_count*100:.1f}%)")
+                print(f"   Remaining: {after_count:,} samples with realistic profits (-10% to +10%)")
+
         # Convert date columns to datetime
         date_columns = ['entry_time', 'exit_time']
         for col in date_columns:
@@ -182,7 +194,8 @@ class DataLoader:
         self,
         test_size: float = 0.2,
         random_state: int = 42,
-        stratify_column: Optional[str] = None
+        stratify_column: Optional[str] = None,
+        use_time_based_split: bool = True
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Split data into training and testing sets BY OPPORTUNITY GROUP.
@@ -194,6 +207,9 @@ class DataLoader:
             test_size: Proportion of data for testing (0.0 to 1.0)
             random_state: Random seed for reproducibility
             stratify_column: Column to use for stratified splitting (e.g., 'was_profitable')
+                           (only used when use_time_based_split=False)
+            use_time_based_split: If True, split chronologically (recommended for time-series).
+                                 If False, use random split (may cause temporal leakage).
 
         Returns:
             (train_df, test_df)
@@ -217,25 +233,51 @@ class DataLoader:
 
         # Split opportunity IDs (not rows!)
         # This ensures same opportunity doesn't appear in train AND test
-        if stratify_column:
-            # For stratification, use majority class of each opportunity
-            opportunity_labels = self.df.groupby('_opportunity_id')[stratify_column].agg(
-                lambda x: x.mode()[0] if len(x.mode()) > 0 else x.iloc[0]
-            )
-            stratify_values = [opportunity_labels[opp_id] for opp_id in unique_opportunities]
+        if use_time_based_split:
+            # TIME-BASED SPLIT (recommended for time-series data)
+            # Train on older data, test on newer data (prevents temporal leakage)
+            print(f"   Split method: TIME-BASED (chronological)")
 
-            train_opps, test_opps = train_test_split(
-                unique_opportunities,
-                test_size=test_size,
-                random_state=random_state,
-                stratify=stratify_values
-            )
+            # Get earliest entry_time for each opportunity
+            opportunity_times = self.df.groupby('_opportunity_id')['entry_time'].min()
+
+            # Sort opportunities chronologically
+            sorted_opps = opportunity_times.sort_values().index.tolist()
+
+            # Split at the cutoff point
+            split_idx = int(len(sorted_opps) * (1 - test_size))
+            train_opps = sorted_opps[:split_idx]
+            test_opps = sorted_opps[split_idx:]
+
+            # Print date ranges
+            train_times = opportunity_times[train_opps]
+            test_times = opportunity_times[test_opps]
+            print(f"   Train date range: {train_times.min()} to {train_times.max()}")
+            print(f"   Test date range: {test_times.min()} to {test_times.max()}")
+
         else:
-            train_opps, test_opps = train_test_split(
-                unique_opportunities,
-                test_size=test_size,
-                random_state=random_state
-            )
+            # RANDOM SPLIT (legacy mode - may cause temporal leakage)
+            print(f"   Split method: RANDOM (legacy - warning: temporal leakage possible)")
+
+            if stratify_column:
+                # For stratification, use majority class of each opportunity
+                opportunity_labels = self.df.groupby('_opportunity_id')[stratify_column].agg(
+                    lambda x: x.mode()[0] if len(x.mode()) > 0 else x.iloc[0]
+                )
+                stratify_values = [opportunity_labels[opp_id] for opp_id in unique_opportunities]
+
+                train_opps, test_opps = train_test_split(
+                    unique_opportunities,
+                    test_size=test_size,
+                    random_state=random_state,
+                    stratify=stratify_values
+                )
+            else:
+                train_opps, test_opps = train_test_split(
+                    unique_opportunities,
+                    test_size=test_size,
+                    random_state=random_state
+                )
 
         # Filter dataframe by opportunity IDs
         train_df = self.df[self.df['_opportunity_id'].isin(train_opps)].copy()

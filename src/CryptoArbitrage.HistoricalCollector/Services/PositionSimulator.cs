@@ -188,14 +188,19 @@ public class PositionSimulator
 
                 try
                 {
-                    var simulation = SimulateWithOptimalHindsight(
+                    // Generate 9 training rows per opportunity (one for each fixed duration)
+                    var fixedDurationSimulations = SimulateWithFixedDurations(
                         opportunity,
                         snapshots,
                         snapshotIndex);
 
-                    if (simulation != null)
+                    if (fixedDurationSimulations != null && fixedDurationSimulations.Any())
                     {
-                        simulations.Add(simulation);
+                        // ConcurrentBag doesn't have AddRange, add items individually
+                        foreach (var sim in fixedDurationSimulations)
+                        {
+                            simulations.Add(sim);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -258,6 +263,256 @@ public class PositionSimulator
         public int HitProfitTarget { get; set; }
         public int HitStopLoss { get; set; }
         public Dictionary<string, int> ExitReasons { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Generate training data with fixed-duration predictions
+    /// Creates 9 training rows per opportunity (one for each target duration)
+    /// This makes profit/duration predictions feasible compared to unpredictable optimal hindsight
+    /// </summary>
+    private List<SimulatedExecution> SimulateWithFixedDurations(
+        ArbitrageOpportunityDto opportunity,
+        List<HistoricalMarketSnapshot> snapshots,
+        int entryIndex)
+    {
+        // Fixed durations to evaluate (hours)
+        decimal[] targetDurations = { 0.5m, 1m, 2m, 4m, 8m, 12m, 24m, 48m, 72m };
+
+        var results = new List<SimulatedExecution>();
+
+        foreach (var targetHours in targetDurations)
+        {
+            var simulation = SimulateWithFixedDuration(
+                opportunity,
+                snapshots,
+                entryIndex,
+                targetHours);
+
+            if (simulation != null)
+            {
+                results.Add(simulation);
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Simulate a single position with a fixed exit duration
+    /// Evaluates profit at a specific target hold time
+    /// </summary>
+    private SimulatedExecution? SimulateWithFixedDuration(
+        ArbitrageOpportunityDto opportunity,
+        List<HistoricalMarketSnapshot> snapshots,
+        int entryIndex,
+        decimal targetHoldHours)
+    {
+        var entrySnapshot = snapshots[entryIndex];
+        var entryTime = entrySnapshot.Timestamp;
+
+        // Calculate entry prices with slippage
+        var entryPrices = CalculateEntryPrices(opportunity, entrySnapshot, entryIndex);
+
+        // Calculate target exit time
+        var targetExitTime = entryTime.AddHours((double)targetHoldHours);
+
+        // Find snapshot closest to target exit time
+        var exitIndex = FindSnapshotIndexClosestTo(snapshots, targetExitTime, entryIndex);
+        if (exitIndex == -1 || exitIndex >= snapshots.Count)
+        {
+            // No data available at target duration
+            return null;
+        }
+
+        var exitSnapshot = snapshots[exitIndex];
+        var actualHoldHours = (decimal)(exitSnapshot.Timestamp - entryTime).TotalHours;
+
+        // Calculate exit prices with slippage
+        var exitPrices = CalculateExitPrices(opportunity, exitSnapshot, exitIndex);
+
+        // Simulate funding payments during hold period
+        var fundingPayments = SimulateFundingPayments(
+            opportunity,
+            snapshots,
+            entryIndex,
+            exitIndex);
+
+        // Calculate total PnL
+        var pnl = CalculatePnL(
+            opportunity,
+            entryPrices,
+            exitPrices,
+            fundingPayments,
+            DEFAULT_POSITION_SIZE);
+
+        // Calculate total fees
+        var totalFeesUsd = DEFAULT_POSITION_SIZE * (opportunity.PositionCostPercent / 100);
+
+        // Track peak profit and drawdown during hold period
+        var (peakProfit, maxDrawdown) = CalculatePeakAndDrawdown(
+            opportunity,
+            snapshots,
+            entryIndex,
+            exitIndex,
+            (entryPrices.LongPrice, entryPrices.ShortPrice));
+
+        // Build simulation result
+        return new SimulatedExecution
+        {
+            // Snapshot
+            OpportunitySnapshotJson = JsonSerializer.Serialize(opportunity),
+            EntryTime = entrySnapshot.Timestamp,
+            ExitTime = exitSnapshot.Timestamp,
+            HourOfDay = entrySnapshot.Timestamp.Hour,
+            DayOfWeek = (int)entrySnapshot.Timestamp.DayOfWeek,
+
+            // Market context
+            BtcPriceAtEntry = entrySnapshot.BtcPrice,
+            MarketRegimeAtEntry = entrySnapshot.MarketRegime,
+
+            // Opportunity features
+            Symbol = opportunity.Symbol,
+            Strategy = opportunity.SubType.ToString(),
+            LongExchange = opportunity.LongExchange,
+            ShortExchange = opportunity.ShortExchange,
+
+            // Funding rate details
+            LongFundingRate = opportunity.LongFundingRate,
+            ShortFundingRate = opportunity.ShortFundingRate,
+            LongFundingIntervalHours = opportunity.LongFundingIntervalHours,
+            ShortFundingIntervalHours = opportunity.ShortFundingIntervalHours,
+            LongNextFundingTimeMinutes = opportunity.LongNextFundingTime.HasValue
+                ? (decimal?)(opportunity.LongNextFundingTime.Value - entrySnapshot.Timestamp).TotalMinutes
+                : null,
+            ShortNextFundingTimeMinutes = opportunity.ShortNextFundingTime.HasValue
+                ? (decimal?)(opportunity.ShortNextFundingTime.Value - entrySnapshot.Timestamp).TotalMinutes
+                : null,
+
+            // Price spread
+            CurrentPriceSpreadPercent = opportunity.CurrentPriceSpreadPercent,
+
+            // Profitability metrics
+            FundProfit8h = opportunity.FundProfit8h,
+            FundApr = opportunity.FundApr,
+            FundProfit8h24hProj = opportunity.FundProfit8h24hProj,
+            FundApr24hProj = opportunity.FundApr24hProj,
+            FundBreakEvenTime24hProj = opportunity.FundBreakEvenTime24hProj,
+            FundProfit8h3dProj = opportunity.FundProfit8h3dProj,
+            FundApr3dProj = opportunity.FundApr3dProj,
+            FundBreakEvenTime3dProj = opportunity.FundBreakEvenTime3dProj,
+            BreakEvenTimeHours = opportunity.BreakEvenTimeHours,
+
+            // Price spread statistics
+            PriceSpread24hAvg = opportunity.PriceSpread24hAvg,
+            PriceSpread3dAvg = opportunity.PriceSpread3dAvg,
+
+            // Risk metrics
+            SpreadVolatilityCv = opportunity.SpreadVolatilityCv,
+            SpreadVolatilityStdDev = opportunity.SpreadVolatilityStdDev,
+            Spread30SampleAvg = opportunity.Spread30SampleAvg,
+
+            Volume24h = opportunity.Volume24h,
+            LongVolume24h = opportunity.LongVolume24h,
+            ShortVolume24h = opportunity.ShortVolume24h,
+            BidAskSpreadPercent = opportunity.BidAskSpreadPercent,
+            OrderbookDepthUsd = opportunity.OrderbookDepthUsd,
+            LiquidityStatus = opportunity.LiquidityStatus?.ToString(),
+
+            PositionCostPercent = opportunity.PositionCostPercent,
+            PositionSizeUsd = DEFAULT_POSITION_SIZE,
+
+            // Fixed-duration prediction feature (NEW)
+            TargetHoldHours = targetHoldHours,
+
+            // Target variables (actual outcomes at this duration)
+            StrategyName = "FixedDuration",
+            ExitReason = $"FIXED_DURATION_{targetHoldHours}h",
+            ActualHoldHours = actualHoldHours,
+            ActualProfitPercent = pnl.TotalProfitPercent,
+            ActualProfitUsd = pnl.TotalProfitUsd,
+            WasProfitable = pnl.TotalProfitPercent > 0,
+            HitProfitTarget = pnl.TotalProfitPercent > 0.5m,
+            HitStopLoss = pnl.TotalProfitPercent < -2.0m,
+
+            // Performance metrics
+            PeakUnrealizedProfitPercent = Math.Max(peakProfit, pnl.TotalProfitPercent),
+            MaxDrawdownPercent = maxDrawdown,
+            FundingPaymentsCount = fundingPayments.Count,
+            TotalFundingEarnedUsd = fundingPayments.Sum(f => f.Amount),
+
+            // Execution quality
+            TotalFeesUsd = totalFeesUsd,
+
+            // Prices (already include slippage)
+            EntryLongPrice = entryPrices.LongPrice,
+            EntryShortPrice = entryPrices.ShortPrice,
+            ExitLongPrice = exitPrices.LongPrice,
+            ExitShortPrice = exitPrices.ShortPrice,
+
+            // No snapshots for fixed-duration training (we don't need exit prediction data)
+            Snapshots = new List<PositionSnapshot>()
+        };
+    }
+
+    /// <summary>
+    /// Calculate peak profit and max drawdown during a hold period
+    /// </summary>
+    private (decimal peakProfit, decimal maxDrawdown) CalculatePeakAndDrawdown(
+        ArbitrageOpportunityDto opportunity,
+        List<HistoricalMarketSnapshot> snapshots,
+        int entryIndex,
+        int exitIndex,
+        (decimal LongPrice, decimal ShortPrice) entryPrices)
+    {
+        double peakProfit = double.MinValue;
+        double maxDrawdown = 0.0;
+
+        // Sample every 5 minutes between entry and exit
+        var entryTime = snapshots[entryIndex].Timestamp;
+        var exitTime = snapshots[exitIndex].Timestamp;
+        var sampleInterval = GetAdaptiveSampleInterval(opportunity);
+
+        var currentTime = entryTime.AddHours((double)sampleInterval);
+
+        while (currentTime <= exitTime)
+        {
+            var snapshotIndex = FindSnapshotIndexClosestTo(snapshots, currentTime, entryIndex);
+            if (snapshotIndex == -1 || snapshotIndex >= snapshots.Count)
+                break;
+
+            var snapshot = snapshots[snapshotIndex];
+
+            // Get current prices
+            var currentLongPrice = GetPrice(snapshot, opportunity.LongExchange, opportunity.Symbol, snapshotIndex);
+            var currentShortPrice = GetPrice(snapshot, opportunity.ShortExchange, opportunity.Symbol, snapshotIndex);
+
+            if (currentLongPrice == 0 || currentShortPrice == 0)
+            {
+                currentTime = currentTime.AddHours((double)sampleInterval);
+                continue;
+            }
+
+            // Calculate unrealized P&L (simplified, without funding)
+            var longPnl = (double)((currentLongPrice - entryPrices.LongPrice) / entryPrices.LongPrice);
+            var shortPnl = (double)((entryPrices.ShortPrice - currentShortPrice) / entryPrices.ShortPrice);
+            var pricePnl = ((longPnl + shortPnl) / 2.0) * 100.0;
+
+            // Subtract exit fees
+            var exitFeePercent = (double)(opportunity.PositionCostPercent / 2m);
+            var netPnl = pricePnl - exitFeePercent;
+
+            peakProfit = Math.Max(peakProfit, netPnl);
+            maxDrawdown = Math.Min(maxDrawdown, netPnl);
+
+            currentTime = currentTime.AddHours((double)sampleInterval);
+        }
+
+        // Clamp to reasonable ranges before converting to decimal (±1000% max)
+        // Extreme values from volatile tokens can overflow decimal conversion
+        peakProfit = Math.Clamp(peakProfit, -1000.0, 1000.0);
+        maxDrawdown = Math.Clamp(maxDrawdown, -1000.0, 1000.0);
+
+        return ((decimal)peakProfit, (decimal)maxDrawdown);
     }
 
     /// <summary>
@@ -353,6 +608,10 @@ public class PositionSimulator
             var exitFeePercent = (double)(opportunity.PositionCostPercent / 2m); // Half of total cost is exit
             var netUnrealizedPnl = pricePnl + (cumulativeFunding * 100.0) - exitFeePercent;
 
+            // Clamp PnL to realistic range (±50%) to prevent extreme values from volatile tokens
+            // Arbitrage profit >50% in hours is unrealistic and indicates data quality issues
+            netUnrealizedPnl = Math.Clamp(netUnrealizedPnl, -50.0, 50.0);
+
             // Update peak and drawdown tracking (use NET P&L)
             peakProfit = Math.Max(peakProfit, netUnrealizedPnl);
             maxDrawdown = Math.Min(maxDrawdown, netUnrealizedPnl);
@@ -408,16 +667,18 @@ public class PositionSimulator
             optimalExitIndex
         );
 
-        // Generate position snapshots from checkpoint data (thread-safe ID generation)
-        var positionSnapshots = _snapshotGenerator.GenerateSnapshots(
-            executionId: Interlocked.Increment(ref _executionIdCounter),
-            opportunity: opportunity,
-            entrySnapshot: entrySnapshot,
-            checkpoints: checkpoints,
-            optimalExitIndex: optimalExitIndex,
-            exitReason: exitReason,
-            optimalExitPnL: (decimal)bestProfit // Convert double to decimal
-        );
+        // DISABLED: Exit position snapshot generation (not needed for entry-only predictions)
+        // This significantly speeds up training data generation
+        // var positionSnapshots = _snapshotGenerator.GenerateSnapshots(
+        //     executionId: Interlocked.Increment(ref _executionIdCounter),
+        //     opportunity: opportunity,
+        //     entrySnapshot: entrySnapshot,
+        //     checkpoints: checkpoints,
+        //     optimalExitIndex: optimalExitIndex,
+        //     exitReason: exitReason,
+        //     optimalExitPnL: (decimal)bestProfit
+        // );
+        var positionSnapshots = new List<PositionSnapshot>();
 
         // Calculate exit prices with slippage
         var exitPrices = CalculateExitPrices(opportunity, exitSnapshot, bestExitIndex);
@@ -519,7 +780,10 @@ public class PositionSimulator
             HitStopLoss = false, // Not applicable for optimal hindsight
 
             // Performance metrics (convert double back to decimal for storage)
-            PeakUnrealizedProfitPercent = (decimal)peakProfit,
+            // BUG FIX: Ensure peak profit is always >= actual profit (mathematical requirement)
+            // peakProfit uses exit-only fees, but actual profit uses full position cost
+            // Take the max to prevent peak < actual inconsistency
+            PeakUnrealizedProfitPercent = Math.Max((decimal)peakProfit, pnl.TotalProfitPercent),
             MaxDrawdownPercent = (decimal)maxDrawdown,
             FundingPaymentsCount = fundingPayments.Count,
             TotalFundingEarnedUsd = fundingPayments.Sum(f => f.Amount),
@@ -1111,6 +1375,10 @@ public class PositionSimulator
         // totalPnlBeforeFees is in decimal (0.03 = 3%), multiply by 100 to get percent
         // Then subtract position cost percent (e.g., 0.2% for 0.1% entry + 0.1% exit)
         var totalPnlPercent = (totalPnlBeforeFees * 100) - opportunity.PositionCostPercent;
+
+        // Clamp PnL to realistic range (±50%) to prevent extreme values from volatile tokens
+        totalPnlPercent = Math.Clamp(totalPnlPercent, -50m, 50m);
+
         var totalPnlUsd = (totalPnlPercent / 100) * positionSize;
 
         return (totalPnlPercent, totalPnlUsd);

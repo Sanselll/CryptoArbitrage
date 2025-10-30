@@ -46,7 +46,7 @@ xgboost:
     gamma: 0.2828364305968697
     reg_alpha: 0.49326562706568244
     reg_lambda: 3.3253962521475
-    scale_pos_weight: 4.79  # Updated for optimal hindsight data: 17.3% success rate (84898/17735 = 4.79)
+    scale_pos_weight: 15.8  # Updated for filtered dataset (15.76:1 class imbalance)
     objective: 'binary:logistic'
     eval_metric: 'auc'
     tree_method: 'hist'

@@ -896,7 +896,7 @@ export const OpportunitiesList = () => {
                           : 'text-binance-text-secondary'
                       }`}>
                         {opp.spread30SampleAvg !== null && opp.spread30SampleAvg !== undefined
-                          ? `${opp.spread30SampleAvg >= 0 ? '+' : ''}${(opp.spread30SampleAvg * 100).toFixed(4)}%`
+                          ? `${opp.spread30SampleAvg >= 0 ? '+' : ''}${opp.spread30SampleAvg.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
