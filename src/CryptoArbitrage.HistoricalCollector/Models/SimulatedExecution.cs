@@ -75,6 +75,17 @@ public class SimulatedExecution
     public decimal PositionSizeUsd { get; set; } = 1000m; // Default simulation size
 
     // ===================================================================
+    // FIXED-DURATION PREDICTION FEATURE
+    // ===================================================================
+
+    /// <summary>
+    /// Target hold duration for fixed-duration predictions (in hours).
+    /// For training: The specific duration we're evaluating (0.5, 1, 2, 4, 8, 12, 24, 48, 72)
+    /// For inference: The duration the user wants to hold for
+    /// </summary>
+    public decimal? TargetHoldHours { get; set; }
+
+    // ===================================================================
     // TARGET VARIABLES (y) - What we're trying to predict
     // ===================================================================
 

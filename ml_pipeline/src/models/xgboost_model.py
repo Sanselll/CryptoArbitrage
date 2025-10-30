@@ -225,14 +225,14 @@ class XGBoostProfitPredictor(XGBoostModel):
         if config is None:
             config = {
                 'n_estimators': 500,
-                'max_depth': 6,
+                'max_depth': 5,  # Reduced from 6 to prevent overfitting
                 'learning_rate': 0.05,
                 'min_child_weight': 3,
                 'subsample': 0.8,
                 'colsample_bytree': 0.8,
-                'gamma': 0.1,
-                'reg_alpha': 0.1,
-                'reg_lambda': 1.0,
+                'gamma': 0.5,  # Increased from 0.1 (more conservative splits)
+                'reg_alpha': 0.5,  # Increased L1 regularization (was 0.1)
+                'reg_lambda': 2.0,  # Increased L2 regularization (was 1.0)
                 'objective': 'reg:squarederror',
                 'eval_metric': 'rmse',
                 'tree_method': 'hist',
@@ -250,13 +250,15 @@ class XGBoostSuccessClassifier(XGBoostModel):
         if config is None:
             config = {
                 'n_estimators': 300,
-                'max_depth': 5,
+                'max_depth': 4,  # Reduced from 5 to prevent overfitting
                 'learning_rate': 0.05,
                 'min_child_weight': 3,
                 'subsample': 0.8,
                 'colsample_bytree': 0.8,
-                'gamma': 0.1,
-                'scale_pos_weight': 1.0,
+                'gamma': 0.5,  # Increased from 0.1 (more conservative splits)
+                'scale_pos_weight': 5.1,  # FIX: Handle class imbalance (83.6% negative / 16.4% positive)
+                'reg_alpha': 0.5,  # Added L1 regularization
+                'reg_lambda': 2.0,  # Added L2 regularization
                 'objective': 'binary:logistic',
                 'eval_metric': 'auc',
                 'tree_method': 'hist',
@@ -274,14 +276,14 @@ class XGBoostDurationPredictor(XGBoostModel):
         if config is None:
             config = {
                 'n_estimators': 400,
-                'max_depth': 6,
+                'max_depth': 5,  # Reduced from 6 to prevent overfitting
                 'learning_rate': 0.05,
                 'min_child_weight': 3,
                 'subsample': 0.8,
                 'colsample_bytree': 0.8,
-                'gamma': 0.1,
-                'reg_alpha': 0.1,
-                'reg_lambda': 1.0,
+                'gamma': 0.5,  # Increased from 0.1 (more conservative splits)
+                'reg_alpha': 0.5,  # Increased L1 regularization (was 0.1)
+                'reg_lambda': 2.0,  # Increased L2 regularization (was 1.0)
                 'objective': 'reg:squarederror',
                 'eval_metric': 'rmse',
                 'tree_method': 'hist',

@@ -417,10 +417,10 @@ public class OpportunityEnricher : IHostedService
                 var longPrice = longHistory.PriceHistory[i];
                 var shortPrice = shortHistory.PriceHistory[i];
 
-                // Spread = (ShortPrice - LongPrice) / LongPrice
+                // Spread = (ShortPrice - LongPrice) / LongPrice * 100 (as percentage)
                 if (longPrice > 0)
                 {
-                    var spread = (shortPrice - longPrice) / longPrice;
+                    var spread = ((shortPrice - longPrice) / longPrice) * 100m;
                     spreads.Add(spread);
                 }
             }

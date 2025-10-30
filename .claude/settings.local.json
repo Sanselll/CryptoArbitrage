@@ -102,7 +102,9 @@
       "Bash(docker logs:*)",
       "Bash(docker stop:*)",
       "Bash(gh run list:*)",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "Bash(kill:*)",
+      "Bash(sort:*)"
     ],
     "deny": [],
     "ask": []
