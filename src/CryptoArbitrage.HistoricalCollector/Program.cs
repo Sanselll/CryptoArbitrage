@@ -98,7 +98,7 @@ var endDateOption = new Option<DateTime>(
 var intervalOption = new Option<string>(
     "--interval",
     description: "Snapshot interval (1m, 5m, 15m, etc.)",
-    getDefaultValue: () => "1m");
+    getDefaultValue: () => "5m");
 
 var exchangesOption = new Option<string>(
     "--exchanges",
@@ -273,7 +273,7 @@ collectCommand.SetHandler(async (startDate, endDate, exchanges, symbols) =>
             var fundingHistory = await fetcher.FetchAllFundingRates(currentDay, dayEnd, exchangeList, symbolList);
 
             Console.WriteLine($"  Step 3/4: Fetching price klines...");
-            var priceHistory = await fetcher.FetchAllPriceKlines(currentDay, dayEnd, exchangeList, symbolList, "1m");
+            var priceHistory = await fetcher.FetchAllPriceKlines(currentDay, dayEnd, exchangeList, symbolList, "5m");
 
             Console.WriteLine($"  Step 4/4: Saving data...");
             var manifest = await persister.SaveRawDataAsync(

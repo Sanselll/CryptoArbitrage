@@ -1,0 +1,308 @@
+================================================================================
+TRAINING PPO AGENT FOR FUNDING ARBITRAGE
+================================================================================
+Data: data/rl_train.csv
+Total timesteps: 80,000
+Learning rate: 0.0003
+Seed: 99
+
+Creating training environment with 8 parallel workers...
+Creating evaluation environment...
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 38,697 opportunities from 2025-10-22 00:40:00+00:00 to 2025-10-28 23:55:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+
+Initializing PPO agent...
+💻 Using CPU (faster than MPS for MLP + small batches)
+Using cpu device
+
+Model architecture:
+  Policy network: MLP (256 → 256 hidden layers)
+  Value network: MLP (256 → 256 hidden layers)
+  Total parameters: ~200K per network
+  Observation space: 124 dimensions
+  Action space: 9 discrete actions
+  Entropy: 0.0800 → 0.0200 (annealed via callback)
+  Gamma: 0.9900
+  GAE Lambda: 0.9800
+  Clip range: 0.243
+  Reward scale: 1.000
+  Hold bonus: 0.000
+  Quality entry bonus: 0.500
+  Quality entry penalty: -0.500
+
+================================================================================
+STARTING TRAINING
+================================================================================
+Training for 80,000 timesteps...
+Progress will be logged to: models/rl_v3_80k_seed99/ppo_20251031_143012
+
+Logging to models/rl_v3_80k_seed99/ppo_20251031_143012/tensorboard/PPO_1
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -18.4    |
+| time/                    |          |
+|    fps                   | 325      |
+|    iterations            | 1        |
+|    time_elapsed          | 50       |
+|    total_timesteps       | 16384    |
+| trading/                 |          |
+|    episode_pnl_pct       | 0.0132   |
+|    episode_reward        | 21.7     |
+|    final_portfolio_value | 1e+04    |
+|    reward_per_pnl        | 1.65e+03 |
+|    trades_count          | 21       |
+|    win_rate              | 23.8     |
+| train/                   |          |
+|    ent_coef              | 0.0677   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -37.5       |
+| time/                    |             |
+|    fps                   | 309         |
+|    iterations            | 2           |
+|    time_elapsed          | 105         |
+|    total_timesteps       | 32768       |
+| trading/                 |             |
+|    episode_pnl_pct       | -1.32       |
+|    episode_reward        | -117        |
+|    final_portfolio_value | 9.87e+03    |
+|    reward_per_pnl        | 88.5        |
+|    trades_count          | 22          |
+|    win_rate              | 22.7        |
+| train/                   |             |
+|    approx_kl             | 0.014552135 |
+|    clip_fraction         | 0.0634      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0554      |
+|    entropy_loss          | -2.19       |
+|    explained_variance    | -0.00174    |
+|    learning_rate         | 0.0003      |
+|    loss                  | 239         |
+|    n_updates             | 17          |
+|    policy_gradient_loss  | -0.0227     |
+|    value_loss            | 578         |
+------------------------------------------
+Eval num_timesteps=40000, episode_reward=-103.57 +/- 169.03
+New best mean reward!
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -104        |
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -36.6       |
+| time/                    |             |
+|    fps                   | 300         |
+|    iterations            | 3           |
+|    time_elapsed          | 163         |
+|    total_timesteps       | 49152       |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.163      |
+|    episode_reward        | -21.5       |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 132         |
+|    trades_count          | 17          |
+|    win_rate              | 17.6        |
+| train/                   |             |
+|    approx_kl             | 0.012242455 |
+|    clip_fraction         | 0.0521      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0431      |
+|    entropy_loss          | -2.18       |
+|    explained_variance    | 0.00754     |
+|    learning_rate         | 0.0003      |
+|    loss                  | 529         |
+|    n_updates             | 34          |
+|    policy_gradient_loss  | -0.0215     |
+|    value_loss            | 1.17e+03    |
+------------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -20         |
+| time/                    |             |
+|    fps                   | 286         |
+|    iterations            | 4           |
+|    time_elapsed          | 228         |
+|    total_timesteps       | 65536       |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.259      |
+|    episode_reward        | -33         |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 127         |
+|    trades_count          | 18          |
+|    win_rate              | 27.8        |
+| train/                   |             |
+|    approx_kl             | 0.013523938 |
+|    clip_fraction         | 0.07        |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0308      |
+|    entropy_loss          | -2.16       |
+|    explained_variance    | -0.00998    |
+|    learning_rate         | 0.0003      |
+|    loss                  | 542         |
+|    n_updates             | 51          |
+|    policy_gradient_loss  | -0.028      |
+|    value_loss            | 839         |
+------------------------------------------
+Eval num_timesteps=80000, episode_reward=-68.16 +/- 71.20
+New best mean reward!
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -68.2       |
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -16.9       |
+| time/                    |             |
+|    fps                   | 289         |
+|    iterations            | 5           |
+|    time_elapsed          | 282         |
+|    total_timesteps       | 81920       |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.302      |
+|    episode_reward        | -30.5       |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 101         |
+|    trades_count          | 21          |
+|    win_rate              | 19          |
+| train/                   |             |
+|    approx_kl             | 0.014060751 |
+|    clip_fraction         | 0.0797      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.02        |
+|    entropy_loss          | -2.14       |
+|    explained_variance    | -0.000883   |
+|    learning_rate         | 0.0003      |
+|    loss                  | 211         |
+|    n_updates             | 68          |
+|    policy_gradient_loss  | -0.0304     |
+|    value_loss            | 750         |
+------------------------------------------
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━ 81,920/80,000  [ 0:04:37 < 0:00:00 , 344 it/s ]
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+
+✅ Training complete!
+Final model saved to: models/rl_v3_80k_seed99/ppo_20251031_143012/final_model
+Best model saved to: models/rl_v3_80k_seed99/ppo_20251031_143012/best_model
+
+Evaluating best model on test set...
+
+================================================================================
+EVALUATING TRAINED AGENT
+================================================================================
+Loading model from: models/rl_v3_80k_seed99/ppo_20251031_143012/best_model/best_model.zip
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 38,697 opportunities from 2025-10-22 00:40:00+00:00 to 2025-10-28 23:55:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+Episode 1/10: Reward=+96.57, P&L=-0.12%, Steps=72
+Episode 2/10: Reward=+64.41, P&L=-0.39%, Steps=72
+Episode 3/10: Reward=-207.37, P&L=-1.27%, Steps=72
+Episode 4/10: Reward=-181.73, P&L=-0.99%, Steps=72
+Episode 5/10: Reward=+87.74, P&L=+0.04%, Steps=72
+Episode 6/10: Reward=-395.15, P&L=-1.59%, Steps=72
+Episode 7/10: Reward=-325.11, P&L=-1.36%, Steps=72
+Episode 8/10: Reward=-128.36, P&L=-0.78%, Steps=72
+Episode 9/10: Reward=-15.06, P&L=-0.37%, Steps=72
+Episode 10/10: Reward=-118.86, P&L=-0.53%, Steps=72
+
+────────────────────────────────────────────────────────────
+EVALUATION SUMMARY
+────────────────────────────────────────────────────────────
+Episodes: 10
+Average Reward: -112.29 ± 162.41
+Average P&L: -0.74% ± 0.52%
+Average Length: 72.0 steps
+Win Rate: 10.0%
+────────────────────────────────────────────────────────────
+
+TOP 5 MOST PROFITABLE TRADES:
+────────────────────────────────────────────────────────────────────────────────
+1. FUSDT | Entry: 2025-10-25 00:54 | P&L: $+122.27 (+1.90%) | Duration: 2.0h
+2. FUSDT | Entry: 2025-10-25 00:52 | P&L: $+68.93 (+1.07%) | Duration: 14.0h
+3. FUSDT | Entry: 2025-10-25 00:33 | P&L: $+57.81 (+1.78%) | Duration: 4.0h
+4. FUSDT | Entry: 2025-10-24 10:52 | P&L: $+41.39 (+0.64%) | Duration: 10.0h
+5. FUSDT | Entry: 2025-10-24 10:54 | P&L: $+41.32 (+0.64%) | Duration: 10.0h
+────────────────────────────────────────────────────────────────────────────────
+
+✅ All trades saved to: evaluation_trades_20251031_143529.csv
+   Total trades: 190
+   Winning trades: 65
+   Losing trades: 125

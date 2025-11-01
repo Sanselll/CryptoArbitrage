@@ -104,7 +104,16 @@
       "Bash(gh run list:*)",
       "Bash(git fetch:*)",
       "Bash(kill:*)",
-      "Bash(sort:*)"
+      "Bash(sort:*)",
+      "Bash(for dir in /Users/sansel/Projects/CryptoArbitrage/src/CryptoArbitrage.HistoricalCollector/data/opportunities/2025-09-{04,05,06,07,08})",
+      "Bash(jq:*)",
+      "Bash(while ps:*)",
+      "Bash(do sleep 10)",
+      "Bash(sysctl:*)",
+      "WebFetch(domain:docs.ray.io)",
+      "Bash(=2.9.0)",
+      "WebFetch(domain:stable-baselines3.readthedocs.io)",
+      "WebFetch(domain:stackoverflow.com)"
     ],
     "deny": [],
     "ask": []

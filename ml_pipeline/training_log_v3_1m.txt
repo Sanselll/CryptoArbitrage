@@ -1,0 +1,2384 @@
+================================================================================
+TRAINING PPO AGENT FOR FUNDING ARBITRAGE
+================================================================================
+Data: data/rl_train.csv
+Total timesteps: 1,000,000
+Learning rate: 0.0003
+Seed: 42
+
+Creating training environment with 8 parallel workers...
+Creating evaluation environment...
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 38,697 opportunities from 2025-10-22 00:40:00+00:00 to 2025-10-28 23:55:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+
+Initializing PPO agent...
+💻 Using CPU (faster than MPS for MLP + small batches)
+Using cpu device
+
+Model architecture:
+  Policy network: MLP (256 → 256 hidden layers)
+  Value network: MLP (256 → 256 hidden layers)
+  Total parameters: ~200K per network
+  Observation space: 124 dimensions
+  Action space: 9 discrete actions
+  Entropy: 0.0800 → 0.0200 (annealed via callback)
+  Gamma: 0.9900
+  GAE Lambda: 0.9800
+  Clip range: 0.243
+  Reward scale: 1.000
+  Hold bonus: 0.000
+  Quality entry bonus: 0.500
+  Quality entry penalty: -0.500
+
+================================================================================
+STARTING TRAINING
+================================================================================
+Training for 1,000,000 timesteps...
+Progress will be logged to: models/rl_v3_1m/ppo_20251031_120100
+
+Logging to models/rl_v3_1m/ppo_20251031_120100/tensorboard/PPO_1
+/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/stable_baselines3/common/callbacks.py:418: UserWarning: Training and eval env are not of the same type<stable_baselines3.common.vec_env.subproc_vec_env.SubprocVecEnv object at 0x325e2c700> != <stable_baselines3.common.vec_env.dummy_vec_env.DummyVecEnv object at 0x325e2ffa0>
+  warnings.warn("Training and eval env are not of the same type" f"{self.training_env} != {self.eval_env}")
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -20.7    |
+| time/                    |          |
+|    fps                   | 344      |
+|    iterations            | 1        |
+|    time_elapsed          | 47       |
+|    total_timesteps       | 16384    |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.356   |
+|    episode_reward        | -27      |
+|    final_portfolio_value | 9.96e+03 |
+|    reward_per_pnl        | 75.8     |
+|    trades_count          | 22       |
+|    win_rate              | 18.2     |
+| train/                   |          |
+|    ent_coef              | 0.079    |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -29.4       |
+| time/                    |             |
+|    fps                   | 329         |
+|    iterations            | 2           |
+|    time_elapsed          | 99          |
+|    total_timesteps       | 32768       |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.4        |
+|    episode_reward        | -30         |
+|    final_portfolio_value | 9.96e+03    |
+|    reward_per_pnl        | 74.9        |
+|    trades_count          | 22          |
+|    win_rate              | 13.6        |
+| train/                   |             |
+|    approx_kl             | 0.014055121 |
+|    clip_fraction         | 0.0676      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.078       |
+|    entropy_loss          | -2.19       |
+|    explained_variance    | -0.00142    |
+|    learning_rate         | 0.0003      |
+|    loss                  | 226         |
+|    n_updates             | 17          |
+|    policy_gradient_loss  | -0.0228     |
+|    value_loss            | 715         |
+------------------------------------------
+Eval num_timesteps=40000, episode_reward=-73.89 +/- 97.50
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -73.9       |
+| time/                    |             |
+|    total_timesteps       | 40000       |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.887      |
+|    episode_reward        | -109        |
+|    final_portfolio_value | 9.91e+03    |
+|    reward_per_pnl        | 123         |
+|    trades_count          | 21          |
+|    win_rate              | 28.6        |
+| train/                   |             |
+|    approx_kl             | 0.011762042 |
+|    clip_fraction         | 0.0547      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.18       |
+|    explained_variance    | -0.00619    |
+|    learning_rate         | 0.0003      |
+|    loss                  | 803         |
+|    n_updates             | 34          |
+|    policy_gradient_loss  | -0.0251     |
+|    value_loss            | 901         |
+------------------------------------------
+New best mean reward!
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -32.4    |
+| time/                    |          |
+|    fps                   | 330      |
+|    iterations            | 3        |
+|    time_elapsed          | 148      |
+|    total_timesteps       | 49152    |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.349   |
+|    episode_reward        | -29.5    |
+|    final_portfolio_value | 9.97e+03 |
+|    reward_per_pnl        | 84.4     |
+|    trades_count          | 21       |
+|    win_rate              | 14.3     |
+| train/                   |          |
+|    ent_coef              | 0.0771   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -22         |
+| time/                    |             |
+|    fps                   | 347         |
+|    iterations            | 4           |
+|    time_elapsed          | 188         |
+|    total_timesteps       | 65536       |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.654      |
+|    episode_reward        | -49.6       |
+|    final_portfolio_value | 9.93e+03    |
+|    reward_per_pnl        | 75.8        |
+|    trades_count          | 20          |
+|    win_rate              | 5           |
+| train/                   |             |
+|    approx_kl             | 0.012674956 |
+|    clip_fraction         | 0.0625      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0761      |
+|    entropy_loss          | -2.17       |
+|    explained_variance    | 0.00266     |
+|    learning_rate         | 0.0003      |
+|    loss                  | 316         |
+|    n_updates             | 51          |
+|    policy_gradient_loss  | -0.0249     |
+|    value_loss            | 1.31e+03    |
+------------------------------------------
+Eval num_timesteps=80000, episode_reward=-62.60 +/- 107.00
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -62.6       |
+| time/                    |             |
+|    total_timesteps       | 80000       |
+| trading/                 |             |
+|    episode_pnl_pct       | 0.0376      |
+|    episode_reward        | 6.25        |
+|    final_portfolio_value | 1e+04       |
+|    reward_per_pnl        | 166         |
+|    trades_count          | 20          |
+|    win_rate              | 20          |
+| train/                   |             |
+|    approx_kl             | 0.012669086 |
+|    clip_fraction         | 0.0716      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.16       |
+|    explained_variance    | 0.016       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 153         |
+|    n_updates             | 68          |
+|    policy_gradient_loss  | -0.025      |
+|    value_loss            | 1.83e+03    |
+------------------------------------------
+New best mean reward!
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -29      |
+| time/                    |          |
+|    fps                   | 343      |
+|    iterations            | 5        |
+|    time_elapsed          | 238      |
+|    total_timesteps       | 81920    |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.228   |
+|    episode_reward        | -0.0143  |
+|    final_portfolio_value | 9.98e+03 |
+|    reward_per_pnl        | 0.0626   |
+|    trades_count          | 22       |
+|    win_rate              | 22.7     |
+| train/                   |          |
+|    ent_coef              | 0.0751   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -24.1       |
+| time/                    |             |
+|    fps                   | 347         |
+|    iterations            | 6           |
+|    time_elapsed          | 283         |
+|    total_timesteps       | 98304       |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.355      |
+|    episode_reward        | -35.5       |
+|    final_portfolio_value | 9.96e+03    |
+|    reward_per_pnl        | 99.9        |
+|    trades_count          | 19          |
+|    win_rate              | 5.26        |
+| train/                   |             |
+|    approx_kl             | 0.013590996 |
+|    clip_fraction         | 0.0728      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0741      |
+|    entropy_loss          | -2.15       |
+|    explained_variance    | 0.0402      |
+|    learning_rate         | 0.0003      |
+|    loss                  | 312         |
+|    n_updates             | 85          |
+|    policy_gradient_loss  | -0.029      |
+|    value_loss            | 1.13e+03    |
+------------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -28         |
+| time/                    |             |
+|    fps                   | 356         |
+|    iterations            | 7           |
+|    time_elapsed          | 321         |
+|    total_timesteps       | 114688      |
+| trading/                 |             |
+|    episode_pnl_pct       | 0.0201      |
+|    episode_reward        | 16.2        |
+|    final_portfolio_value | 1e+04       |
+|    reward_per_pnl        | 808         |
+|    trades_count          | 17          |
+|    win_rate              | 29.4        |
+| train/                   |             |
+|    approx_kl             | 0.012855419 |
+|    clip_fraction         | 0.0735      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0731      |
+|    entropy_loss          | -2.14       |
+|    explained_variance    | 0.0666      |
+|    learning_rate         | 0.0003      |
+|    loss                  | 447         |
+|    n_updates             | 102         |
+|    policy_gradient_loss  | -0.03       |
+|    value_loss            | 941         |
+------------------------------------------
+Eval num_timesteps=120000, episode_reward=-112.96 +/- 136.44
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -113        |
+| time/                    |             |
+|    total_timesteps       | 120000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.339      |
+|    episode_reward        | -28         |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 82.5        |
+|    trades_count          | 22          |
+|    win_rate              | 27.3        |
+| train/                   |             |
+|    approx_kl             | 0.014459912 |
+|    clip_fraction         | 0.0841      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.13       |
+|    explained_variance    | -0.0347     |
+|    learning_rate         | 0.0003      |
+|    loss                  | 310         |
+|    n_updates             | 119         |
+|    policy_gradient_loss  | -0.0308     |
+|    value_loss            | 1e+03       |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -29.9    |
+| time/                    |          |
+|    fps                   | 358      |
+|    iterations            | 8        |
+|    time_elapsed          | 365      |
+|    total_timesteps       | 131072   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.203   |
+|    episode_reward        | -8.36    |
+|    final_portfolio_value | 9.98e+03 |
+|    reward_per_pnl        | 41.2     |
+|    trades_count          | 21       |
+|    win_rate              | 19       |
+| train/                   |          |
+|    ent_coef              | 0.0721   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -13.4       |
+| time/                    |             |
+|    fps                   | 361         |
+|    iterations            | 9           |
+|    time_elapsed          | 407         |
+|    total_timesteps       | 147456      |
+| trading/                 |             |
+|    episode_pnl_pct       | -1.93       |
+|    episode_reward        | -165        |
+|    final_portfolio_value | 9.81e+03    |
+|    reward_per_pnl        | 85          |
+|    trades_count          | 27          |
+|    win_rate              | 22.2        |
+| train/                   |             |
+|    approx_kl             | 0.013137067 |
+|    clip_fraction         | 0.0765      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0712      |
+|    entropy_loss          | -2.12       |
+|    explained_variance    | 0.027       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 1.28e+03    |
+|    n_updates             | 136         |
+|    policy_gradient_loss  | -0.0302     |
+|    value_loss            | 1.24e+03    |
+------------------------------------------
+Eval num_timesteps=160000, episode_reward=-24.68 +/- 38.98
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -24.7       |
+| time/                    |             |
+|    total_timesteps       | 160000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.167      |
+|    episode_reward        | -11.9       |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 71          |
+|    trades_count          | 22          |
+|    win_rate              | 31.8        |
+| train/                   |             |
+|    approx_kl             | 0.014098051 |
+|    clip_fraction         | 0.0833      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.11       |
+|    explained_variance    | 0.022       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 525         |
+|    n_updates             | 153         |
+|    policy_gradient_loss  | -0.0291     |
+|    value_loss            | 1.45e+03    |
+------------------------------------------
+New best mean reward!
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -18      |
+| time/                    |          |
+|    fps                   | 363      |
+|    iterations            | 10       |
+|    time_elapsed          | 450      |
+|    total_timesteps       | 163840   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.34    |
+|    episode_reward        | -34.6    |
+|    final_portfolio_value | 9.97e+03 |
+|    reward_per_pnl        | 102      |
+|    trades_count          | 18       |
+|    win_rate              | 11.1     |
+| train/                   |          |
+|    ent_coef              | 0.0702   |
+---------------------------------------
+-----------------------------------------
+| rollout/                 |            |
+|    ep_len_mean           | 72         |
+|    ep_rew_mean           | -26.9      |
+| time/                    |            |
+|    fps                   | 368        |
+|    iterations            | 11         |
+|    time_elapsed          | 488        |
+|    total_timesteps       | 180224     |
+| trading/                 |            |
+|    episode_pnl_pct       | -0.105     |
+|    episode_reward        | -12.1      |
+|    final_portfolio_value | 9.99e+03   |
+|    reward_per_pnl        | 115        |
+|    trades_count          | 21         |
+|    win_rate              | 23.8       |
+| train/                   |            |
+|    approx_kl             | 0.01631653 |
+|    clip_fraction         | 0.105      |
+|    clip_range            | 0.243      |
+|    ent_coef              | 0.0692     |
+|    entropy_loss          | -2.11      |
+|    explained_variance    | 0.0633     |
+|    learning_rate         | 0.0003     |
+|    loss                  | 167        |
+|    n_updates             | 170        |
+|    policy_gradient_loss  | -0.0378    |
+|    value_loss            | 634        |
+-----------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -25.6       |
+| time/                    |             |
+|    fps                   | 373         |
+|    iterations            | 12          |
+|    time_elapsed          | 525         |
+|    total_timesteps       | 196608      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.841      |
+|    episode_reward        | -50.7       |
+|    final_portfolio_value | 9.92e+03    |
+|    reward_per_pnl        | 60.3        |
+|    trades_count          | 20          |
+|    win_rate              | 15          |
+| train/                   |             |
+|    approx_kl             | 0.017308164 |
+|    clip_fraction         | 0.108       |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0682      |
+|    entropy_loss          | -2.1        |
+|    explained_variance    | 0.00405     |
+|    learning_rate         | 0.0003      |
+|    loss                  | 303         |
+|    n_updates             | 187         |
+|    policy_gradient_loss  | -0.0397     |
+|    value_loss            | 592         |
+------------------------------------------
+Eval num_timesteps=200000, episode_reward=-54.18 +/- 74.51
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -54.2       |
+| time/                    |             |
+|    total_timesteps       | 200000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.324      |
+|    episode_reward        | -36.3       |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 112         |
+|    trades_count          | 21          |
+|    win_rate              | 23.8        |
+| train/                   |             |
+|    approx_kl             | 0.017795816 |
+|    clip_fraction         | 0.119       |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.09       |
+|    explained_variance    | 0.0844      |
+|    learning_rate         | 0.0003      |
+|    loss                  | 164         |
+|    n_updates             | 204         |
+|    policy_gradient_loss  | -0.042      |
+|    value_loss            | 515         |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -20.7    |
+| time/                    |          |
+|    fps                   | 371      |
+|    iterations            | 13       |
+|    time_elapsed          | 572      |
+|    total_timesteps       | 212992   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.472   |
+|    episode_reward        | -38.6    |
+|    final_portfolio_value | 9.95e+03 |
+|    reward_per_pnl        | 81.8     |
+|    trades_count          | 19       |
+|    win_rate              | 15.8     |
+| train/                   |          |
+|    ent_coef              | 0.0672   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -17.3       |
+| time/                    |             |
+|    fps                   | 374         |
+|    iterations            | 14          |
+|    time_elapsed          | 613         |
+|    total_timesteps       | 229376      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.331      |
+|    episode_reward        | -26.7       |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 80.7        |
+|    trades_count          | 19          |
+|    win_rate              | 15.8        |
+| train/                   |             |
+|    approx_kl             | 0.016287182 |
+|    clip_fraction         | 0.0988      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0662      |
+|    entropy_loss          | -2.08       |
+|    explained_variance    | 0.0255      |
+|    learning_rate         | 0.0003      |
+|    loss                  | 475         |
+|    n_updates             | 221         |
+|    policy_gradient_loss  | -0.0344     |
+|    value_loss            | 1.2e+03     |
+------------------------------------------
+Eval num_timesteps=240000, episode_reward=-79.20 +/- 114.69
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -79.2       |
+| time/                    |             |
+|    total_timesteps       | 240000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.0474     |
+|    episode_reward        | -3.72       |
+|    final_portfolio_value | 1e+04       |
+|    reward_per_pnl        | 78.4        |
+|    trades_count          | 20          |
+|    win_rate              | 20          |
+| train/                   |             |
+|    approx_kl             | 0.017938301 |
+|    clip_fraction         | 0.118       |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.07       |
+|    explained_variance    | 0.0742      |
+|    learning_rate         | 0.0003      |
+|    loss                  | 395         |
+|    n_updates             | 238         |
+|    policy_gradient_loss  | -0.0379     |
+|    value_loss            | 794         |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -7.21    |
+| time/                    |          |
+|    fps                   | 373      |
+|    iterations            | 15       |
+|    time_elapsed          | 658      |
+|    total_timesteps       | 245760   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.206   |
+|    episode_reward        | -28      |
+|    final_portfolio_value | 9.98e+03 |
+|    reward_per_pnl        | 136      |
+|    trades_count          | 17       |
+|    win_rate              | 5.88     |
+| train/                   |          |
+|    ent_coef              | 0.0653   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -21.2       |
+| time/                    |             |
+|    fps                   | 374         |
+|    iterations            | 16          |
+|    time_elapsed          | 699         |
+|    total_timesteps       | 262144      |
+| trading/                 |             |
+|    episode_pnl_pct       | -2.62       |
+|    episode_reward        | -269        |
+|    final_portfolio_value | 9.74e+03    |
+|    reward_per_pnl        | 103         |
+|    trades_count          | 21          |
+|    win_rate              | 19          |
+| train/                   |             |
+|    approx_kl             | 0.015516427 |
+|    clip_fraction         | 0.1         |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0643      |
+|    entropy_loss          | -2.07       |
+|    explained_variance    | 0.113       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 242         |
+|    n_updates             | 255         |
+|    policy_gradient_loss  | -0.0382     |
+|    value_loss            | 964         |
+------------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -13.7       |
+| time/                    |             |
+|    fps                   | 376         |
+|    iterations            | 17          |
+|    time_elapsed          | 739         |
+|    total_timesteps       | 278528      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.49       |
+|    episode_reward        | -22         |
+|    final_portfolio_value | 9.95e+03    |
+|    reward_per_pnl        | 44.8        |
+|    trades_count          | 19          |
+|    win_rate              | 10.5        |
+| train/                   |             |
+|    approx_kl             | 0.016378714 |
+|    clip_fraction         | 0.104       |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0633      |
+|    entropy_loss          | -2.06       |
+|    explained_variance    | 0.0268      |
+|    learning_rate         | 0.0003      |
+|    loss                  | 467         |
+|    n_updates             | 272         |
+|    policy_gradient_loss  | -0.0374     |
+|    value_loss            | 1.25e+03    |
+------------------------------------------
+Eval num_timesteps=280000, episode_reward=-3.51 +/- 34.54
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -3.51       |
+| time/                    |             |
+|    total_timesteps       | 280000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.169      |
+|    episode_reward        | -10.6       |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 62.5        |
+|    trades_count          | 24          |
+|    win_rate              | 29.2        |
+| train/                   |             |
+|    approx_kl             | 0.014871594 |
+|    clip_fraction         | 0.0959      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.07       |
+|    explained_variance    | 0.0831      |
+|    learning_rate         | 0.0003      |
+|    loss                  | 357         |
+|    n_updates             | 289         |
+|    policy_gradient_loss  | -0.0355     |
+|    value_loss            | 1.32e+03    |
+------------------------------------------
+New best mean reward!
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -1.89    |
+| time/                    |          |
+|    fps                   | 376      |
+|    iterations            | 18       |
+|    time_elapsed          | 783      |
+|    total_timesteps       | 294912   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.0738  |
+|    episode_reward        | 6.06     |
+|    final_portfolio_value | 9.99e+03 |
+|    reward_per_pnl        | -82.2    |
+|    trades_count          | 17       |
+|    win_rate              | 17.6     |
+| train/                   |          |
+|    ent_coef              | 0.0623   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -17.4       |
+| time/                    |             |
+|    fps                   | 378         |
+|    iterations            | 19          |
+|    time_elapsed          | 822         |
+|    total_timesteps       | 311296      |
+| trading/                 |             |
+|    episode_pnl_pct       | 0.211       |
+|    episode_reward        | 179         |
+|    final_portfolio_value | 1e+04       |
+|    reward_per_pnl        | 846         |
+|    trades_count          | 19          |
+|    win_rate              | 36.8        |
+| train/                   |             |
+|    approx_kl             | 0.014685059 |
+|    clip_fraction         | 0.0925      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0613      |
+|    entropy_loss          | -2.06       |
+|    explained_variance    | 0.0593      |
+|    learning_rate         | 0.0003      |
+|    loss                  | 503         |
+|    n_updates             | 306         |
+|    policy_gradient_loss  | -0.0322     |
+|    value_loss            | 2.24e+03    |
+------------------------------------------
+Eval num_timesteps=320000, episode_reward=-48.04 +/- 79.17
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -48         |
+| time/                    |             |
+|    total_timesteps       | 320000      |
+| trading/                 |             |
+|    episode_pnl_pct       | 0.0308      |
+|    episode_reward        | -2.69       |
+|    final_portfolio_value | 1e+04       |
+|    reward_per_pnl        | -87.5       |
+|    trades_count          | 20          |
+|    win_rate              | 20          |
+| train/                   |             |
+|    approx_kl             | 0.014781758 |
+|    clip_fraction         | 0.086       |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.06       |
+|    explained_variance    | 0.0906      |
+|    learning_rate         | 0.0003      |
+|    loss                  | 412         |
+|    n_updates             | 323         |
+|    policy_gradient_loss  | -0.032      |
+|    value_loss            | 1.95e+03    |
+------------------------------------------
+----------------------------------------
+| rollout/                 |           |
+|    ep_len_mean           | 72        |
+|    ep_rew_mean           | -1.59     |
+| time/                    |           |
+|    fps                   | 380       |
+|    iterations            | 20        |
+|    time_elapsed          | 861       |
+|    total_timesteps       | 327680    |
+| trading/                 |           |
+|    episode_pnl_pct       | -0.00886  |
+|    episode_reward        | 22.1      |
+|    final_portfolio_value | 1e+04     |
+|    reward_per_pnl        | -2.49e+03 |
+|    trades_count          | 22        |
+|    win_rate              | 13.6      |
+| train/                   |           |
+|    ent_coef              | 0.0603    |
+----------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -8.19       |
+| time/                    |             |
+|    fps                   | 380         |
+|    iterations            | 21          |
+|    time_elapsed          | 903         |
+|    total_timesteps       | 344064      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.305      |
+|    episode_reward        | -18.2       |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 59.7        |
+|    trades_count          | 21          |
+|    win_rate              | 19          |
+| train/                   |             |
+|    approx_kl             | 0.016096374 |
+|    clip_fraction         | 0.0965      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0594      |
+|    entropy_loss          | -2.05       |
+|    explained_variance    | 0.264       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 1.67e+03    |
+|    n_updates             | 340         |
+|    policy_gradient_loss  | -0.0366     |
+|    value_loss            | 976         |
+------------------------------------------
+Eval num_timesteps=360000, episode_reward=-226.22 +/- 65.87
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -226        |
+| time/                    |             |
+|    total_timesteps       | 360000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.233      |
+|    episode_reward        | 9.82        |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | -42.2       |
+|    trades_count          | 20          |
+|    win_rate              | 15          |
+| train/                   |             |
+|    approx_kl             | 0.015594596 |
+|    clip_fraction         | 0.0994      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.03       |
+|    explained_variance    | 0.245       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 188         |
+|    n_updates             | 357         |
+|    policy_gradient_loss  | -0.037      |
+|    value_loss            | 814         |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -26.8    |
+| time/                    |          |
+|    fps                   | 380      |
+|    iterations            | 22       |
+|    time_elapsed          | 946      |
+|    total_timesteps       | 360448   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.18    |
+|    episode_reward        | -7.12    |
+|    final_portfolio_value | 9.98e+03 |
+|    reward_per_pnl        | 39.5     |
+|    trades_count          | 23       |
+|    win_rate              | 21.7     |
+| train/                   |          |
+|    ent_coef              | 0.0584   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -16.9       |
+| time/                    |             |
+|    fps                   | 380         |
+|    iterations            | 23          |
+|    time_elapsed          | 991         |
+|    total_timesteps       | 376832      |
+| trading/                 |             |
+|    episode_pnl_pct       | -2.29       |
+|    episode_reward        | -148        |
+|    final_portfolio_value | 9.77e+03    |
+|    reward_per_pnl        | 64.5        |
+|    trades_count          | 22          |
+|    win_rate              | 18.2        |
+| train/                   |             |
+|    approx_kl             | 0.015501351 |
+|    clip_fraction         | 0.0862      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0574      |
+|    entropy_loss          | -2.04       |
+|    explained_variance    | 0.195       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 761         |
+|    n_updates             | 374         |
+|    policy_gradient_loss  | -0.0315     |
+|    value_loss            | 1.86e+03    |
+------------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -7.97       |
+| time/                    |             |
+|    fps                   | 381         |
+|    iterations            | 24          |
+|    time_elapsed          | 1031        |
+|    total_timesteps       | 393216      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.25       |
+|    episode_reward        | -1.42       |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 5.68        |
+|    trades_count          | 20          |
+|    win_rate              | 30          |
+| train/                   |             |
+|    approx_kl             | 0.016358241 |
+|    clip_fraction         | 0.0967      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0564      |
+|    entropy_loss          | -2.04       |
+|    explained_variance    | 0.276       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 552         |
+|    n_updates             | 391         |
+|    policy_gradient_loss  | -0.0374     |
+|    value_loss            | 749         |
+------------------------------------------
+Eval num_timesteps=400000, episode_reward=24.92 +/- 87.53
+Episode length: 72.00 +/- 0.00
+-----------------------------------------
+| eval/                    |            |
+|    mean_ep_length        | 72         |
+|    mean_reward           | 24.9       |
+| time/                    |            |
+|    total_timesteps       | 400000     |
+| trading/                 |            |
+|    episode_pnl_pct       | 2.07       |
+|    episode_reward        | 234        |
+|    final_portfolio_value | 1.02e+04   |
+|    reward_per_pnl        | 113        |
+|    trades_count          | 26         |
+|    win_rate              | 26.9       |
+| train/                   |            |
+|    approx_kl             | 0.01728123 |
+|    clip_fraction         | 0.102      |
+|    clip_range            | 0.243      |
+|    entropy_loss          | -2.02      |
+|    explained_variance    | 0.167      |
+|    learning_rate         | 0.0003     |
+|    loss                  | 435        |
+|    n_updates             | 408        |
+|    policy_gradient_loss  | -0.0368    |
+|    value_loss            | 963        |
+-----------------------------------------
+New best mean reward!
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -11.5    |
+| time/                    |          |
+|    fps                   | 380      |
+|    iterations            | 25       |
+|    time_elapsed          | 1076     |
+|    total_timesteps       | 409600   |
+| trading/                 |          |
+|    episode_pnl_pct       | 0.0956   |
+|    episode_reward        | 62.2     |
+|    final_portfolio_value | 1e+04    |
+|    reward_per_pnl        | 650      |
+|    trades_count          | 21       |
+|    win_rate              | 28.6     |
+| train/                   |          |
+|    ent_coef              | 0.0554   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -14.8       |
+| time/                    |             |
+|    fps                   | 382         |
+|    iterations            | 26          |
+|    time_elapsed          | 1113        |
+|    total_timesteps       | 425984      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.339      |
+|    episode_reward        | 1.36        |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | -4.01       |
+|    trades_count          | 25          |
+|    win_rate              | 16          |
+| train/                   |             |
+|    approx_kl             | 0.015229446 |
+|    clip_fraction         | 0.0907      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0544      |
+|    entropy_loss          | -2.01       |
+|    explained_variance    | 0.318       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 420         |
+|    n_updates             | 425         |
+|    policy_gradient_loss  | -0.0356     |
+|    value_loss            | 1.06e+03    |
+------------------------------------------
+Eval num_timesteps=440000, episode_reward=-254.64 +/- 167.24
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -255        |
+| time/                    |             |
+|    total_timesteps       | 440000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.204      |
+|    episode_reward        | -2.09       |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 10.3        |
+|    trades_count          | 22          |
+|    win_rate              | 22.7        |
+| train/                   |             |
+|    approx_kl             | 0.016702674 |
+|    clip_fraction         | 0.104       |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2.01       |
+|    explained_variance    | 0.211       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 355         |
+|    n_updates             | 442         |
+|    policy_gradient_loss  | -0.0375     |
+|    value_loss            | 1.23e+03    |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -10.2    |
+| time/                    |          |
+|    fps                   | 383      |
+|    iterations            | 27       |
+|    time_elapsed          | 1153     |
+|    total_timesteps       | 442368   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.0321  |
+|    episode_reward        | 4.88     |
+|    final_portfolio_value | 1e+04    |
+|    reward_per_pnl        | -152     |
+|    trades_count          | 20       |
+|    win_rate              | 40       |
+| train/                   |          |
+|    ent_coef              | 0.0535   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 1.14        |
+| time/                    |             |
+|    fps                   | 383         |
+|    iterations            | 28          |
+|    time_elapsed          | 1197        |
+|    total_timesteps       | 458752      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.333      |
+|    episode_reward        | -21.5       |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 64.5        |
+|    trades_count          | 21          |
+|    win_rate              | 14.3        |
+| train/                   |             |
+|    approx_kl             | 0.014332156 |
+|    clip_fraction         | 0.0915      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0525      |
+|    entropy_loss          | -2.02       |
+|    explained_variance    | 0.209       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 800         |
+|    n_updates             | 459         |
+|    policy_gradient_loss  | -0.0317     |
+|    value_loss            | 1.72e+03    |
+------------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -10.8       |
+| time/                    |             |
+|    fps                   | 383         |
+|    iterations            | 29          |
+|    time_elapsed          | 1238        |
+|    total_timesteps       | 475136      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.199      |
+|    episode_reward        | -17.8       |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 89.3        |
+|    trades_count          | 22          |
+|    win_rate              | 18.2        |
+| train/                   |             |
+|    approx_kl             | 0.018609028 |
+|    clip_fraction         | 0.112       |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0515      |
+|    entropy_loss          | -2.01       |
+|    explained_variance    | 0.362       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 359         |
+|    n_updates             | 476         |
+|    policy_gradient_loss  | -0.0445     |
+|    value_loss            | 634         |
+------------------------------------------
+Eval num_timesteps=480000, episode_reward=-86.21 +/- 163.96
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -86.2       |
+| time/                    |             |
+|    total_timesteps       | 480000      |
+| trading/                 |             |
+|    episode_pnl_pct       | 0.00326     |
+|    episode_reward        | 15.1        |
+|    final_portfolio_value | 1e+04       |
+|    reward_per_pnl        | 4.64e+03    |
+|    trades_count          | 23          |
+|    win_rate              | 34.8        |
+| train/                   |             |
+|    approx_kl             | 0.017307606 |
+|    clip_fraction         | 0.108       |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -2          |
+|    explained_variance    | 0.396       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 282         |
+|    n_updates             | 493         |
+|    policy_gradient_loss  | -0.0409     |
+|    value_loss            | 769         |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 1.08     |
+| time/                    |          |
+|    fps                   | 383      |
+|    iterations            | 30       |
+|    time_elapsed          | 1280     |
+|    total_timesteps       | 491520   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.362   |
+|    episode_reward        | -39.3    |
+|    final_portfolio_value | 9.96e+03 |
+|    reward_per_pnl        | 109      |
+|    trades_count          | 22       |
+|    win_rate              | 4.55     |
+| train/                   |          |
+|    ent_coef              | 0.0505   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 20.5        |
+| time/                    |             |
+|    fps                   | 384         |
+|    iterations            | 31          |
+|    time_elapsed          | 1319        |
+|    total_timesteps       | 507904      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.443      |
+|    episode_reward        | -36.6       |
+|    final_portfolio_value | 9.96e+03    |
+|    reward_per_pnl        | 82.6        |
+|    trades_count          | 20          |
+|    win_rate              | 15          |
+| train/                   |             |
+|    approx_kl             | 0.016947906 |
+|    clip_fraction         | 0.105       |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0495      |
+|    entropy_loss          | -2          |
+|    explained_variance    | 0.374       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 193         |
+|    n_updates             | 510         |
+|    policy_gradient_loss  | -0.0404     |
+|    value_loss            | 783         |
+------------------------------------------
+Eval num_timesteps=520000, episode_reward=-102.89 +/- 87.96
+Episode length: 72.00 +/- 0.00
+-------------------------------------------
+| eval/                    |              |
+|    mean_ep_length        | 72           |
+|    mean_reward           | -103         |
+| time/                    |              |
+|    total_timesteps       | 520000       |
+| trading/                 |              |
+|    episode_pnl_pct       | -0.0895      |
+|    episode_reward        | 2.72         |
+|    final_portfolio_value | 9.99e+03     |
+|    reward_per_pnl        | -30.4        |
+|    trades_count          | 24           |
+|    win_rate              | 29.2         |
+| train/                   |              |
+|    approx_kl             | 0.0141972685 |
+|    clip_fraction         | 0.08         |
+|    clip_range            | 0.243        |
+|    entropy_loss          | -1.99        |
+|    explained_variance    | 0.183        |
+|    learning_rate         | 0.0003       |
+|    loss                  | 557          |
+|    n_updates             | 527          |
+|    policy_gradient_loss  | -0.0268      |
+|    value_loss            | 3e+03        |
+-------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -8.43    |
+| time/                    |          |
+|    fps                   | 384      |
+|    iterations            | 32       |
+|    time_elapsed          | 1362     |
+|    total_timesteps       | 524288   |
+| trading/                 |          |
+|    episode_pnl_pct       | -1.24    |
+|    episode_reward        | -74.7    |
+|    final_portfolio_value | 9.88e+03 |
+|    reward_per_pnl        | 60.4     |
+|    trades_count          | 27       |
+|    win_rate              | 22.2     |
+| train/                   |          |
+|    ent_coef              | 0.0485   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 11.1        |
+| time/                    |             |
+|    fps                   | 385         |
+|    iterations            | 33          |
+|    time_elapsed          | 1403        |
+|    total_timesteps       | 540672      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.477      |
+|    episode_reward        | -32.2       |
+|    final_portfolio_value | 9.95e+03    |
+|    reward_per_pnl        | 67.4        |
+|    trades_count          | 26          |
+|    win_rate              | 15.4        |
+| train/                   |             |
+|    approx_kl             | 0.015332354 |
+|    clip_fraction         | 0.0985      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0476      |
+|    entropy_loss          | -1.99       |
+|    explained_variance    | 0.227       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 1.91e+03    |
+|    n_updates             | 544         |
+|    policy_gradient_loss  | -0.0356     |
+|    value_loss            | 1.63e+03    |
+------------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | -0.565      |
+| time/                    |             |
+|    fps                   | 386         |
+|    iterations            | 34          |
+|    time_elapsed          | 1442        |
+|    total_timesteps       | 557056      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.0295     |
+|    episode_reward        | 8.96        |
+|    final_portfolio_value | 1e+04       |
+|    reward_per_pnl        | -304        |
+|    trades_count          | 20          |
+|    win_rate              | 30          |
+| train/                   |             |
+|    approx_kl             | 0.015394216 |
+|    clip_fraction         | 0.103       |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0466      |
+|    entropy_loss          | -1.99       |
+|    explained_variance    | 0.338       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 348         |
+|    n_updates             | 561         |
+|    policy_gradient_loss  | -0.0371     |
+|    value_loss            | 1.07e+03    |
+------------------------------------------
+Eval num_timesteps=560000, episode_reward=-39.55 +/- 103.14
+Episode length: 72.00 +/- 0.00
+-------------------------------------------
+| eval/                    |              |
+|    mean_ep_length        | 72           |
+|    mean_reward           | -39.5        |
+| time/                    |              |
+|    total_timesteps       | 560000       |
+| trading/                 |              |
+|    episode_pnl_pct       | -0.0358      |
+|    episode_reward        | 32.2         |
+|    final_portfolio_value | 1e+04        |
+|    reward_per_pnl        | -900         |
+|    trades_count          | 21           |
+|    win_rate              | 23.8         |
+| train/                   |              |
+|    approx_kl             | 0.0153635265 |
+|    clip_fraction         | 0.0957       |
+|    clip_range            | 0.243        |
+|    entropy_loss          | -1.99        |
+|    explained_variance    | 0.305        |
+|    learning_rate         | 0.0003       |
+|    loss                  | 614          |
+|    n_updates             | 578          |
+|    policy_gradient_loss  | -0.0365      |
+|    value_loss            | 1.2e+03      |
+-------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | -5.73    |
+| time/                    |          |
+|    fps                   | 386      |
+|    iterations            | 35       |
+|    time_elapsed          | 1485     |
+|    total_timesteps       | 573440   |
+| trading/                 |          |
+|    episode_pnl_pct       | -1.04    |
+|    episode_reward        | -74.9    |
+|    final_portfolio_value | 9.9e+03  |
+|    reward_per_pnl        | 72.1     |
+|    trades_count          | 23       |
+|    win_rate              | 21.7     |
+| train/                   |          |
+|    ent_coef              | 0.0456   |
+---------------------------------------
+-----------------------------------------
+| rollout/                 |            |
+|    ep_len_mean           | 72         |
+|    ep_rew_mean           | -1.29      |
+| time/                    |            |
+|    fps                   | 386        |
+|    iterations            | 36         |
+|    time_elapsed          | 1524       |
+|    total_timesteps       | 589824     |
+| trading/                 |            |
+|    episode_pnl_pct       | -0.295     |
+|    episode_reward        | -25.6      |
+|    final_portfolio_value | 9.97e+03   |
+|    reward_per_pnl        | 86.8       |
+|    trades_count          | 22         |
+|    win_rate              | 22.7       |
+| train/                   |            |
+|    approx_kl             | 0.01416373 |
+|    clip_fraction         | 0.0803     |
+|    clip_range            | 0.243      |
+|    ent_coef              | 0.0446     |
+|    entropy_loss          | -1.99      |
+|    explained_variance    | 0.285      |
+|    learning_rate         | 0.0003     |
+|    loss                  | 545        |
+|    n_updates             | 595        |
+|    policy_gradient_loss  | -0.0287    |
+|    value_loss            | 2.47e+03   |
+-----------------------------------------
+Eval num_timesteps=600000, episode_reward=-26.20 +/- 140.61
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -26.2       |
+| time/                    |             |
+|    total_timesteps       | 600000      |
+| trading/                 |             |
+|    episode_pnl_pct       | 2.18        |
+|    episode_reward        | 364         |
+|    final_portfolio_value | 1.02e+04    |
+|    reward_per_pnl        | 167         |
+|    trades_count          | 25          |
+|    win_rate              | 28          |
+| train/                   |             |
+|    approx_kl             | 0.017946221 |
+|    clip_fraction         | 0.106       |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -1.98       |
+|    explained_variance    | 0.393       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 221         |
+|    n_updates             | 612         |
+|    policy_gradient_loss  | -0.0412     |
+|    value_loss            | 815         |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 5.56     |
+| time/                    |          |
+|    fps                   | 387      |
+|    iterations            | 37       |
+|    time_elapsed          | 1564     |
+|    total_timesteps       | 606208   |
+| trading/                 |          |
+|    episode_pnl_pct       | 0.342    |
+|    episode_reward        | 40.5     |
+|    final_portfolio_value | 1e+04    |
+|    reward_per_pnl        | 119      |
+|    trades_count          | 23       |
+|    win_rate              | 34.8     |
+| train/                   |          |
+|    ent_coef              | 0.0436   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 5.9         |
+| time/                    |             |
+|    fps                   | 387         |
+|    iterations            | 38          |
+|    time_elapsed          | 1605        |
+|    total_timesteps       | 622592      |
+| trading/                 |             |
+|    episode_pnl_pct       | 1.79        |
+|    episode_reward        | 195         |
+|    final_portfolio_value | 1.02e+04    |
+|    reward_per_pnl        | 109         |
+|    trades_count          | 25          |
+|    win_rate              | 28          |
+| train/                   |             |
+|    approx_kl             | 0.016475014 |
+|    clip_fraction         | 0.102       |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0426      |
+|    entropy_loss          | -1.98       |
+|    explained_variance    | 0.408       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 420         |
+|    n_updates             | 629         |
+|    policy_gradient_loss  | -0.0372     |
+|    value_loss            | 901         |
+------------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 3.65        |
+| time/                    |             |
+|    fps                   | 388         |
+|    iterations            | 39          |
+|    time_elapsed          | 1645        |
+|    total_timesteps       | 638976      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.455      |
+|    episode_reward        | -3.93       |
+|    final_portfolio_value | 9.95e+03    |
+|    reward_per_pnl        | 8.64        |
+|    trades_count          | 23          |
+|    win_rate              | 13          |
+| train/                   |             |
+|    approx_kl             | 0.020370884 |
+|    clip_fraction         | 0.133       |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0417      |
+|    entropy_loss          | -1.97       |
+|    explained_variance    | 0.42        |
+|    learning_rate         | 0.0003      |
+|    loss                  | 214         |
+|    n_updates             | 646         |
+|    policy_gradient_loss  | -0.0453     |
+|    value_loss            | 689         |
+------------------------------------------
+Eval num_timesteps=640000, episode_reward=-22.06 +/- 81.38
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -22.1       |
+| time/                    |             |
+|    total_timesteps       | 640000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.0593     |
+|    episode_reward        | 23.6        |
+|    final_portfolio_value | 9.99e+03    |
+|    reward_per_pnl        | -398        |
+|    trades_count          | 24          |
+|    win_rate              | 29.2        |
+| train/                   |             |
+|    approx_kl             | 0.017299682 |
+|    clip_fraction         | 0.102       |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -1.96       |
+|    explained_variance    | 0.359       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 254         |
+|    n_updates             | 663         |
+|    policy_gradient_loss  | -0.0344     |
+|    value_loss            | 1.42e+03    |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 9.36     |
+| time/                    |          |
+|    fps                   | 387      |
+|    iterations            | 40       |
+|    time_elapsed          | 1690     |
+|    total_timesteps       | 655360   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.501   |
+|    episode_reward        | -54.2    |
+|    final_portfolio_value | 9.95e+03 |
+|    reward_per_pnl        | 108      |
+|    trades_count          | 21       |
+|    win_rate              | 9.52     |
+| train/                   |          |
+|    ent_coef              | 0.0407   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 11.8        |
+| time/                    |             |
+|    fps                   | 387         |
+|    iterations            | 41          |
+|    time_elapsed          | 1731        |
+|    total_timesteps       | 671744      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.213      |
+|    episode_reward        | -14.7       |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 69.1        |
+|    trades_count          | 22          |
+|    win_rate              | 9.09        |
+| train/                   |             |
+|    approx_kl             | 0.015459074 |
+|    clip_fraction         | 0.0949      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0397      |
+|    entropy_loss          | -1.97       |
+|    explained_variance    | 0.292       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 1.81e+03    |
+|    n_updates             | 680         |
+|    policy_gradient_loss  | -0.0321     |
+|    value_loss            | 1.97e+03    |
+------------------------------------------
+Eval num_timesteps=680000, episode_reward=-152.49 +/- 144.50
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -152        |
+| time/                    |             |
+|    total_timesteps       | 680000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.261      |
+|    episode_reward        | -1.14       |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 4.37        |
+|    trades_count          | 22          |
+|    win_rate              | 27.3        |
+| train/                   |             |
+|    approx_kl             | 0.015822658 |
+|    clip_fraction         | 0.0936      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -1.95       |
+|    explained_variance    | 0.491       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 393         |
+|    n_updates             | 697         |
+|    policy_gradient_loss  | -0.0352     |
+|    value_loss            | 1.18e+03    |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 11.3     |
+| time/                    |          |
+|    fps                   | 387      |
+|    iterations            | 42       |
+|    time_elapsed          | 1774     |
+|    total_timesteps       | 688128   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.0871  |
+|    episode_reward        | -3.64    |
+|    final_portfolio_value | 9.99e+03 |
+|    reward_per_pnl        | 41.8     |
+|    trades_count          | 24       |
+|    win_rate              | 25       |
+| train/                   |          |
+|    ent_coef              | 0.0387   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 7.66        |
+| time/                    |             |
+|    fps                   | 387         |
+|    iterations            | 43          |
+|    time_elapsed          | 1816        |
+|    total_timesteps       | 704512      |
+| trading/                 |             |
+|    episode_pnl_pct       | 0.78        |
+|    episode_reward        | 115         |
+|    final_portfolio_value | 1.01e+04    |
+|    reward_per_pnl        | 148         |
+|    trades_count          | 24          |
+|    win_rate              | 29.2        |
+| train/                   |             |
+|    approx_kl             | 0.016155634 |
+|    clip_fraction         | 0.0958      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0377      |
+|    entropy_loss          | -1.93       |
+|    explained_variance    | 0.487       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 654         |
+|    n_updates             | 714         |
+|    policy_gradient_loss  | -0.0364     |
+|    value_loss            | 1.07e+03    |
+------------------------------------------
+Eval num_timesteps=720000, episode_reward=-87.00 +/- 212.50
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -87         |
+| time/                    |             |
+|    total_timesteps       | 720000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.12       |
+|    episode_reward        | 11.3        |
+|    final_portfolio_value | 9.99e+03    |
+|    reward_per_pnl        | -94.5       |
+|    trades_count          | 24          |
+|    win_rate              | 33.3        |
+| train/                   |             |
+|    approx_kl             | 0.017529648 |
+|    clip_fraction         | 0.111       |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -1.94       |
+|    explained_variance    | 0.51        |
+|    learning_rate         | 0.0003      |
+|    loss                  | 252         |
+|    n_updates             | 731         |
+|    policy_gradient_loss  | -0.0407     |
+|    value_loss            | 767         |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 15.5     |
+| time/                    |          |
+|    fps                   | 386      |
+|    iterations            | 44       |
+|    time_elapsed          | 1863     |
+|    total_timesteps       | 720896   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.139   |
+|    episode_reward        | -15.9    |
+|    final_portfolio_value | 9.99e+03 |
+|    reward_per_pnl        | 115      |
+|    trades_count          | 20       |
+|    win_rate              | 20       |
+| train/                   |          |
+|    ent_coef              | 0.0367   |
+---------------------------------------
+-----------------------------------------
+| rollout/                 |            |
+|    ep_len_mean           | 72         |
+|    ep_rew_mean           | -3.38      |
+| time/                    |            |
+|    fps                   | 385        |
+|    iterations            | 45         |
+|    time_elapsed          | 1912       |
+|    total_timesteps       | 737280     |
+| trading/                 |            |
+|    episode_pnl_pct       | 1.48       |
+|    episode_reward        | 287        |
+|    final_portfolio_value | 1.01e+04   |
+|    reward_per_pnl        | 193        |
+|    trades_count          | 25         |
+|    win_rate              | 36         |
+| train/                   |            |
+|    approx_kl             | 0.01578807 |
+|    clip_fraction         | 0.0908     |
+|    clip_range            | 0.243      |
+|    ent_coef              | 0.0358     |
+|    entropy_loss          | -1.94      |
+|    explained_variance    | 0.496      |
+|    learning_rate         | 0.0003     |
+|    loss                  | 369        |
+|    n_updates             | 748        |
+|    policy_gradient_loss  | -0.0306    |
+|    value_loss            | 1.96e+03   |
+-----------------------------------------
+-------------------------------------------
+| rollout/                 |              |
+|    ep_len_mean           | 72           |
+|    ep_rew_mean           | 43.1         |
+| time/                    |              |
+|    fps                   | 385          |
+|    iterations            | 46           |
+|    time_elapsed          | 1956         |
+|    total_timesteps       | 753664       |
+| trading/                 |              |
+|    episode_pnl_pct       | -0.235       |
+|    episode_reward        | -11          |
+|    final_portfolio_value | 9.98e+03     |
+|    reward_per_pnl        | 46.5         |
+|    trades_count          | 24           |
+|    win_rate              | 25           |
+| train/                   |              |
+|    approx_kl             | 0.0146640055 |
+|    clip_fraction         | 0.0862       |
+|    clip_range            | 0.243        |
+|    ent_coef              | 0.0348       |
+|    entropy_loss          | -1.95        |
+|    explained_variance    | 0.564        |
+|    learning_rate         | 0.0003       |
+|    loss                  | 280          |
+|    n_updates             | 765          |
+|    policy_gradient_loss  | -0.0316      |
+|    value_loss            | 1.44e+03     |
+-------------------------------------------
+Eval num_timesteps=760000, episode_reward=-136.69 +/- 179.54
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -137        |
+| time/                    |             |
+|    total_timesteps       | 760000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.0349     |
+|    episode_reward        | 10.2        |
+|    final_portfolio_value | 1e+04       |
+|    reward_per_pnl        | -291        |
+|    trades_count          | 23          |
+|    win_rate              | 26.1        |
+| train/                   |             |
+|    approx_kl             | 0.014097919 |
+|    clip_fraction         | 0.0726      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -1.92       |
+|    explained_variance    | 0.572       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 677         |
+|    n_updates             | 782         |
+|    policy_gradient_loss  | -0.0319     |
+|    value_loss            | 1.62e+03    |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 26.5     |
+| time/                    |          |
+|    fps                   | 384      |
+|    iterations            | 47       |
+|    time_elapsed          | 2001     |
+|    total_timesteps       | 770048   |
+| trading/                 |          |
+|    episode_pnl_pct       | 2.52     |
+|    episode_reward        | 273      |
+|    final_portfolio_value | 1.03e+04 |
+|    reward_per_pnl        | 108      |
+|    trades_count          | 20       |
+|    win_rate              | 30       |
+| train/                   |          |
+|    ent_coef              | 0.0338   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 18.6        |
+| time/                    |             |
+|    fps                   | 385         |
+|    iterations            | 48          |
+|    time_elapsed          | 2041        |
+|    total_timesteps       | 786432      |
+| trading/                 |             |
+|    episode_pnl_pct       | -1.28       |
+|    episode_reward        | -40         |
+|    final_portfolio_value | 9.87e+03    |
+|    reward_per_pnl        | 31.4        |
+|    trades_count          | 25          |
+|    win_rate              | 28          |
+| train/                   |             |
+|    approx_kl             | 0.014222523 |
+|    clip_fraction         | 0.0806      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0328      |
+|    entropy_loss          | -1.92       |
+|    explained_variance    | 0.518       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 759         |
+|    n_updates             | 799         |
+|    policy_gradient_loss  | -0.0338     |
+|    value_loss            | 1.45e+03    |
+------------------------------------------
+Eval num_timesteps=800000, episode_reward=-143.14 +/- 92.74
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -143        |
+| time/                    |             |
+|    total_timesteps       | 800000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.295      |
+|    episode_reward        | -31.9       |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 108         |
+|    trades_count          | 18          |
+|    win_rate              | 11.1        |
+| train/                   |             |
+|    approx_kl             | 0.014934973 |
+|    clip_fraction         | 0.0881      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -1.93       |
+|    explained_variance    | 0.592       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 610         |
+|    n_updates             | 816         |
+|    policy_gradient_loss  | -0.0322     |
+|    value_loss            | 1.2e+03     |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 15.5     |
+| time/                    |          |
+|    fps                   | 384      |
+|    iterations            | 49       |
+|    time_elapsed          | 2085     |
+|    total_timesteps       | 802816   |
+| trading/                 |          |
+|    episode_pnl_pct       | 0.148    |
+|    episode_reward        | 20.1     |
+|    final_portfolio_value | 1e+04    |
+|    reward_per_pnl        | 136      |
+|    trades_count          | 23       |
+|    win_rate              | 26.1     |
+| train/                   |          |
+|    ent_coef              | 0.0318   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 37.4        |
+| time/                    |             |
+|    fps                   | 384         |
+|    iterations            | 50          |
+|    time_elapsed          | 2130        |
+|    total_timesteps       | 819200      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.603      |
+|    episode_reward        | 47.5        |
+|    final_portfolio_value | 9.94e+03    |
+|    reward_per_pnl        | -78.8       |
+|    trades_count          | 27          |
+|    win_rate              | 25.9        |
+| train/                   |             |
+|    approx_kl             | 0.014205718 |
+|    clip_fraction         | 0.0774      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0308      |
+|    entropy_loss          | -1.91       |
+|    explained_variance    | 0.47        |
+|    learning_rate         | 0.0003      |
+|    loss                  | 394         |
+|    n_updates             | 833         |
+|    policy_gradient_loss  | -0.0312     |
+|    value_loss            | 1.67e+03    |
+------------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 29.6        |
+| time/                    |             |
+|    fps                   | 384         |
+|    iterations            | 51          |
+|    time_elapsed          | 2173        |
+|    total_timesteps       | 835584      |
+| trading/                 |             |
+|    episode_pnl_pct       | 0.53        |
+|    episode_reward        | 59.4        |
+|    final_portfolio_value | 1.01e+04    |
+|    reward_per_pnl        | 112         |
+|    trades_count          | 21          |
+|    win_rate              | 42.9        |
+| train/                   |             |
+|    approx_kl             | 0.011398887 |
+|    clip_fraction         | 0.0597      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0299      |
+|    entropy_loss          | -1.89       |
+|    explained_variance    | 0.471       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 5.11e+03    |
+|    n_updates             | 850         |
+|    policy_gradient_loss  | -0.0251     |
+|    value_loss            | 3.18e+03    |
+------------------------------------------
+Eval num_timesteps=840000, episode_reward=34.10 +/- 205.39
+Episode length: 72.00 +/- 0.00
+-----------------------------------------
+| eval/                    |            |
+|    mean_ep_length        | 72         |
+|    mean_reward           | 34.1       |
+| time/                    |            |
+|    total_timesteps       | 840000     |
+| trading/                 |            |
+|    episode_pnl_pct       | -0.483     |
+|    episode_reward        | -6.42      |
+|    final_portfolio_value | 9.95e+03   |
+|    reward_per_pnl        | 13.3       |
+|    trades_count          | 16         |
+|    win_rate              | 25         |
+| train/                   |            |
+|    approx_kl             | 0.01588156 |
+|    clip_fraction         | 0.0989     |
+|    clip_range            | 0.243      |
+|    entropy_loss          | -1.9       |
+|    explained_variance    | 0.556      |
+|    learning_rate         | 0.0003     |
+|    loss                  | 527        |
+|    n_updates             | 867        |
+|    policy_gradient_loss  | -0.0363    |
+|    value_loss            | 1.15e+03   |
+-----------------------------------------
+New best mean reward!
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 24       |
+| time/                    |          |
+|    fps                   | 383      |
+|    iterations            | 52       |
+|    time_elapsed          | 2220     |
+|    total_timesteps       | 851968   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.542   |
+|    episode_reward        | -38.4    |
+|    final_portfolio_value | 9.95e+03 |
+|    reward_per_pnl        | 70.8     |
+|    trades_count          | 24       |
+|    win_rate              | 12.5     |
+| train/                   |          |
+|    ent_coef              | 0.0289   |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 24.8        |
+| time/                    |             |
+|    fps                   | 383         |
+|    iterations            | 53          |
+|    time_elapsed          | 2262        |
+|    total_timesteps       | 868352      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.272      |
+|    episode_reward        | -12.9       |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 47.6        |
+|    trades_count          | 25          |
+|    win_rate              | 16          |
+| train/                   |             |
+|    approx_kl             | 0.014830153 |
+|    clip_fraction         | 0.0825      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0279      |
+|    entropy_loss          | -1.88       |
+|    explained_variance    | 0.584       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 727         |
+|    n_updates             | 884         |
+|    policy_gradient_loss  | -0.0314     |
+|    value_loss            | 1.4e+03     |
+------------------------------------------
+Eval num_timesteps=880000, episode_reward=-178.39 +/- 187.44
+Episode length: 72.00 +/- 0.00
+-----------------------------------------
+| eval/                    |            |
+|    mean_ep_length        | 72         |
+|    mean_reward           | -178       |
+| time/                    |            |
+|    total_timesteps       | 880000     |
+| trading/                 |            |
+|    episode_pnl_pct       | -1.03      |
+|    episode_reward        | -86.5      |
+|    final_portfolio_value | 9.9e+03    |
+|    reward_per_pnl        | 83.7       |
+|    trades_count          | 23         |
+|    win_rate              | 30.4       |
+| train/                   |            |
+|    approx_kl             | 0.01594425 |
+|    clip_fraction         | 0.0938     |
+|    clip_range            | 0.243      |
+|    entropy_loss          | -1.88      |
+|    explained_variance    | 0.614      |
+|    learning_rate         | 0.0003     |
+|    loss                  | 983        |
+|    n_updates             | 901        |
+|    policy_gradient_loss  | -0.0339    |
+|    value_loss            | 1.17e+03   |
+-----------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 34.6     |
+| time/                    |          |
+|    fps                   | 383      |
+|    iterations            | 54       |
+|    time_elapsed          | 2304     |
+|    total_timesteps       | 884736   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.802   |
+|    episode_reward        | 6.08     |
+|    final_portfolio_value | 9.92e+03 |
+|    reward_per_pnl        | -7.58    |
+|    trades_count          | 23       |
+|    win_rate              | 26.1     |
+| train/                   |          |
+|    ent_coef              | 0.0269   |
+---------------------------------------
+-----------------------------------------
+| rollout/                 |            |
+|    ep_len_mean           | 72         |
+|    ep_rew_mean           | 41.3       |
+| time/                    |            |
+|    fps                   | 383        |
+|    iterations            | 55         |
+|    time_elapsed          | 2347       |
+|    total_timesteps       | 901120     |
+| trading/                 |            |
+|    episode_pnl_pct       | -0.378     |
+|    episode_reward        | 34.8       |
+|    final_portfolio_value | 9.96e+03   |
+|    reward_per_pnl        | -92        |
+|    trades_count          | 25         |
+|    win_rate              | 28         |
+| train/                   |            |
+|    approx_kl             | 0.01484476 |
+|    clip_fraction         | 0.0831     |
+|    clip_range            | 0.243      |
+|    ent_coef              | 0.0259     |
+|    entropy_loss          | -1.88      |
+|    explained_variance    | 0.6        |
+|    learning_rate         | 0.0003     |
+|    loss                  | 399        |
+|    n_updates             | 918        |
+|    policy_gradient_loss  | -0.0321    |
+|    value_loss            | 1.48e+03   |
+-----------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 14.6        |
+| time/                    |             |
+|    fps                   | 384         |
+|    iterations            | 56          |
+|    time_elapsed          | 2389        |
+|    total_timesteps       | 917504      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.468      |
+|    episode_reward        | -13.2       |
+|    final_portfolio_value | 9.95e+03    |
+|    reward_per_pnl        | 28.1        |
+|    trades_count          | 23          |
+|    win_rate              | 26.1        |
+| train/                   |             |
+|    approx_kl             | 0.014382357 |
+|    clip_fraction         | 0.0789      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.0249      |
+|    entropy_loss          | -1.87       |
+|    explained_variance    | 0.6         |
+|    learning_rate         | 0.0003      |
+|    loss                  | 539         |
+|    n_updates             | 935         |
+|    policy_gradient_loss  | -0.0305     |
+|    value_loss            | 1.5e+03     |
+------------------------------------------
+Eval num_timesteps=920000, episode_reward=-181.04 +/- 103.65
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -181        |
+| time/                    |             |
+|    total_timesteps       | 920000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.269      |
+|    episode_reward        | -13.6       |
+|    final_portfolio_value | 9.97e+03    |
+|    reward_per_pnl        | 50.6        |
+|    trades_count          | 23          |
+|    win_rate              | 30.4        |
+| train/                   |             |
+|    approx_kl             | 0.015145128 |
+|    clip_fraction         | 0.0906      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -1.89       |
+|    explained_variance    | 0.708       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 625         |
+|    n_updates             | 952         |
+|    policy_gradient_loss  | -0.0364     |
+|    value_loss            | 1.04e+03    |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 41.8     |
+| time/                    |          |
+|    fps                   | 383      |
+|    iterations            | 57       |
+|    time_elapsed          | 2435     |
+|    total_timesteps       | 933888   |
+| trading/                 |          |
+|    episode_pnl_pct       | 0.178    |
+|    episode_reward        | 59.1     |
+|    final_portfolio_value | 1e+04    |
+|    reward_per_pnl        | 332      |
+|    trades_count          | 18       |
+|    win_rate              | 16.7     |
+| train/                   |          |
+|    ent_coef              | 0.024    |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 62.9        |
+| time/                    |             |
+|    fps                   | 384         |
+|    iterations            | 58          |
+|    time_elapsed          | 2474        |
+|    total_timesteps       | 950272      |
+| trading/                 |             |
+|    episode_pnl_pct       | 1.3         |
+|    episode_reward        | 169         |
+|    final_portfolio_value | 1.01e+04    |
+|    reward_per_pnl        | 130         |
+|    trades_count          | 24          |
+|    win_rate              | 41.7        |
+| train/                   |             |
+|    approx_kl             | 0.012211671 |
+|    clip_fraction         | 0.0632      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.023       |
+|    entropy_loss          | -1.86       |
+|    explained_variance    | 0.581       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 266         |
+|    n_updates             | 969         |
+|    policy_gradient_loss  | -0.0249     |
+|    value_loss            | 2.82e+03    |
+------------------------------------------
+Eval num_timesteps=960000, episode_reward=-99.17 +/- 126.75
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -99.2       |
+| time/                    |             |
+|    total_timesteps       | 960000      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.211      |
+|    episode_reward        | -1.1        |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 5.21        |
+|    trades_count          | 25          |
+|    win_rate              | 20          |
+| train/                   |             |
+|    approx_kl             | 0.012520471 |
+|    clip_fraction         | 0.0662      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -1.83       |
+|    explained_variance    | 0.687       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 643         |
+|    n_updates             | 986         |
+|    policy_gradient_loss  | -0.0279     |
+|    value_loss            | 1.98e+03    |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 13       |
+| time/                    |          |
+|    fps                   | 383      |
+|    iterations            | 59       |
+|    time_elapsed          | 2521     |
+|    total_timesteps       | 966656   |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.281   |
+|    episode_reward        | -22.6    |
+|    final_portfolio_value | 9.97e+03 |
+|    reward_per_pnl        | 80.4     |
+|    trades_count          | 23       |
+|    win_rate              | 17.4     |
+| train/                   |          |
+|    ent_coef              | 0.022    |
+---------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 40.1        |
+| time/                    |             |
+|    fps                   | 383         |
+|    iterations            | 60          |
+|    time_elapsed          | 2565        |
+|    total_timesteps       | 983040      |
+| trading/                 |             |
+|    episode_pnl_pct       | 0.305       |
+|    episode_reward        | 76.4        |
+|    final_portfolio_value | 1e+04       |
+|    reward_per_pnl        | 251         |
+|    trades_count          | 22          |
+|    win_rate              | 31.8        |
+| train/                   |             |
+|    approx_kl             | 0.013187713 |
+|    clip_fraction         | 0.0743      |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.021       |
+|    entropy_loss          | -1.85       |
+|    explained_variance    | 0.709       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 579         |
+|    n_updates             | 1003        |
+|    policy_gradient_loss  | -0.0287     |
+|    value_loss            | 1.51e+03    |
+------------------------------------------
+------------------------------------------
+| rollout/                 |             |
+|    ep_len_mean           | 72          |
+|    ep_rew_mean           | 44.3        |
+| time/                    |             |
+|    fps                   | 383         |
+|    iterations            | 61          |
+|    time_elapsed          | 2608        |
+|    total_timesteps       | 999424      |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.213      |
+|    episode_reward        | -5.56       |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 26          |
+|    trades_count          | 19          |
+|    win_rate              | 21.1        |
+| train/                   |             |
+|    approx_kl             | 0.013376024 |
+|    clip_fraction         | 0.073       |
+|    clip_range            | 0.243       |
+|    ent_coef              | 0.02        |
+|    entropy_loss          | -1.84       |
+|    explained_variance    | 0.695       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 558         |
+|    n_updates             | 1020        |
+|    policy_gradient_loss  | -0.0291     |
+|    value_loss            | 1.66e+03    |
+------------------------------------------
+Eval num_timesteps=1000000, episode_reward=-14.12 +/- 89.23
+Episode length: 72.00 +/- 0.00
+------------------------------------------
+| eval/                    |             |
+|    mean_ep_length        | 72          |
+|    mean_reward           | -14.1       |
+| time/                    |             |
+|    total_timesteps       | 1000000     |
+| trading/                 |             |
+|    episode_pnl_pct       | -0.203      |
+|    episode_reward        | -15.5       |
+|    final_portfolio_value | 9.98e+03    |
+|    reward_per_pnl        | 75.9        |
+|    trades_count          | 22          |
+|    win_rate              | 13.6        |
+| train/                   |             |
+|    approx_kl             | 0.012320731 |
+|    clip_fraction         | 0.0685      |
+|    clip_range            | 0.243       |
+|    entropy_loss          | -1.82       |
+|    explained_variance    | 0.678       |
+|    learning_rate         | 0.0003      |
+|    loss                  | 639         |
+|    n_updates             | 1037        |
+|    policy_gradient_loss  | -0.0269     |
+|    value_loss            | 2.38e+03    |
+------------------------------------------
+---------------------------------------
+| rollout/                 |          |
+|    ep_len_mean           | 72       |
+|    ep_rew_mean           | 38.8     |
+| time/                    |          |
+|    fps                   | 382      |
+|    iterations            | 62       |
+|    time_elapsed          | 2656     |
+|    total_timesteps       | 1015808  |
+| trading/                 |          |
+|    episode_pnl_pct       | -0.413   |
+|    episode_reward        | -27.7    |
+|    final_portfolio_value | 9.96e+03 |
+|    reward_per_pnl        | 67.1     |
+|    trades_count          | 23       |
+|    win_rate              | 17.4     |
+| train/                   |          |
+|    ent_coef              | 0.02     |
+---------------------------------------
+ 100% ━━━━━━━━━━━━━━━━━━━━ 1,015,808/1,000,000  [ 0:43:39 < 0:00:00 , 475 it/s ]
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 154,786 opportunities from 2025-09-01 01:00:00+00:00 to 2025-10-22 00:40:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+
+✅ Training complete!
+Final model saved to: models/rl_v3_1m/ppo_20251031_120100/final_model
+Best model saved to: models/rl_v3_1m/ppo_20251031_120100/best_model
+
+Evaluating best model on test set...
+
+================================================================================
+EVALUATING TRAINED AGENT
+================================================================================
+Loading model from: models/rl_v3_1m/ppo_20251031_120100/best_model/best_model.zip
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 38,697 opportunities from 2025-10-22 00:40:00+00:00 to 2025-10-28 23:55:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+Episode 1/10: Reward=-58.35, P&L=-1.12%, Steps=72
+Episode 2/10: Reward=-116.72, P&L=-0.88%, Steps=72
+Episode 3/10: Reward=-382.48, P&L=-1.85%, Steps=72
+Episode 4/10: Reward=-65.46, P&L=-0.81%, Steps=72
+Episode 5/10: Reward=-800.93, P&L=-3.15%, Steps=72
+Episode 6/10: Reward=-800.93, P&L=-3.15%, Steps=72
+Episode 7/10: Reward=+40.29, P&L=-0.40%, Steps=72
+Episode 8/10: Reward=-5.08, P&L=-0.43%, Steps=72
+Episode 9/10: Reward=-189.44, P&L=-1.64%, Steps=72
+Episode 10/10: Reward=+499.84, P&L=+1.21%, Steps=72
+
+────────────────────────────────────────────────────────────
+EVALUATION SUMMARY
+────────────────────────────────────────────────────────────
+Episodes: 10
+Average Reward: -187.93 ± 372.13
+Average P&L: -1.22% ± 1.25%
+Average Length: 72.0 steps
+Win Rate: 10.0%
+────────────────────────────────────────────────────────────
+
+TOP 5 MOST PROFITABLE TRADES:
+────────────────────────────────────────────────────────────────────────────────
+1. COAIUSDT | Entry: 2025-10-24 04:07 | P&L: $+190.63 (+2.86%) | Duration: 17.0h
+2. FUSDT | Entry: 2025-10-25 15:49 | P&L: $+160.14 (+2.52%) | Duration: 14.0h
+3. COAIUSDT | Entry: 2025-10-27 05:22 | P&L: $+55.88 (+0.85%) | Duration: 9.0h
+4. COAIUSDT | Entry: 2025-10-27 05:24 | P&L: $+51.47 (+0.78%) | Duration: 10.0h
+5. COAIUSDT | Entry: 2025-10-26 18:49 | P&L: $+50.63 (+1.56%) | Duration: 3.0h
+────────────────────────────────────────────────────────────────────────────────
+
+✅ All trades saved to: evaluation_trades_20251031_124553.csv
+   Total trades: 241
+   Winning trades: 73
+   Losing trades: 168

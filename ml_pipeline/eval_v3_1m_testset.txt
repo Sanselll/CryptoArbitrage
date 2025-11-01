@@ -1,0 +1,47 @@
+
+================================================================================
+EVALUATING TRAINED AGENT
+================================================================================
+Loading model from: models/rl_v3_1m/ppo_20251031_120100/best_model/best_model.zip
+   Price history loaded from: data/price_history
+   Feature scaler loaded from: models/rl/feature_scaler.pkl
+   Features will be standardized (mean=0, std=1)
+✅ Environment initialized
+   Data: 38,697 opportunities from 2025-10-22 00:40:00+00:00 to 2025-10-28 23:55:00+00:00
+   Episode length: 72h (3 days)
+   Action space: 9 actions
+   Observation space: 124 dimensions
+Episode 1/10: Reward=-58.35, P&L=-1.12%, Steps=72
+Episode 2/10: Reward=-116.72, P&L=-0.88%, Steps=72
+Episode 3/10: Reward=-382.48, P&L=-1.85%, Steps=72
+Episode 4/10: Reward=-65.46, P&L=-0.81%, Steps=72
+Episode 5/10: Reward=-800.93, P&L=-3.15%, Steps=72
+Episode 6/10: Reward=-800.93, P&L=-3.15%, Steps=72
+Episode 7/10: Reward=+40.29, P&L=-0.40%, Steps=72
+Episode 8/10: Reward=-5.08, P&L=-0.43%, Steps=72
+Episode 9/10: Reward=-189.44, P&L=-1.64%, Steps=72
+Episode 10/10: Reward=+499.84, P&L=+1.21%, Steps=72
+
+────────────────────────────────────────────────────────────
+EVALUATION SUMMARY
+────────────────────────────────────────────────────────────
+Episodes: 10
+Average Reward: -187.93 ± 372.13
+Average P&L: -1.22% ± 1.25%
+Average Length: 72.0 steps
+Win Rate: 10.0%
+────────────────────────────────────────────────────────────
+
+TOP 5 MOST PROFITABLE TRADES:
+────────────────────────────────────────────────────────────────────────────────
+1. COAIUSDT | Entry: 2025-10-24 04:07 | P&L: $+190.63 (+2.86%) | Duration: 17.0h
+2. FUSDT | Entry: 2025-10-25 15:49 | P&L: $+160.14 (+2.52%) | Duration: 14.0h
+3. COAIUSDT | Entry: 2025-10-27 05:22 | P&L: $+55.88 (+0.85%) | Duration: 9.0h
+4. COAIUSDT | Entry: 2025-10-27 05:24 | P&L: $+51.47 (+0.78%) | Duration: 10.0h
+5. COAIUSDT | Entry: 2025-10-26 18:49 | P&L: $+50.63 (+1.56%) | Duration: 3.0h
+────────────────────────────────────────────────────────────────────────────────
+
+✅ All trades saved to: evaluation_trades_20251031_141510.csv
+   Total trades: 241
+   Winning trades: 73
+   Losing trades: 168
