@@ -404,15 +404,36 @@ def evaluate_agent(model_path: str, data_path: str, price_history_path: str = No
     episode_lengths = []
     all_trades = []  # Track all trades across episodes
 
+    # Import for action probability extraction
+    from stable_baselines3.common.utils import obs_as_tensor
+
     for episode in range(num_runs):
         obs, info = env.reset()
         episode_reward = 0
         steps = 0
         done = False
 
+        # Track action data for ENTER and EXIT actions only
+        enter_actions = {}  # key: step, value: (action, prob, hold_prob)
+        exit_actions = {}   # key: step, value: (action, prob, hold_prob)
+
         while not done:
             # Get action from trained policy
             action, _states = model.predict(obs, deterministic=True)
+
+            # Extract action probabilities for this step
+            # Add batch dimension if needed (PPO policy expects batched input)
+            obs_for_policy = obs.reshape(1, -1) if obs.ndim == 1 else obs
+            obs_tensor = obs_as_tensor(obs_for_policy, model.policy.device)
+            distribution = model.policy.get_distribution(obs_tensor)
+            action_probs = distribution.distribution.probs.detach().cpu().numpy()[0]
+
+            # Track ENTER or EXIT actions with their probabilities
+            if 1 <= action <= 5:  # ENTER action
+                enter_actions[steps] = (action, float(action_probs[action]), float(action_probs[0]))
+            elif 6 <= action <= 8:  # EXIT action
+                exit_actions[steps] = (action, float(action_probs[action]), float(action_probs[0]))
+
             obs, reward, terminated, truncated, info = env.step(action)
 
             episode_reward += reward
@@ -425,7 +446,25 @@ def evaluate_agent(model_path: str, data_path: str, price_history_path: str = No
 
         # Collect closed positions from this episode
         if hasattr(env.unwrapped, 'portfolio') and hasattr(env.unwrapped.portfolio, 'closed_positions'):
-            for pos in env.unwrapped.portfolio.closed_positions:
+            for i, pos in enumerate(env.unwrapped.portfolio.closed_positions):
+                # Try to find entry/exit actions - use position order as approximation
+                # Since positions close in order, we can match them sequentially
+                entry_data = None
+                exit_data = None
+
+                # Get the i-th ENTER and EXIT actions
+                if i < len(enter_actions):
+                    enter_step = sorted(enter_actions.keys())[i] if enter_actions else None
+                    if enter_step is not None:
+                        action, prob, hold_prob = enter_actions[enter_step]
+                        entry_data = {'action': action, 'prob': prob, 'hold_prob': hold_prob}
+
+                if i < len(exit_actions):
+                    exit_step = sorted(exit_actions.keys())[i] if exit_actions else None
+                    if exit_step is not None:
+                        action, prob, hold_prob = exit_actions[exit_step]
+                        exit_data = {'action': action, 'prob': prob, 'hold_prob': hold_prob}
+
                 all_trades.append({
                     'episode': episode + 1,
                     'symbol': pos.symbol,
@@ -436,7 +475,13 @@ def evaluate_agent(model_path: str, data_path: str, price_history_path: str = No
                     'duration_hours': (pos.exit_time - pos.entry_time).total_seconds() / 3600,
                     'entry_fees_usd': pos.entry_fees_paid_usd,
                     'exit_fees_usd': pos.exit_fees_paid_usd,
-                    'position_size_usd': pos.position_size_usd
+                    'position_size_usd': pos.position_size_usd,
+                    'entry_action': entry_data['action'] if entry_data else None,
+                    'entry_probability': entry_data['prob'] if entry_data else None,
+                    'entry_hold_prob': entry_data['hold_prob'] if entry_data else None,
+                    'exit_action': exit_data['action'] if exit_data else None,
+                    'exit_probability': exit_data['prob'] if exit_data else None,
+                    'exit_hold_prob': exit_data['hold_prob'] if exit_data else None
                 })
 
         mode_str = "Full-range" if use_full_range else f"{episode+1}/{num_runs}"

@@ -53,6 +53,13 @@ export interface Position {
   openedAt: string;
   closedAt?: string;
   activeOpportunityId?: number;
+
+  // RL Predictions (Reinforcement Learning)
+  rlExitProbability?: number;             // RL EXIT action probability (0-1)
+  rlHoldProbability?: number;             // RL HOLD action probability (0-1)
+  rlConfidence?: string;                  // RL confidence level: HIGH/MEDIUM/LOW
+  rlStateValue?: number;                  // RL state value estimate
+  rlModelVersion?: string;                // RL model version
 }
 
 export enum OpportunityStatus {
@@ -154,13 +161,20 @@ export interface ArbitrageOpportunity {
   liquidityStatus?: LiquidityStatus;
   liquidityWarning?: string;
 
-  // ML Predictions
+  // ML Predictions (XGBoost)
   mlPredictedProfitPercent?: number;     // Expected profit %
   mlSuccessProbability?: number;          // Probability of success (0-1)
   mlPredictedDurationHours?: number;      // Optimal hold duration (hours)
   mlPredictedHoldHours?: number;          // Alias for mlPredictedDurationHours (deprecated)
   mlCompositeScore?: number;              // Combined ML score (0-100)
   mlModelVersion?: string;                // ML model version
+
+  // RL Predictions (Reinforcement Learning)
+  rlEnterProbability?: number;            // RL ENTER action probability (0-1)
+  rlHoldProbability?: number;             // RL HOLD action probability (0-1)
+  rlConfidence?: string;                  // RL confidence level: HIGH/MEDIUM/LOW
+  rlStateValue?: number;                  // RL state value estimate
+  rlModelVersion?: string;                // RL model version
 
   status: OpportunityStatus;
   detectedAt: string;

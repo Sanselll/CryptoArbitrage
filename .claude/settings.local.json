@@ -113,7 +113,15 @@
       "WebFetch(domain:docs.ray.io)",
       "Bash(=2.9.0)",
       "WebFetch(domain:stable-baselines3.readthedocs.io)",
-      "WebFetch(domain:stackoverflow.com)"
+      "WebFetch(domain:stackoverflow.com)",
+      "Bash(if [ -f ml_api_server_new.log ])",
+      "Bash(then cat ml_api_server_new.log)",
+      "Bash(else echo \"Log file not found\")",
+      "Bash(xargs grep:*)",
+      "Bash(pgrep:*)",
+      "Bash(ps:*)",
+      "Bash(journalctl:*)",
+      "Bash(grep -i position|predict)"
     ],
     "deny": [],
     "ask": []

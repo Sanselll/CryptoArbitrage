@@ -27,4 +27,11 @@ public class PositionDto
     public DateTime OpenedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
     public int? ActiveOpportunityId { get; set; }
+
+    // RL Predictions (Reinforcement Learning)
+    public float? RLExitProbability { get; set; }              // RL model probability of EXIT action (0-1)
+    public float? RLHoldProbability { get; set; }              // RL model probability of HOLD action (0-1)
+    public string? RLConfidence { get; set; }                  // RL prediction confidence: HIGH/MEDIUM/LOW
+    public float? RLStateValue { get; set; }                   // RL state value estimate
+    public string? RLModelVersion { get; set; }                // RL model version used
 }

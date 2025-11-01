@@ -9,6 +9,7 @@ import { LoadingOverlay } from './ui/LoadingOverlay';
 import { ExchangeBadge } from './ui/ExchangeBadge';
 import { AlertDialog, ConfirmDialog } from './ui/Dialog';
 import { MLScoreBadge } from './ui/MLScoreBadge';
+import { RLActionBadge } from './ui/RLActionBadge';
 import {
   Table,
   TableHeader,
@@ -107,7 +108,7 @@ const formatExecutionTime = (openedAt: string) => {
 };
 
 type SortField = 'spread' | 'priceSpread24h' | 'priceSpread3d' | 'spread30Sample' | 'spreadVolStdDev' | 'spreadVolCv' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
-  | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d' | 'mlScore';
+  | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d' | 'mlScore' | 'rlAction';
 type SortDirection = 'asc' | 'desc';
 
 export const OpportunitiesList = () => {
@@ -282,6 +283,27 @@ export const OpportunitiesList = () => {
         case 'mlScore':
           aValue = a.mlCompositeScore ?? -Infinity;
           bValue = b.mlCompositeScore ?? -Infinity;
+          break;
+        case 'rlAction':
+          // Sort by RL action: ENTER (highest enter prob) > HOLD > none
+          // For each opp, compare enter prob vs hold prob to determine action
+          const aEnterProb = a.rlEnterProbability ?? 0;
+          const aHoldProb = a.rlHoldProbability ?? 0;
+          const bEnterProb = b.rlEnterProbability ?? 0;
+          const bHoldProb = b.rlHoldProbability ?? 0;
+
+          // Determine action for each (ENTER=2, HOLD=1, none=0)
+          const aAction = aEnterProb > aHoldProb ? 2 : (aHoldProb > 0 ? 1 : 0);
+          const bAction = bEnterProb > bHoldProb ? 2 : (bHoldProb > 0 ? 1 : 0);
+
+          // If same action, sort by probability
+          if (aAction === bAction) {
+            aValue = aAction === 2 ? aEnterProb : aHoldProb;
+            bValue = bAction === 2 ? bEnterProb : bHoldProb;
+          } else {
+            aValue = aAction;
+            bValue = bAction;
+          }
           break;
         default:
           aValue = a.fundApr;
@@ -696,6 +718,17 @@ export const OpportunitiesList = () => {
                         )}
                       </div></TableHead>
                 <TableHead
+                  className="sticky right-[170px] z-40 bg-binance-bg-secondary border-l border-binance-border text-center cursor-pointer hover:bg-binance-bg-hover transition-colors w-[85px]"
+                  onClick={() => handleSort('rlAction')}
+                  title="reinforcement learning action (ENTER/HOLD) - click to sort">
+                  <div className="flex items-center justify-center gap-1">
+                    RL Action
+                    {sortField === 'rlAction' && (
+                      <ArrowUpDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead
                   className="sticky right-[85px] z-40 bg-binance-bg-secondary border-l border-binance-border text-center cursor-pointer hover:bg-binance-bg-hover transition-colors w-[85px]"
                   onClick={() => handleSort('mlScore')}
                   title="machine learning predicted score (0-100)">
@@ -997,6 +1030,19 @@ export const OpportunitiesList = () => {
                       ) : (
                         <span className="font-mono text-[11px] text-binance-text-secondary">--</span>
                       )}
+                    </TableCell>
+                    <TableCell className={`sticky right-[170px] z-20 border-l border-binance-border w-[85px] ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                      <div className="px-0.5">
+                        <RLActionBadge
+                          actionType="ENTER"
+                          probability={opp.rlEnterProbability}
+                          confidence={opp.rlConfidence}
+                          holdProbability={opp.rlHoldProbability}
+                          stateValue={opp.rlStateValue}
+                          modelVersion={opp.rlModelVersion}
+                          size="sm"
+                        />
+                      </div>
                     </TableCell>
                     <TableCell className={`sticky right-[85px] z-20 border-l border-binance-border w-[85px] ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                       <div className="px-0.5">

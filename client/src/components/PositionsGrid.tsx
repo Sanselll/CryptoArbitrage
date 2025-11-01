@@ -7,6 +7,7 @@ import { EmptyState } from './ui/EmptyState';
 import { LoadingOverlay } from './ui/LoadingOverlay';
 import { ExchangeBadge } from './ui/ExchangeBadge';
 import { AlertDialog, ConfirmDialog } from './ui/Dialog';
+import { RLActionBadge } from './ui/RLActionBadge';
 import {
   Table,
   TableHeader,
@@ -278,6 +279,7 @@ export const PositionsGrid = () => {
                 <TableHead className="text-right">Fees</TableHead>
                 <TableHead className="text-right">Total P&L</TableHead>
                 <TableHead className="text-right">Time</TableHead>
+                <TableHead className="sticky right-[85px] z-40 bg-binance-bg-secondary border-l border-binance-border text-center w-[85px]" title="reinforcement learning EXIT prediction">RL Action</TableHead>
                 <TableHead className="sticky right-0 z-40 bg-binance-bg-secondary border-l border-binance-border text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -472,6 +474,39 @@ export const PositionsGrid = () => {
                         <span className="font-mono text-[11px] text-binance-text-secondary">
                           {pair.executionId ? executionTimes[pair.executionId] || '--' : '--'}
                         </span>
+                      </TableCell>
+                      <TableCell className={`sticky right-[85px] z-20 border-l border-binance-border w-[85px] ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                        <div className="px-0.5">
+                          <RLActionBadge
+                            actionType="EXIT"
+                            probability={
+                              isCrossFut
+                                ? longPerpPosition?.rlExitProbability
+                                : perpPosition?.rlExitProbability
+                            }
+                            confidence={
+                              isCrossFut
+                                ? longPerpPosition?.rlConfidence
+                                : perpPosition?.rlConfidence
+                            }
+                            holdProbability={
+                              isCrossFut
+                                ? longPerpPosition?.rlHoldProbability
+                                : perpPosition?.rlHoldProbability
+                            }
+                            stateValue={
+                              isCrossFut
+                                ? longPerpPosition?.rlStateValue
+                                : perpPosition?.rlStateValue
+                            }
+                            modelVersion={
+                              isCrossFut
+                                ? longPerpPosition?.rlModelVersion
+                                : perpPosition?.rlModelVersion
+                            }
+                            size="sm"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                         {pair.executionId ? (
@@ -728,6 +763,39 @@ export const PositionsGrid = () => {
                         <span className="font-mono text-[11px] text-binance-text-secondary">
                           {pair.executionId ? executionTimes[pair.executionId] || '--' : '--'}
                         </span>
+                      </TableCell>
+                      <TableCell className={`sticky right-[85px] z-20 border-l border-binance-border w-[85px] ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
+                        <div className="px-0.5">
+                          <RLActionBadge
+                            actionType="EXIT"
+                            probability={
+                              isCrossFut
+                                ? longPerpPosition?.rlExitProbability
+                                : perpPosition?.rlExitProbability
+                            }
+                            confidence={
+                              isCrossFut
+                                ? longPerpPosition?.rlConfidence
+                                : perpPosition?.rlConfidence
+                            }
+                            holdProbability={
+                              isCrossFut
+                                ? longPerpPosition?.rlHoldProbability
+                                : perpPosition?.rlHoldProbability
+                            }
+                            stateValue={
+                              isCrossFut
+                                ? longPerpPosition?.rlStateValue
+                                : perpPosition?.rlStateValue
+                            }
+                            modelVersion={
+                              isCrossFut
+                                ? longPerpPosition?.rlModelVersion
+                                : perpPosition?.rlModelVersion
+                            }
+                            size="sm"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell className={`sticky right-0 z-20 border-l border-binance-border text-right ${isHovered ? 'bg-[#2b3139]' : 'bg-binance-bg-secondary'}`} rowSpan={2}>
                         {pair.executionId ? (
