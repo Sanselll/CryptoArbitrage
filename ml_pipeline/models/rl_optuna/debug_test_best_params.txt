@@ -1,0 +1,18 @@
+Best trial: 0
+Best value: -inf
+
+Best hyperparameters:
+  learning_rate: 5.6115164153345e-05
+  n_steps: 1024
+  batch_size: 64
+  n_epochs: 18
+  gamma: 0.9954100351056889
+  gae_lambda: 0.9637265320016442
+  clip_range: 0.055146123573950614
+  ent_coef_initial: 0.04864594334728975
+  ent_coef_final: 0.008491983767203797
+  reward_pnl_scale: 0.022948683681130556
+  reward_hold_bonus: 0.05454749016213018
+  reward_quality_bonus: 0.18340450985343382
+  reward_quality_penalty: -0.6957577570404623
+  net_arch: small

@@ -1,0 +1,29 @@
+Failure # 1 (occurred at 2025-10-31_17-14-46)
+[36mray::ImplicitFunc.train()[39m (pid=67355, ip=127.0.0.1, actor_id=226b38debd3ae5d6cdae550f01000000, repr=train_ppo_pbt)
+  File "/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/ray/tune/trainable/trainable.py", line 331, in train
+    raise skipped from exception_cause(skipped)
+  File "/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/ray/air/_internal/util.py", line 107, in run
+    self._ret = self._target(*self._args, **self._kwargs)
+  File "/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/ray/tune/trainable/function_trainable.py", line 44, in <lambda>
+    training_func=lambda: self._trainable_func(self.config),
+  File "/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/ray/tune/trainable/function_trainable.py", line 249, in _trainable_func
+    output = fn()
+  File "/Users/sansel/Projects/CryptoArbitrage/ml_pipeline/train_pbt.py", line 158, in train_ppo_pbt
+    eval_env = create_env(eval_data_path, price_history_path, feature_scaler_path,
+  File "/Users/sansel/Projects/CryptoArbitrage/ml_pipeline/train_pbt.py", line 99, in create_env
+    env = FundingArbitrageEnv(
+  File "/Users/sansel/Projects/CryptoArbitrage/ml_pipeline/src/rl/environment.py", line 89, in __init__
+    self.data = self._load_data(data_path)
+  File "/Users/sansel/Projects/CryptoArbitrage/ml_pipeline/src/rl/environment.py", line 156, in _load_data
+    df = pd.read_csv(data_path, low_memory=False)
+  File "/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/pandas/io/parsers/readers.py", line 1026, in read_csv
+    return _read(filepath_or_buffer, kwds)
+  File "/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/pandas/io/parsers/readers.py", line 620, in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+  File "/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/pandas/io/parsers/readers.py", line 1620, in __init__
+    self._engine = self._make_engine(f, self.engine)
+  File "/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/pandas/io/parsers/readers.py", line 1880, in _make_engine
+    self.handles = get_handle(
+  File "/opt/homebrew/Caskroom/miniforge/base/lib/python3.10/site-packages/pandas/io/common.py", line 873, in get_handle
+    handle = open(
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/sansel/Projects/CryptoArbitrage/ml_pipeline/data/rl_eval.csv'
