@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { X, DollarSign, TrendingUp, Wallet, AlertCircle, Sparkles } from 'lucide-react';
+import { X, DollarSign, TrendingUp, Wallet, AlertCircle } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { LoadingOverlay } from './ui/LoadingOverlay';
 import { ExchangeBadge } from './ui/ExchangeBadge';
-import { MLScoreBadge } from './ui/MLScoreBadge';
 import { useArbitrageStore } from '../stores/arbitrageStore';
 
 interface ExecuteDialogProps {
@@ -25,13 +24,6 @@ interface ExecuteDialogProps {
     shortFundingRate?: number;
     annualizedSpread?: number;
     estimatedProfitPercentage?: number;
-    // ML predictions
-    mlCompositeScore?: number;
-    mlPredictedProfitPercent?: number;
-    mlSuccessProbability?: number;
-    mlPredictedDurationHours?: number;
-    mlPredictedHoldHours?: number; // Alias for backward compatibility
-    mlModelVersion?: string;
   };
 }
 
@@ -175,32 +167,6 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
             </div>
           </div>
         </div>
-
-        {/* ML Predictions */}
-        {opportunity.mlCompositeScore !== undefined && (
-          <div className="p-3 bg-binance-bg-secondary/50 border-b border-binance-border">
-            <div className="flex items-center gap-1 mb-2">
-              <Sparkles className="w-3 h-3 text-purple-400" />
-              <h3 className="text-[10px] font-semibold text-binance-text">AI Predictions</h3>
-              {opportunity.mlModelVersion && (
-                <Badge variant="info" size="sm" className="ml-auto text-[8px] px-1 py-0">
-                  {opportunity.mlModelVersion}
-                </Badge>
-              )}
-            </div>
-            <div className="flex justify-center">
-              <MLScoreBadge
-                score={opportunity.mlCompositeScore}
-                profitPrediction={opportunity.mlPredictedProfitPercent}
-                successProbability={opportunity.mlSuccessProbability}
-                holdDuration={opportunity.mlPredictedDurationHours || opportunity.mlPredictedHoldHours}
-                modelVersion={opportunity.mlModelVersion}
-                size="md"
-                showDetails
-              />
-            </div>
-          </div>
-        )}
 
         {/* Balance Display */}
         {balances.length > 0 && (

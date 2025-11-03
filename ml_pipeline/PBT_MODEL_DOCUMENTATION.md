@@ -81,47 +81,73 @@ Test Data:       Oct 22, 2025 - Oct 28, 2025 (same as validation)
 
 ```
 ml_pipeline/
-├── train_pbt_simple.py           # Main PBT training script
-├── train_rl_agent.py             # Single-agent training & evaluation
-├── PBT_GUIDE.md                  # Quick start guide
-├── PBT_MODEL_DOCUMENTATION.md    # This file
-├── requirements_pbt.txt          # PBT dependencies
+├── common/                          # Shared utilities
+│   ├── data/                        # Data loaders (reusable)
+│   │   ├── loader.py
+│   │   ├── price_history_loader.py
+│   │   ├── preprocessor.py
+│   │   └── ...
+│   └── utils/
 │
-├── src/
+├── models/                          # Model-specific code
+│   └── rl/                          # Reinforcement Learning models
+│       ├── core/                    # RL implementation
+│       │   ├── environment.py       # Funding arbitrage Gym environment
+│       │   ├── portfolio.py         # Portfolio management
+│       │   ├── reward.py            # Reward calculation
+│       │   └── __init__.py
+│       └── scripts/                 # RL training scripts
+│           ├── train_rl_agent.py    # Single-agent training & evaluation
+│           └── train_simple_mode_pbt.py  # Main PBT training script
+│
+├── scripts/                         # Data preparation (shared)
+│   ├── prepare_rl_data.py
+│   ├── split_rl_data.py
+│   └── fit_feature_scaler.py
+│
+├── server/                          # Deployment API
+│   ├── app.py                       # Flask server
+│   ├── inference/
+│   │   └── rl_predictor.py
+│   └── requirements.txt
+│
+├── trained_models/                  # All trained models
 │   └── rl/
-│       ├── environment.py        # Funding arbitrage Gym environment
-│       ├── portfolio.py          # Portfolio management
-│       └── __init__.py
+│       ├── feature_scaler.pkl       # StandardScaler for features
+│       ├── simple_mode_pbt/         # PBT training runs
+│       │   └── pbt_YYYYMMDD_HHMMSS/ # Timestamped training runs
+│       │       ├── agent_0_model.zip
+│       │       ├── agent_0_hyperparams.json
+│       │       ├── agent_1_model.zip
+│       │       ├── agent_1_hyperparams.json
+│       │       └── ...
+│       └── deployed/                # Production models
+│           └── best_model.zip
 │
 ├── data/
-│   ├── rl_train.csv             # Training opportunities (Sep 1 - Oct 22)
-│   ├── rl_test.csv              # Test opportunities (Oct 22 - Oct 28)
-│   └── price_history/           # Price history parquet files
+│   ├── rl_train.csv                 # Training opportunities (Sep 1 - Oct 22)
+│   ├── rl_test.csv                  # Test opportunities (Oct 22 - Oct 28)
+│   └── price_history/               # Price history parquet files
 │       ├── BTCUSDT.parquet
 │       ├── ETHUSDT.parquet
 │       └── ...
 │
-└── models/
-    ├── rl/
-    │   └── feature_scaler.pkl   # StandardScaler for features
-    │
-    └── pbt_YYYYMMDD_HHMMSS/     # PBT training run output
-        ├── agent_0_model.zip    # Agent 0 model weights
-        ├── agent_0_hyperparams.json
-        ├── agent_1_model.zip
-        ├── agent_1_hyperparams.json
-        └── ...
+├── config/                          # Configuration files
+├── PBT_GUIDE.md                     # Quick start guide
+├── PBT_MODEL_DOCUMENTATION.md       # This file
+└── requirements.txt                 # Python dependencies
 ```
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
-| `train_pbt_simple.py` | Main PBT training script using multiprocessing |
-| `train_rl_agent.py` | Single-agent training and evaluation utilities |
-| `src/rl/environment.py` | Funding arbitrage trading environment |
-| `src/rl/portfolio.py` | Position and portfolio management |
-| `feature_scaler.pkl` | StandardScaler fitted on training data |
+| `models/rl/scripts/train_simple_mode_pbt.py` | Main PBT training script using multiprocessing |
+| `models/rl/scripts/train_rl_agent.py` | Single-agent training and evaluation utilities |
+| `models/rl/core/environment.py` | Funding arbitrage trading environment |
+| `models/rl/core/portfolio.py` | Position and portfolio management |
+| `trained_models/rl/feature_scaler.pkl` | StandardScaler fitted on training data |
+| `server/app.py` | Flask REST API for production inference |
 
 ---
 
@@ -132,14 +158,14 @@ ml_pipeline/
 Train a population of 8 agents for 500k timesteps:
 
 ```bash
-python train_pbt_simple.py \
+python models/rl/scripts/train_simple_mode_pbt.py \
     --population 8 \
     --timesteps 500000 \
     --perturbation-interval 20000 \
     --train-data data/rl_train.csv \
     --eval-data data/rl_test.csv \
     --price-history data/price_history \
-    --feature-scaler models/rl/feature_scaler.pkl
+    --feature-scaler trained_models/rl/feature_scaler.pkl
 ```
 
 **Expected runtime:** 4-8 hours on 8-core CPU
@@ -154,14 +180,14 @@ python train_pbt_simple.py \
 | `--train-data` | `data/rl_train.csv` | Path to training opportunities |
 | `--eval-data` | `data/rl_test.csv` | Path to evaluation opportunities |
 | `--price-history` | `data/price_history` | Path to price history directory |
-| `--feature-scaler` | `models/rl/feature_scaler.pkl` | Path to feature scaler |
-| `--output-dir` | `models/pbt_TIMESTAMP` | Output directory for models |
+| `--feature-scaler` | `trained_models/rl/feature_scaler.pkl` | Path to feature scaler |
+| `--output-dir` | `trained_models/rl/simple_mode_pbt/pbt_TIMESTAMP` | Output directory for models |
 
 ### Advanced Training
 
 **Quick test run (2 agents, 10k timesteps):**
 ```bash
-python train_pbt_simple.py \
+python models/rl/scripts/train_simple_mode_pbt.py \
     --population 2 \
     --timesteps 10000 \
     --perturbation-interval 5000
@@ -169,7 +195,7 @@ python train_pbt_simple.py \
 
 **Large population (more exploration):**
 ```bash
-python train_pbt_simple.py \
+python models/rl/scripts/train_simple_mode_pbt.py \
     --population 12 \
     --timesteps 1000000 \
     --perturbation-interval 25000
@@ -177,10 +203,10 @@ python train_pbt_simple.py \
 
 **Custom output directory:**
 ```bash
-python train_pbt_simple.py \
+python models/rl/scripts/train_simple_mode_pbt.py \
     --population 8 \
     --timesteps 500000 \
-    --output-dir models/my_experiment
+    --output-dir trained_models/rl/my_experiment
 ```
 
 ### Training Output
@@ -219,8 +245,8 @@ ID    Reward       P&L%       WinRate    Trades
 After training completes, the best model is automatically identified:
 
 ```bash
-python train_rl_agent.py \
-    --eval-only models/pbt_20251101_083701/agent_2_model.zip \
+python models/rl/scripts/train_rl_agent.py \
+    --eval-only trained_models/rl/simple_mode_pbt/pbt_20251101_083701/agent_2_model.zip \
     --eval-data-path data/rl_test.csv \
     --price-history-path data/price_history \
     --n-eval-episodes 1
@@ -259,11 +285,13 @@ Evaluate all agents from the final population:
 
 ```bash
 # Evaluate agent 0
-python train_rl_agent.py --eval-only models/pbt_TIMESTAMP/agent_0_model.zip \
+python models/rl/scripts/train_rl_agent.py \
+    --eval-only trained_models/rl/simple_mode_pbt/pbt_TIMESTAMP/agent_0_model.zip \
     --eval-data-path data/rl_test.csv --n-eval-episodes 1
 
 # Evaluate agent 1
-python train_rl_agent.py --eval-only models/pbt_TIMESTAMP/agent_1_model.zip \
+python models/rl/scripts/train_rl_agent.py \
+    --eval-only trained_models/rl/simple_mode_pbt/pbt_TIMESTAMP/agent_1_model.zip \
     --eval-data-path data/rl_test.csv --n-eval-episodes 1
 
 # ... repeat for all agents
@@ -333,7 +361,7 @@ These are automatically tuned by PBT:
 ### View Agent Hyperparameters
 
 ```bash
-cat models/pbt_TIMESTAMP/agent_2_hyperparams.json
+cat trained_models/rl/simple_mode_pbt/pbt_TIMESTAMP/agent_2_hyperparams.json
 ```
 
 Output:
@@ -357,8 +385,10 @@ The best model is automatically saved during training. To manually copy it:
 
 ```bash
 # Copy best model to production directory
-cp models/pbt_20251101_083701/agent_2_model.zip models/production/best_model.zip
-cp models/pbt_20251101_083701/agent_2_hyperparams.json models/production/hyperparams.json
+cp trained_models/rl/simple_mode_pbt/pbt_20251101_083701/agent_2_model.zip \
+   trained_models/rl/deployed/best_model.zip
+cp trained_models/rl/simple_mode_pbt/pbt_20251101_083701/agent_2_hyperparams.json \
+   trained_models/rl/deployed/hyperparams.json
 ```
 
 ### Load Model in Code
@@ -367,7 +397,7 @@ cp models/pbt_20251101_083701/agent_2_hyperparams.json models/production/hyperpa
 from stable_baselines3 import PPO
 
 # Load the model
-model = PPO.load("models/pbt_20251101_083701/agent_2_model.zip")
+model = PPO.load("trained_models/rl/simple_mode_pbt/pbt_20251101_083701/agent_2_model.zip")
 
 # Use for inference
 obs = env.reset()
@@ -379,15 +409,16 @@ action, _states = model.predict(obs, deterministic=True)
 Use timestamped directories for versioning:
 
 ```
-models/
-├── pbt_20251101_083701/  # Training run 1
-│   ├── agent_2_model.zip  (best: +2.91% P&L)
-│   └── ...
-├── pbt_20251102_140523/  # Training run 2
-│   ├── agent_5_model.zip  (best: +3.15% P&L)
-│   └── ...
-└── production/
-    └── best_model.zip     # Current production model
+trained_models/rl/
+├── simple_mode_pbt/
+│   ├── pbt_20251101_083701/  # Training run 1
+│   │   ├── agent_2_model.zip  (best: +2.91% P&L)
+│   │   └── ...
+│   ├── pbt_20251102_140523/  # Training run 2
+│   │   ├── agent_5_model.zip  (best: +3.15% P&L)
+│   │   └── ...
+└── deployed/
+    └── best_model.zip         # Current production model
 ```
 
 ---
@@ -440,13 +471,13 @@ models/
 **Solutions:**
 ```bash
 # Reduce population size
-python train_pbt_simple.py --population 4 --timesteps 500000
+python models/rl/scripts/train_simple_mode_pbt.py --population 4 --timesteps 500000
 
 # Reduce timesteps
-python train_pbt_simple.py --population 8 --timesteps 200000
+python models/rl/scripts/train_simple_mode_pbt.py --population 8 --timesteps 200000
 
 # Use fewer opportunities per hour (faster episodes)
-# Edit train_pbt_simple.py line 51:
+# Edit models/rl/scripts/train_simple_mode_pbt.py:
 max_opportunities_per_hour=3,  # Instead of 5
 ```
 
@@ -457,12 +488,12 @@ max_opportunities_per_hour=3,  # Instead of 5
 **Solutions:**
 ```bash
 # Increase perturbation frequency
-python train_pbt_simple.py --perturbation-interval 10000
+python models/rl/scripts/train_simple_mode_pbt.py --perturbation-interval 10000
 
 # Increase population size for more diversity
-python train_pbt_simple.py --population 12
+python models/rl/scripts/train_simple_mode_pbt.py --population 12
 
-# Edit mutation rate in train_pbt_simple.py line 149:
+# Edit mutation rate in models/rl/scripts/train_simple_mode_pbt.py:
 def mutate_hyperparams(hyperparams, mutation_rate=0.3):  # Increase from 0.2
 ```
 
@@ -474,11 +505,11 @@ def mutate_hyperparams(hyperparams, mutation_rate=0.3):  # Increase from 0.2
 
 **Verify fix:**
 ```bash
-# Check environment.py line 150-154
-grep -A 5 "if self.use_full_range_episodes:" src/rl/environment.py
+# Check environment.py
+grep -A 5 "if self.use_full_range_episodes:" models/rl/core/environment.py
 
-# Check train_rl_agent.py line 536
-grep "data_path=args.eval_data_path" train_rl_agent.py
+# Check train_rl_agent.py
+grep "data_path=args.eval_data_path" models/rl/scripts/train_rl_agent.py
 ```
 
 #### 4. Out of Memory
@@ -488,10 +519,10 @@ grep "data_path=args.eval_data_path" train_rl_agent.py
 **Solutions:**
 ```bash
 # Reduce population
-python train_pbt_simple.py --population 4
+python models/rl/scripts/train_simple_mode_pbt.py --population 4
 
 # Train agents sequentially (slower but uses less memory)
-# Edit train_pbt_simple.py line 243:
+# Edit models/rl/scripts/train_simple_mode_pbt.py:
 with mp.Pool(processes=min(2, mp.cpu_count())) as pool:  # Limit to 2 processes
 ```
 
@@ -507,7 +538,7 @@ ls -lh data/rl_test.csv
 ls -lh data/price_history/
 
 # Use absolute paths
-python train_pbt_simple.py \
+python models/rl/scripts/train_simple_mode_pbt.py \
     --train-data $(pwd)/data/rl_train.csv \
     --eval-data $(pwd)/data/rl_test.csv
 ```
@@ -521,7 +552,7 @@ python train_pbt_simple.py \
 The environment supports reward shaping parameters:
 
 ```python
-# In train_pbt_simple.py, modify environment creation:
+# In models/rl/scripts/train_simple_mode_pbt.py, modify environment creation:
 FundingArbitrageEnv(
     data_path=self.train_data,
     pnl_reward_scale=3.0,        # Increase to emphasize P&L
@@ -541,9 +572,9 @@ import numpy as np
 
 # Load top 3 agents
 models = [
-    PPO.load("models/pbt_TIMESTAMP/agent_2_model.zip"),
-    PPO.load("models/pbt_TIMESTAMP/agent_3_model.zip"),
-    PPO.load("models/pbt_TIMESTAMP/agent_6_model.zip"),
+    PPO.load("trained_models/rl/simple_mode_pbt/pbt_TIMESTAMP/agent_2_model.zip"),
+    PPO.load("trained_models/rl/simple_mode_pbt/pbt_TIMESTAMP/agent_3_model.zip"),
+    PPO.load("trained_models/rl/simple_mode_pbt/pbt_TIMESTAMP/agent_6_model.zip"),
 ]
 
 # Ensemble prediction (majority voting)
@@ -565,8 +596,8 @@ Test model robustness across different time periods:
 
 # Evaluate on each
 for week in 1 2 3; do
-    python train_rl_agent.py \
-        --eval-only models/pbt_TIMESTAMP/agent_2_model.zip \
+    python models/rl/scripts/train_rl_agent.py \
+        --eval-only trained_models/rl/simple_mode_pbt/pbt_TIMESTAMP/agent_2_model.zip \
         --eval-data-path data/rl_test_week${week}.csv \
         --n-eval-episodes 1
 done
@@ -599,11 +630,11 @@ For issues or questions:
 1. Check the [PBT_GUIDE.md](PBT_GUIDE.md) for quick start
 2. Review this documentation
 3. Check training logs in `pbt_training_log.txt`
-4. Inspect model outputs in `models/pbt_TIMESTAMP/`
+4. Inspect model outputs in `trained_models/rl/simple_mode_pbt/pbt_TIMESTAMP/`
 
 ---
 
-**Last Updated:** November 1, 2025
-**Model Version:** PBT v1.0
-**Best Model:** `models/pbt_20251101_083701/agent_2_model.zip`
+**Last Updated:** November 3, 2025
+**Model Version:** Simple Mode v1.0
+**Best Model:** `trained_models/rl/deployed/best_model.zip`
 **Performance:** +2.91% P&L, 45.1% Win Rate

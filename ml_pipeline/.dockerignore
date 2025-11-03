@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Training artifacts (not needed for API server)
+models/rl/scripts/
+scripts/
+data/opportunities/
+data/rl_train.csv
+data/rl_test.csv
+data/price_history/
+
+# Logs
+*.log
+*.txt
+ml_api_server_new.log
+
+# Documentation (not needed in Docker)
+README.md
+PBT_MODEL_DOCUMENTATION.md
+MIGRATION.md
+REORGANIZATION_COMPLETE.md
+*.md
+
+# Git
+.git/
+.gitignore
+
+# Config (if not needed at runtime)
+config/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Temporary files
+*.tmp
+*.bak
+*~

@@ -612,6 +612,9 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                 var (spread30Avg, spreadStdDev, spreadCv) = CalculateSpread30SampleAvgAsync(o.Symbol, o.LongExchange, o.ShortExchange).Result;
 
                 // Update opportunity fields for CFPS
+                // NOTE: Funding projection fields (FundApr24hProj, FundApr3dProj, FundProfit8h24hProj, FundProfit8h3dProj,
+                //       FundBreakEvenTime24hProj, FundBreakEvenTime3dProj) are PRESERVED from CalculateOpportunityMetrics.
+                //       These fields provide historical funding rate context even for price spread arbitrage.
                 o.SubType = StrategySubType.CrossExchangeFuturesPriceSpread;
                 o.SpreadRate = netProfitPercent / 100m;
                 o.AnnualizedSpread = netProfitPercent / 100m; // Not annualized (one-time profit)

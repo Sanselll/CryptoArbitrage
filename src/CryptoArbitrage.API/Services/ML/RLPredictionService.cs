@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Models;
 
 namespace CryptoArbitrage.API.Services.ML;
@@ -125,9 +126,11 @@ public class RLPredictionService : IDisposable
     }
 
     /// <summary>
-    /// Evaluate EXIT probabilities for open positions
+    /// Evaluate EXIT probabilities for open positions (execution-based)
+    /// Groups positions by ExecutionId and evaluates each execution SEPARATELY
+    /// Makes one API call per execution to respect Simple Mode constraint (1 execution per call)
     /// </summary>
-    /// <param name="positions">List of positions to evaluate (max 3)</param>
+    /// <param name="positions">List of positions to evaluate</param>
     /// <param name="portfolio">Current portfolio state</param>
     /// <param name="opportunities">Optional: current opportunities for context</param>
     /// <returns>Dictionary mapping position ID to RL prediction</returns>
@@ -136,53 +139,99 @@ public class RLPredictionService : IDisposable
         RLPortfolioState portfolio,
         IEnumerable<ArbitrageOpportunityDto>? opportunities = null)
     {
-        var posList = positions.Take(3).ToList();  // Limit to 3 (model constraint)
         var result = new Dictionary<int, RLPredictionDto>();
+        var posList = positions.ToList();
 
         if (posList.Count == 0)
             return result;
 
         try
         {
-            // Build request payload
-            var payload = new
+            // Group positions by ExecutionId to create execution-level features
+            var executionGroups = posList
+                .Where(p => p.ExecutionId.HasValue)
+                .GroupBy(p => p.ExecutionId!.Value)
+                .Select(g => g.ToList())
+                .ToList(); // Process ALL executions
+
+            if (executionGroups.Count == 0)
             {
-                positions = posList.Select(ConvertPositionToFeatures).ToList(),
-                portfolio = portfolio,
-                opportunities = opportunities?.Take(5).Select(ConvertOpportunityToFeatures).ToList() ?? new List<object>()
-            };
-
-            // Serialize and send request
-            var json = JsonSerializer.Serialize(payload, _jsonOptions);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            _logger.LogDebug("Calling RL API /rl/predict/positions with {Count} positions", posList.Count);
-            var response = await _httpClient.PostAsync("/rl/predict/positions", content);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var error = await response.Content.ReadAsStringAsync();
-                _logger.LogError("RL API position prediction failed: {Status} - {Error}", response.StatusCode, error);
+                _logger.LogWarning("No positions with ExecutionId found for RL evaluation");
                 return result;
             }
 
-            // Deserialize response
-            var responseJson = await response.Content.ReadAsStringAsync();
-            var apiResponse = JsonSerializer.Deserialize<RLPositionsResponse>(responseJson, _deserializeOptions);
+            // Convert opportunities to List for matching
+            var opportunitiesList = opportunities?.ToList();
 
-            if (apiResponse?.Predictions == null)
-            {
-                _logger.LogWarning("RL API returned null position predictions");
-                return result;
-            }
+            _logger.LogInformation("Evaluating {Count} executions using Simple Mode (1 API call per execution)", executionGroups.Count);
 
-            // Map predictions back to positions
-            foreach (var prediction in apiResponse.Predictions)
+            // Process each execution SEPARATELY with its own API call
+            // This respects the ML server's Simple Mode constraint (1 execution per call)
+            var executionIndex = 0;
+            foreach (var executionPositions in executionGroups)
             {
-                if (prediction.PositionIndex >= 0 && prediction.PositionIndex < posList.Count)
+                try
                 {
-                    var pos = posList[prediction.PositionIndex];
-                    result[pos.Id] = new RLPredictionDto
+                    // Match this execution to its specific opportunity
+                    var matchedOpportunity = FindMatchingOpportunity(executionPositions, opportunitiesList);
+
+                    // Convert execution to features
+                    var executionFeatures = ConvertExecutionToFeatures(executionPositions, matchedOpportunity);
+
+                    // Build request payload with SINGLE execution
+                    // CRITICAL: ML server reads execution features from portfolio.positions[0], NOT from positions parameter!
+                    // The positions parameter is only used for the symbol
+                    var payload = new
+                    {
+                        positions = new[] { executionFeatures },  // Only used for symbol extraction
+                        portfolio = new
+                        {
+                            total_capital = portfolio.Capital,
+                            capital = portfolio.Capital,
+                            initial_capital = portfolio.InitialCapital,
+                            utilization = portfolio.Utilization,
+                            total_pnl_pct = portfolio.TotalPnlPct,
+                            max_drawdown = portfolio.Drawdown,
+                            drawdown = portfolio.Drawdown,
+                            // CRITICAL: Put THIS execution's features here - ML server reads from positions[0]
+                            positions = new[] { executionFeatures }
+                        },
+                        opportunity = matchedOpportunity != null
+                            ? ConvertOpportunityToFeatures(matchedOpportunity)
+                            : null
+                    };
+
+                    // Serialize and send request for THIS execution
+                    var json = JsonSerializer.Serialize(payload, _jsonOptions);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                    var executionId = executionPositions.FirstOrDefault()?.ExecutionId ?? 0;
+                    _logger.LogDebug("Calling RL API for execution {ExecutionId} (index {Index}/{Total})",
+                        executionId, executionIndex + 1, executionGroups.Count);
+
+                    var response = await _httpClient.PostAsync("/rl/predict/positions", content);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var error = await response.Content.ReadAsStringAsync();
+                        _logger.LogError("RL API prediction failed for execution {ExecutionId}: {Status} - {Error}",
+                            executionId, response.StatusCode, error);
+                        continue; // Skip this execution but continue with others
+                    }
+
+                    // Deserialize response
+                    var responseJson = await response.Content.ReadAsStringAsync();
+                    var apiResponse = JsonSerializer.Deserialize<RLPositionsResponse>(responseJson, _deserializeOptions);
+
+                    if (apiResponse?.Predictions == null || apiResponse.Predictions.Count == 0)
+                    {
+                        _logger.LogWarning("RL API returned no predictions for execution {ExecutionId}", executionId);
+                        continue;
+                    }
+
+                    // Get prediction for this execution (should be first and only prediction)
+                    var prediction = apiResponse.Predictions[0];
+                    var rlPrediction = new RLPredictionDto
                     {
                         ActionProbability = prediction.ExitProbability,
                         HoldProbability = prediction.HoldProbability,
@@ -190,10 +239,28 @@ public class RLPredictionService : IDisposable
                         StateValue = prediction.StateValue,
                         ModelVersion = apiResponse.ModelVersion
                     };
+
+                    // Apply the SAME prediction to ALL positions in this execution
+                    foreach (var pos in executionPositions)
+                    {
+                        result[pos.Id] = rlPrediction;
+                    }
+
+                    _logger.LogDebug("Execution {ExecutionId}: EXIT={ExitProb:P2}, HOLD={HoldProb:P2}, Confidence={Confidence}",
+                        executionId, prediction.ExitProbability, prediction.HoldProbability, prediction.Confidence);
                 }
+                catch (Exception ex)
+                {
+                    var executionId = executionPositions.FirstOrDefault()?.ExecutionId ?? 0;
+                    _logger.LogError(ex, "Failed to evaluate execution {ExecutionId}", executionId);
+                    // Continue with next execution
+                }
+
+                executionIndex++;
             }
 
-            _logger.LogInformation("RL predictions received for {Count} positions", result.Count);
+            _logger.LogInformation("RL predictions completed for {SuccessCount}/{TotalCount} executions ({PositionCount} positions)",
+                result.Count / 2, executionGroups.Count, result.Count);
             return result;
         }
         catch (Exception ex)
@@ -235,29 +302,148 @@ public class RLPredictionService : IDisposable
     }
 
     /// <summary>
-    /// Convert position DTO to feature dictionary for Python API
+    /// Convert execution (2 positions: long + short) to feature dictionary for Python API
+    /// Matches the 10 execution-level features expected by the RL model
     /// </summary>
-    private object ConvertPositionToFeatures(PositionDto pos)
+    /// <param name="executionPositions">List of positions in this execution (should be 2: long + short)</param>
+    /// <param name="opportunity">Optional current opportunity for blending estimated funding</param>
+    private object ConvertExecutionToFeatures(
+        List<PositionDto> executionPositions,
+        ArbitrageOpportunityDto? opportunity = null)
     {
-        var hoursHeld = pos.ClosedAt.HasValue
-            ? (float)(pos.ClosedAt.Value - pos.OpenedAt).TotalHours
-            : (float)(DateTime.UtcNow - pos.OpenedAt).TotalHours;
+        // Execution must have exactly 2 positions (long + short)
+        var longPos = executionPositions.FirstOrDefault(p => p.Side == PositionSide.Long);
+        var shortPos = executionPositions.FirstOrDefault(p => p.Side == PositionSide.Short);
 
-        var pnlPct = pos.InitialMargin > 0
-            ? (float)((pos.UnrealizedPnL / pos.InitialMargin) * 100)
+        if (longPos == null || shortPos == null)
+        {
+            _logger.LogWarning("Execution missing long or short position, using fallback values");
+            // Return minimal features if execution is incomplete
+            return new
+            {
+                symbol = executionPositions.FirstOrDefault()?.Symbol ?? "UNKNOWN",
+                unrealized_pnl_pct = 0.0f,
+                position_age_hours = 0.0f,
+                long_net_funding_usd = 0.0f,
+                short_net_funding_usd = 0.0f,
+                total_net_funding_usd = 0.0f,
+                short_funding_rate = 0.0f,
+                long_funding_rate = 0.0f,
+                current_long_price = 0.0f,
+                current_short_price = 0.0f,
+                entry_long_price = 0.0f,
+                entry_short_price = 0.0f,
+                position_size_usd = 0.0f,
+                entry_fees_paid_usd = 0.0f,
+                long_pnl_pct = 0.0f,
+                short_pnl_pct = 0.0f
+            };
+        }
+
+        // Calculate execution-level metrics
+        var hoursHeld = (float)(DateTime.UtcNow - longPos.OpenedAt).TotalHours;
+
+        // Net P&L % (combined long + short)
+        var totalInitialMargin = longPos.InitialMargin + shortPos.InitialMargin;
+        var totalUnrealizedPnl = longPos.UnrealizedPnL + shortPos.UnrealizedPnL;
+        var netPnlPct = totalInitialMargin > 0
+            ? (float)((totalUnrealizedPnl / totalInitialMargin) * 100)
             : 0.0f;
 
-        // Estimate current funding rate from net funding fees
-        var fundingRate = hoursHeld > 0
-            ? (float)(pos.NetFundingFee / pos.InitialMargin / (decimal)hoursHeld * 8 * 100)  // Normalize to 8h rate
+        // Individual side P&L %
+        var longPnlPct = longPos.InitialMargin > 0
+            ? (float)((longPos.UnrealizedPnL / longPos.InitialMargin) * 100)
             : 0.0f;
+        var shortPnlPct = shortPos.InitialMargin > 0
+            ? (float)((shortPos.UnrealizedPnL / shortPos.InitialMargin) * 100)
+            : 0.0f;
+
+        // Funding fees - Extract BOTH paid and received from BOTH positions
+        // IMPORTANT: Both LONG and SHORT positions can have BOTH paid AND received funding
+        // depending on funding rates. We must calculate NET funding for each side.
+        var longFundingReceived = (float)longPos.TotalFundingFeeReceived;
+        var longFundingPaid = (float)longPos.TotalFundingFeePaid;
+        var shortFundingReceived = (float)shortPos.TotalFundingFeeReceived;
+        var shortFundingPaid = (float)shortPos.TotalFundingFeePaid;
+
+        // Calculate net funding (positive = profit, negative = cost)
+        var longNetFunding = longFundingReceived - longFundingPaid;
+        var shortNetFunding = shortFundingReceived - shortFundingPaid;
+        var totalNetFunding = longNetFunding + shortNetFunding;
+
+        // Estimate funding rates from cumulative NET fees
+        var positionSizeUsd = (float)longPos.InitialMargin;  // Size per side
+        var longFundingRate = hoursHeld > 0 && positionSizeUsd > 0
+            ? longNetFunding / positionSizeUsd / hoursHeld * 8  // Normalize to 8h rate
+            : 0.0f;
+        var shortFundingRate = hoursHeld > 0 && positionSizeUsd > 0
+            ? shortNetFunding / positionSizeUsd / hoursHeld * 8
+            : 0.0f;
+
+        // BLENDING LOGIC: For NEW executions (< 8 hours), blend estimated (from opportunity) with actual funding
+        // For MATURE executions (>= 8 hours), use only actual funding
+        const float BLEND_THRESHOLD_HOURS = 8.0f;
+        if (hoursHeld < BLEND_THRESHOLD_HOURS && opportunity != null)
+        {
+            // Get estimated funding rates from active opportunity
+            // Determine which exchange is LONG and which is SHORT to match rates correctly
+            var longExchange = longPos.Exchange;
+            var shortExchange = shortPos.Exchange;
+
+            // Match opportunity's long/short to position's long/short based on exchange
+            var estimatedLongRate = longExchange == opportunity.LongExchange
+                ? (float)opportunity.LongFundingRate
+                : (float)opportunity.ShortFundingRate;
+            var estimatedShortRate = shortExchange == opportunity.ShortExchange
+                ? (float)opportunity.ShortFundingRate
+                : (float)opportunity.LongFundingRate;
+
+            // Blend factor: 0 = all estimated, 1 = all actual
+            var blendFactor = hoursHeld / BLEND_THRESHOLD_HOURS;
+
+            // Blend: new execution uses estimated, mature execution uses actual
+            var originalLongRate = longFundingRate;
+            var originalShortRate = shortFundingRate;
+
+            longFundingRate = longFundingRate * blendFactor + estimatedLongRate * (1 - blendFactor);
+            shortFundingRate = shortFundingRate * blendFactor + estimatedShortRate * (1 - blendFactor);
+
+            _logger.LogDebug("Blended funding rates for {Hours:F1}h execution (factor={Factor:F2}): " +
+                "long {Actual:F6}→{Blended:F6}, short {ActualShort:F6}→{BlendedShort:F6}",
+                hoursHeld, blendFactor,
+                originalLongRate, longFundingRate, originalShortRate, shortFundingRate);
+        }
+
+        // Current prices (use entry price + P&L to estimate current price)
+        var longCurrentPrice = longPos.ExitPrice.HasValue
+            ? (float)longPos.ExitPrice.Value
+            : (float)(longPos.EntryPrice * (1 + longPos.UnrealizedPnL / longPos.InitialMargin));
+        var shortCurrentPrice = shortPos.ExitPrice.HasValue
+            ? (float)shortPos.ExitPrice.Value
+            : (float)(shortPos.EntryPrice * (1 - shortPos.UnrealizedPnL / shortPos.InitialMargin));
+
+        // Entry/trading fees (estimate ~0.02% maker fee per side)
+        var entryFeesUsd = positionSizeUsd * 2 * 0.0002f;
 
         return new
         {
-            symbol = pos.Symbol,
-            pnl_pct = pnlPct,
-            hours_held = hoursHeld,
-            funding_rate = fundingRate
+            symbol = longPos.Symbol,
+            unrealized_pnl_pct = netPnlPct,
+            position_age_hours = hoursHeld,
+            // Send NET funding for each side (positive = profit, negative = cost)
+            long_net_funding_usd = longNetFunding,
+            short_net_funding_usd = shortNetFunding,
+            total_net_funding_usd = totalNetFunding,
+            short_funding_rate = shortFundingRate,
+            long_funding_rate = longFundingRate,
+            current_long_price = longCurrentPrice,
+            current_short_price = shortCurrentPrice,
+            entry_long_price = (float)longPos.EntryPrice,
+            entry_short_price = (float)shortPos.EntryPrice,
+            position_size_usd = positionSizeUsd,
+            entry_fees_paid_usd = entryFeesUsd,
+            long_pnl_pct = longPnlPct,
+            short_pnl_pct = shortPnlPct
         };
     }
 
@@ -311,6 +497,45 @@ public class RLPredictionService : IDisposable
 
         [JsonPropertyName("model_version")]
         public string ModelVersion { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Find the most appropriate opportunity for a given execution based on symbol and exchange matching
+    /// </summary>
+    private ArbitrageOpportunityDto? FindMatchingOpportunity(
+        List<PositionDto> executionPositions,
+        List<ArbitrageOpportunityDto>? opportunities)
+    {
+        if (opportunities == null || opportunities.Count == 0 || executionPositions.Count == 0)
+            return null;
+
+        var firstPosition = executionPositions[0];
+        var symbol = firstPosition.Symbol;
+
+        // Find opportunities that match the symbol
+        var matchingOpportunities = opportunities.Where(opp => opp.Symbol == symbol).ToList();
+
+        if (matchingOpportunities.Count == 0)
+            return null;
+
+        // Try to match by exchange (for spot-perp or cross-exchange)
+        var longPos = executionPositions.FirstOrDefault(p => p.Side == PositionSide.Long);
+        var shortPos = executionPositions.FirstOrDefault(p => p.Side == PositionSide.Short);
+
+        if (longPos != null && shortPos != null)
+        {
+            // Try to match cross-exchange opportunity (long exchange + short exchange)
+            var exactMatch = matchingOpportunities.FirstOrDefault(opp =>
+                (opp.LongExchange == longPos.Exchange && opp.ShortExchange == shortPos.Exchange) ||
+                (opp.Exchange == longPos.Exchange && longPos.Exchange == shortPos.Exchange) // Same exchange spot-perp
+            );
+
+            if (exactMatch != null)
+                return exactMatch;
+        }
+
+        // Return first matching opportunity by symbol if no exact match
+        return matchingOpportunities.First();
     }
 
     private class RLPositionPrediction

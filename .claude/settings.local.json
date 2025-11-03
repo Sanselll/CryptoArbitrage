@@ -121,7 +121,10 @@
       "Bash(pgrep:*)",
       "Bash(ps:*)",
       "Bash(journalctl:*)",
-      "Bash(grep -i position|predict)"
+      "Bash(grep -i position|predict)",
+      "Bash(psql:*)",
+      "Bash(grep:*)",
+      "Bash(printf:*)"
     ],
     "deny": [],
     "ask": []

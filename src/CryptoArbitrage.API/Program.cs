@@ -342,8 +342,6 @@ builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 });
 
 // ML Services - Using HTTP API to call Python Flask server
-builder.Services.AddSingleton<PythonMLApiClient>();
-builder.Services.AddSingleton<OpportunityMLScorer>();
 builder.Services.AddSingleton<RLPredictionService>();
 
 // ============================================================================
@@ -416,35 +414,6 @@ using (var scope = app.Services.CreateScope())
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         logger.LogError(ex, "An error occurred while migrating the database");
         throw; // Re-throw to prevent app from starting with broken database
-    }
-}
-
-// Check if Python ML API is available on startup
-using (var scope = app.Services.CreateScope())
-{
-    try
-    {
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("Checking Python ML API availability...");
-
-        var mlApiClient = scope.ServiceProvider.GetRequiredService<PythonMLApiClient>();
-        var isHealthy = await mlApiClient.HealthCheckAsync();
-
-        if (isHealthy)
-        {
-            logger.LogInformation($"✅ Python ML API is available at {mlApiUrl}");
-        }
-        else
-        {
-            logger.LogWarning($"⚠️ Python ML API is not available at {mlApiUrl} - ML predictions will not work");
-            logger.LogWarning("   Start the ML API server: cd ml_pipeline && python ml_api_server.py");
-        }
-    }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogWarning(ex, "Failed to connect to Python ML API - continuing without ML predictions");
-        // Don't throw - allow app to start without ML if API is not running
     }
 }
 

@@ -3,6 +3,7 @@ using CryptoArbitrage.API.Constants;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.DataCollection.Events;
+using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.ML;
 using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Data;
@@ -252,12 +253,29 @@ public class SignalRBroadcaster : IHostedService
                                 _logger.LogDebug("Enriching {Count} open positions with RL predictions for user {UserId}",
                                     openPositions.Count, userId);
 
+                                // Fetch current opportunities from cache
+                                List<ArbitrageOpportunityDto>? currentOpportunities = null;
+                                try
+                                {
+                                    using var scope = _serviceScopeFactory.CreateScope();
+                                    var opportunityRepository = scope.ServiceProvider.GetRequiredService<IDataRepository<ArbitrageOpportunityDto>>();
+
+                                    var opportunitiesDict = await opportunityRepository.GetByPatternAsync("opportunity:*");
+                                    currentOpportunities = opportunitiesDict.Values.ToList();
+
+                                    _logger.LogDebug("Fetched {Count} current opportunities for RL prediction", currentOpportunities.Count);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to fetch opportunities for RL prediction, will proceed without them");
+                                }
+
                                 var portfolioState = await BuildPortfolioStateAsync(userId);
 
                                 var rlPredictions = await _rlPredictionService.EvaluatePositionsAsync(
                                     openPositions,
                                     portfolioState,
-                                    null  // We don't have current opportunities here
+                                    currentOpportunities
                                 );
 
                                 foreach (var pos in openPositions)

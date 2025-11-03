@@ -95,12 +95,6 @@ public class ArbitrageOpportunityDto
     // Position tracking
     public bool IsExistingPosition { get; set; } = false;  // true if this represents an open position
 
-    // ML Predictions (XGBoost)
-    public decimal? MLPredictedProfitPercent { get; set; }      // Predicted actual profit %
-    public decimal? MLSuccessProbability { get; set; }          // Probability of being profitable (0-1)
-    public decimal? MLPredictedDurationHours { get; set; }      // Predicted hold duration in hours
-    public decimal? MLCompositeScore { get; set; }              // Success prob × predicted profit
-
     // RL Predictions (Reinforcement Learning)
     public float? RLEnterProbability { get; set; }              // RL model probability of ENTER action (0-1)
     public float? RLHoldProbability { get; set; }               // RL model probability of HOLD action (0-1)

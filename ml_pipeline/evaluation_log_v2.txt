@@ -1,8 +1,0 @@
-usage: train_rl_agent.py [-h] [--data-path DATA_PATH]
-                         [--eval-data-path EVAL_DATA_PATH]
-                         [--price-history-path PRICE_HISTORY_PATH]
-                         [--timesteps TIMESTEPS] [--lr LR]
-                         [--save-dir SAVE_DIR] [--seed SEED]
-                         [--eval-only EVAL_ONLY]
-                         [--n-eval-episodes N_EVAL_EPISODES]
-train_rl_agent.py: error: unrecognized arguments: --feature-scaler-path models/rl/feature_scaler.pkl

@@ -227,8 +227,18 @@ public class PositionReconciliationService
                 && t.CreatedAt <= endTime)
             .ToList();
 
-        _logger.LogDebug("Found {Count} funding fee transactions for Position {PositionId}",
-            fundingTransactions.Count, position.Id);
+        _logger.LogInformation("FUNDING_FEE_DIAGNOSTIC: Found {Count} funding fee transactions for Position {PositionId} " +
+            "(Symbol={Symbol}, Exchange={Exchange}, Side={Side}, OpenedAt={OpenedAt}, ClosedAt={ClosedAt})",
+            fundingTransactions.Count, position.Id, position.Symbol, position.Exchange, position.Side,
+            position.OpenedAt, position.ClosedAt);
+
+        // Log each transaction found
+        foreach (var txLog in fundingTransactions)
+        {
+            _logger.LogInformation("FUNDING_FEE_DIAGNOSTIC: Transaction {TxId} details: " +
+                "Symbol={Symbol}, Exchange={Exchange}, CreatedAt={CreatedAt}, SignedFee={SignedFee}",
+                txLog.TransactionId, txLog.Symbol, txLog.Exchange, txLog.CreatedAt, txLog.SignedFee);
+        }
 
         // Check if already linked (idempotency)
         var existingLinks = await dbContext.PositionTransactions
@@ -248,6 +258,10 @@ public class PositionReconciliationService
             }
 
             // Find overlapping positions for quantity-weighted allocation
+            _logger.LogInformation("FUNDING_FEE_DIAGNOSTIC: Searching for overlapping positions for Transaction {TxId} " +
+                "(Looking for: Side={Side}, Symbol={Symbol}, Exchange={Exchange}, TxTime={TxTime})",
+                tx.TransactionId, position.Side, position.Symbol, position.Exchange, tx.CreatedAt);
+
             var overlappingPositions = await dbContext.Positions
                 .Where(p => p.UserId == position.UserId
                     && p.Symbol == position.Symbol
@@ -258,8 +272,10 @@ public class PositionReconciliationService
                     && (p.ClosedAt == null || p.ClosedAt >= tx.CreatedAt))
                 .ToListAsync(cancellationToken);
 
-            _logger.LogDebug("Found {Count} overlapping positions for funding fee at {Time}",
-                overlappingPositions.Count, tx.CreatedAt);
+            _logger.LogInformation("FUNDING_FEE_DIAGNOSTIC: Found {Count} overlapping positions for Transaction {TxId} at {Time}. " +
+                "Positions: [{PositionIds}]",
+                overlappingPositions.Count, tx.TransactionId, tx.CreatedAt,
+                string.Join(", ", overlappingPositions.Select(p => $"P{p.Id}")));
 
             // Calculate quantity-weighted allocation
             var totalQuantity = overlappingPositions.Sum(p => p.Quantity);
@@ -378,6 +394,16 @@ public class PositionReconciliationService
         }
 
         // Determine status
+        // IMPORTANT: OPEN positions can NEVER be FullyReconciled because new funding fees keep coming every 8h
+        if (position.Status == PositionStatus.Open || position.ClosedAt == null)
+        {
+            // OPEN position: return PartiallyReconciled (will be re-evaluated every cycle for new funding fees)
+            return linkedTransactions.Count > 0
+                ? ReconciliationStatus.PartiallyReconciled
+                : ReconciliationStatus.Preliminary;
+        }
+
+        // CLOSED position: can be marked as FullyReconciled
         if (hasOpeningCommission && hasClosingCommission && hasExpectedFunding)
         {
             return ReconciliationStatus.FullyReconciled;

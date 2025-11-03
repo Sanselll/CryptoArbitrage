@@ -104,9 +104,15 @@ public class PositionReconciliationBackgroundService : BackgroundService
         var reconciliationService = scope.ServiceProvider.GetRequiredService<PositionReconciliationService>();
 
         // Find positions that need reconciliation
+        // IMPORTANT: OPEN positions (ClosedAt == null) are ALWAYS reconciled regardless of status,
+        // because they continue to accumulate funding fees every 8 hours
         var positionsToReconcile = await dbContext.Positions
-            .Where(p => p.ReconciliationStatus == ReconciliationStatus.Preliminary
-                || (_config.RetryPartiallyReconciled && p.ReconciliationStatus == ReconciliationStatus.PartiallyReconciled))
+            .Where(p =>
+                // OPEN positions: always reconcile (funding fees keep coming)
+                (p.Status == PositionStatus.Open && p.ClosedAt == null)
+                // CLOSED positions: only reconcile if not fully reconciled
+                || (p.ReconciliationStatus == ReconciliationStatus.Preliminary
+                    || (_config.RetryPartiallyReconciled && p.ReconciliationStatus == ReconciliationStatus.PartiallyReconciled)))
             .OrderBy(p => p.ClosedAt ?? p.OpenedAt) // Oldest first
             .Take(_config.MaxPositionsPerCycle)
             .ToListAsync(cancellationToken);

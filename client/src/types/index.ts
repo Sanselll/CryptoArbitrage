@@ -161,14 +161,6 @@ export interface ArbitrageOpportunity {
   liquidityStatus?: LiquidityStatus;
   liquidityWarning?: string;
 
-  // ML Predictions (XGBoost)
-  mlPredictedProfitPercent?: number;     // Expected profit %
-  mlSuccessProbability?: number;          // Probability of success (0-1)
-  mlPredictedDurationHours?: number;      // Optimal hold duration (hours)
-  mlPredictedHoldHours?: number;          // Alias for mlPredictedDurationHours (deprecated)
-  mlCompositeScore?: number;              // Combined ML score (0-100)
-  mlModelVersion?: string;                // ML model version
-
   // RL Predictions (Reinforcement Learning)
   rlEnterProbability?: number;            // RL ENTER action probability (0-1)
   rlHoldProbability?: number;             // RL HOLD action probability (0-1)
