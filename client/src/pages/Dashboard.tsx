@@ -4,6 +4,7 @@ import { Header } from '../components/Header';
 import { BalanceWidget } from '../components/BalanceWidget';
 import { OpportunitiesList } from '../components/OpportunitiesList';
 import { TradingDataTabs } from '../components/TradingDataTabs';
+import { AgentControlPanel } from '../components/AgentControlPanel';
 import apiClient from '../services/apiClient';
 import axios from 'axios';
 
@@ -60,7 +61,8 @@ export function Dashboard() {
     return () => {
       disconnect();
     };
-  }, [isBackendOffline, connect, disconnect]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBackendOffline]);
 
   return (
     <div className="h-screen flex flex-col bg-binance-bg">
@@ -73,24 +75,32 @@ export function Dashboard() {
             <div className="text-binance-text-secondary text-sm">Loading...</div>
           </div>
         ) : (
-          // Always show dashboard - BalanceWidget will handle display of exchanges with/without keys
-          <div className="h-full flex flex-col gap-3">
-            {/* Balance Overview - Top Section */}
-            <div className="flex-shrink-0">
-              <BalanceWidget
-                supportedExchanges={supportedExchanges}
-                connectedExchanges={connectedExchanges}
-              />
+          // Dashboard with Agent Control Panel on right side
+          <div className="h-full flex gap-3">
+            {/* Main content area */}
+            <div className="flex-1 flex flex-col gap-3 min-w-0">
+              {/* Balance Overview - Top Section */}
+              <div className="flex-shrink-0">
+                <BalanceWidget
+                  supportedExchanges={supportedExchanges}
+                  connectedExchanges={connectedExchanges}
+                />
+              </div>
+
+              {/* Opportunities List */}
+              <div className="flex-1 min-h-0">
+                <OpportunitiesList />
+              </div>
+
+              {/* Trading Data Tabs - Bottom Section */}
+              <div className="flex-shrink-0 h-80">
+                <TradingDataTabs />
+              </div>
             </div>
 
-            {/* Opportunities List - Full Width */}
-            <div className="flex-1 min-h-0">
-              <OpportunitiesList />
-            </div>
-
-            {/* Trading Data Tabs - Bottom Section */}
-            <div className="flex-shrink-0 h-80">
-              <TradingDataTabs />
+            {/* Agent Control Panel - Right Sidebar */}
+            <div className="w-80 flex-shrink-0">
+              <AgentControlPanel />
             </div>
           </div>
         )}

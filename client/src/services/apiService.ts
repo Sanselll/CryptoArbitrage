@@ -49,7 +49,251 @@ interface UserApiKey {
   isEnabled: boolean;
 }
 
+// Agent types
+interface AgentConfig {
+  maxLeverage: number;
+  targetUtilization: number;
+  maxPositions: number;
+  predictionIntervalSeconds: number;
+}
+
+interface AgentStats {
+  totalDecisions: number;
+  holdDecisions?: number;
+  enterDecisions?: number;
+  exitDecisions?: number;
+  totalTrades: number;
+  winningTrades?: number;
+  losingTrades?: number;
+  winRate: number;
+  totalPnLUsd: number;
+  totalPnLPct: number;
+  todayPnLUsd: number;
+  todayPnLPct: number;
+  activePositions: number;
+}
+
+interface AgentStatus {
+  status: string;
+  startedAt?: string;
+  pausedAt?: string;
+  durationSeconds?: number;
+  errorMessage?: string;
+  totalPredictions: number;
+  config?: AgentConfig;
+  stats?: AgentStats;
+}
+
+interface AgentDecision {
+  timestamp: string;
+  action: string;
+  symbol?: string; // Changed from opportunitySymbol to match backend
+  opportunitySymbol?: string; // Keep for backwards compatibility
+  confidence?: string;
+  enterProbability?: number;
+  exitProbability?: number;
+  stateValue?: number;
+  numOpportunities: number;
+  numPositions: number;
+  reasoning?: string;
+
+  // Execution result fields
+  executionStatus?: string; // "success" | "failed"
+  errorMessage?: string;
+
+  // ENTER specific fields
+  amountUsd?: number;
+  executionId?: number;
+
+  // EXIT specific fields
+  profitUsd?: number;
+  profitPct?: number;
+  durationHours?: number;
+}
+
 export const apiService = {
+  // ============================================================================
+  // AGENT APIS
+  // ============================================================================
+
+  async startAgent(config?: AgentConfig): Promise<AgentStatus> {
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${getApiBaseUrl()}/agent/start`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+        body: config ? JSON.stringify(config) : undefined,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to start agent');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error starting agent:', error);
+      throw error;
+    }
+  },
+
+  async stopAgent(): Promise<void> {
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${getApiBaseUrl()}/agent/stop`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to stop agent');
+      }
+    } catch (error) {
+      console.error('Error stopping agent:', error);
+      throw error;
+    }
+  },
+
+  async pauseAgent(): Promise<void> {
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${getApiBaseUrl()}/agent/pause`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to pause agent');
+      }
+    } catch (error) {
+      console.error('Error pausing agent:', error);
+      throw error;
+    }
+  },
+
+  async resumeAgent(): Promise<void> {
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${getApiBaseUrl()}/agent/resume`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to resume agent');
+      }
+    } catch (error) {
+      console.error('Error resuming agent:', error);
+      throw error;
+    }
+  },
+
+  async getAgentStatus(): Promise<AgentStatus> {
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${getApiBaseUrl()}/agent/status`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch agent status');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching agent status:', error);
+      throw error;
+    }
+  },
+
+  async getAgentConfig(): Promise<AgentConfig> {
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${getApiBaseUrl()}/agent/config`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch agent config');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching agent config:', error);
+      throw error;
+    }
+  },
+
+  async updateAgentConfig(config: Partial<AgentConfig>): Promise<AgentConfig> {
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${getApiBaseUrl()}/agent/config`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(config),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update agent config');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error updating agent config:', error);
+      throw error;
+    }
+  },
+
+  async getAgentStats(): Promise<AgentStats> {
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${getApiBaseUrl()}/agent/stats`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch agent stats');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching agent stats:', error);
+      throw error;
+    }
+  },
+
+  // ============================================================================
+  // EXISTING APIS
+  // ============================================================================
+
   async getUserApiKeys(): Promise<UserApiKey[]> {
     try {
       const token = getAuthToken();
@@ -190,4 +434,13 @@ export const apiService = {
   },
 };
 
-export type { ExecuteOpportunityRequest, ExecuteOpportunityResponse, CloseOpportunityResponse, ExecutionBalances };
+export type {
+  ExecuteOpportunityRequest,
+  ExecuteOpportunityResponse,
+  CloseOpportunityResponse,
+  ExecutionBalances,
+  AgentConfig,
+  AgentStats,
+  AgentStatus,
+  AgentDecision,
+};

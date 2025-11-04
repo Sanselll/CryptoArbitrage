@@ -21,6 +21,7 @@ class Position:
     - Short position on another exchange
     - Separate funding payments on each exchange
     - Entry and exit fees for both sides
+    - Leverage and margin tracking
     """
 
     # Identification
@@ -43,11 +44,17 @@ class Position:
     long_next_funding_time: pd.Timestamp
     short_next_funding_time: pd.Timestamp
 
-    # Fee structure (realistic Binance/Bybit levels)
+    # Leverage and fees (with defaults)
+    leverage: float = 1.0      # Leverage multiplier (1-10x)
     maker_fee: float = 0.0001  # 0.01% maker fee (reduced from 0.02%)
     taker_fee: float = 0.0002  # 0.02% taker fee (reduced from 0.05%)
     entry_fee_pct: float = field(init=False)  # Calculated from maker/taker
     exit_fee_pct: float = field(init=False)
+
+    # Margin and liquidation tracking
+    margin_used_usd: float = field(init=False)  # Actual margin locked
+    long_liquidation_price: float = field(init=False)
+    short_liquidation_price: float = field(init=False)
 
     # State tracking
     hours_held: float = 0.0
@@ -71,14 +78,65 @@ class Position:
     realized_pnl_usd: Optional[float] = None
     realized_pnl_pct: Optional[float] = None
 
+    def to_trade_record(self) -> dict:
+        """Convert position to trade record for CSV logging."""
+        total_funding_usd = self.long_net_funding_usd + self.short_net_funding_usd
+        total_fees_usd = self.entry_fees_paid_usd + self.exit_fees_paid_usd
+
+        return {
+            'entry_datetime': self.entry_time,
+            'exit_datetime': self.exit_time if self.exit_time else None,
+            'symbol': self.symbol,
+            'long_exchange': self.long_exchange,
+            'short_exchange': self.short_exchange,
+            'position_size_usd': self.position_size_usd,
+            'leverage': self.leverage,
+            'entry_long_price': self.entry_long_price,
+            'entry_short_price': self.entry_short_price,
+            'exit_long_price': self.exit_long_price,
+            'exit_short_price': self.exit_short_price,
+            'long_funding_rate': self.long_funding_rate,
+            'short_funding_rate': self.short_funding_rate,
+            'funding_earned_usd': total_funding_usd,
+            'long_funding_earned_usd': self.long_net_funding_usd,
+            'short_funding_earned_usd': self.short_net_funding_usd,
+            'entry_fees_usd': self.entry_fees_paid_usd,
+            'exit_fees_usd': self.exit_fees_paid_usd,
+            'total_fees_usd': total_fees_usd,
+            'realized_pnl_usd': self.realized_pnl_usd,
+            'realized_pnl_pct': self.realized_pnl_pct,
+            'unrealized_pnl_usd': self.unrealized_pnl_usd,
+            'unrealized_pnl_pct': self.unrealized_pnl_pct,
+            'hours_held': self.hours_held,
+            'margin_used_usd': self.margin_used_usd,
+            'status': 'closed' if self.exit_time else 'open',
+        }
+
     def __post_init__(self):
-        """Calculate entry fees after initialization."""
+        """Calculate entry fees, margin, and liquidation prices after initialization."""
         # Entry fees (assume maker orders for limit entry)
         self.entry_fee_pct = self.maker_fee * 2  # Long + short
         self.entry_fees_paid_usd = self.position_size_usd * 2 * self.maker_fee
 
         # Exit fees (assume taker for market exit, calculated on close)
         self.exit_fee_pct = self.taker_fee * 2
+
+        # Calculate margin required (total for both long + short)
+        # Margin = (position_size_long + position_size_short) / leverage
+        # For cross-exchange: both sides use position_size_usd
+        self.margin_used_usd = (self.position_size_usd * 2) / self.leverage
+
+        # Calculate liquidation prices
+        # Using simplified formula (maintenance margin ~10% of position value)
+        # Liquidation occurs when unrealized loss reaches ~90% of margin
+
+        # Long liquidation: price drops by leverage factor
+        # Approximation: liq_price = entry_price * (1 - 0.9/leverage)
+        self.long_liquidation_price = self.entry_long_price * (1 - 0.9 / self.leverage)
+
+        # Short liquidation: price rises by leverage factor
+        # Approximation: liq_price = entry_price * (1 + 0.9/leverage)
+        self.short_liquidation_price = self.entry_short_price * (1 + 0.9 / self.leverage)
 
         # Initial funding tracking
         self.last_long_funding_time = self.long_next_funding_time - timedelta(hours=self.long_funding_interval_hours)
@@ -245,6 +303,31 @@ class Position:
 
         return self.realized_pnl_usd
 
+    def get_liquidation_distance(self, current_long_price: float, current_short_price: float) -> float:
+        """
+        Calculate distance to liquidation as percentage.
+
+        Returns the minimum distance across both long and short sides.
+        Lower values indicate higher risk.
+
+        Args:
+            current_long_price: Current price on long exchange
+            current_short_price: Current price on short exchange
+
+        Returns:
+            Minimum liquidation distance percentage (0-1, where 0.15 = 15%)
+        """
+        # Long side: distance to liquidation price
+        # If current < liq, we're underwater (distance is negative or zero)
+        long_distance = abs(current_long_price - self.long_liquidation_price) / current_long_price
+
+        # Short side: distance to liquidation price
+        # If current > liq, we're underwater
+        short_distance = abs(self.short_liquidation_price - current_short_price) / current_short_price
+
+        # Return minimum (most dangerous side)
+        return min(long_distance, short_distance)
+
     def get_breakdown(self) -> Dict:
         """Get detailed P&L breakdown for analysis."""
         total_capital = self.position_size_usd * 2
@@ -346,12 +429,31 @@ class Portfolio:
         return self.total_capital - allocated
 
     @property
+    def available_margin(self) -> float:
+        """
+        Margin not currently locked in positions.
+
+        With leverage, margin_used < position_size.
+        This represents the actual capital we need to keep locked.
+        """
+        margin_used = self.get_total_margin_used()
+        return self.total_capital - margin_used
+
+    @property
     def capital_utilization(self) -> float:
         """Percentage of capital currently in use."""
         if self.total_capital == 0:
             return 0.0
         allocated = sum(pos.position_size_usd * 2 for pos in self.positions)
         return (allocated / self.total_capital) * 100
+
+    @property
+    def margin_utilization(self) -> float:
+        """Percentage of capital locked as margin."""
+        if self.total_capital == 0:
+            return 0.0
+        margin_used = self.get_total_margin_used()
+        return (margin_used / self.total_capital) * 100
 
     @property
     def unrealized_pnl_usd(self) -> float:
@@ -362,6 +464,40 @@ class Portfolio:
     def portfolio_value(self) -> float:
         """Current portfolio value (capital + unrealized P&L)."""
         return self.total_capital + self.unrealized_pnl_usd
+
+    def get_total_margin_used(self) -> float:
+        """
+        Get total margin locked across all open positions.
+
+        Returns:
+            Total margin in USD
+        """
+        return sum(pos.margin_used_usd for pos in self.positions)
+
+    def get_min_liquidation_distance(self, price_data: Dict[str, Dict[str, float]]) -> float:
+        """
+        Get minimum liquidation distance across all open positions.
+
+        Args:
+            price_data: Dict mapping symbol to {'long_price': float, 'short_price': float}
+
+        Returns:
+            Minimum liquidation distance (0-1), or 1.0 if no positions
+        """
+        if len(self.positions) == 0:
+            return 1.0  # No positions, no liquidation risk
+
+        min_distance = 1.0
+        for pos in self.positions:
+            if pos.symbol in price_data:
+                prices = price_data[pos.symbol]
+                distance = pos.get_liquidation_distance(
+                    prices['long_price'],
+                    prices['short_price']
+                )
+                min_distance = min(min_distance, distance)
+
+        return min_distance
 
     def get_execution_avg_pnl_pct(self) -> float:
         """
@@ -384,21 +520,131 @@ class Portfolio:
 
         return weighted_pnl / total_capital_used
 
-    def can_open_position(self, size_per_side_usd: float) -> bool:
+    def get_execution_state(self, exec_idx: int, price_data: Dict[str, Dict[str, float]]) -> np.ndarray:
+        """
+        Get state features for a single execution slot (12 dimensions).
+
+        Args:
+            exec_idx: Execution index (0-4)
+            price_data: Current price data for all symbols
+
+        Returns:
+            12-dimensional array of execution features
+        """
+        if exec_idx >= len(self.positions):
+            # No position in this slot - return zeros
+            return np.zeros(12, dtype=np.float32)
+
+        pos = self.positions[exec_idx]
+
+        # Get current prices for this position
+        if pos.symbol in price_data:
+            prices = price_data[pos.symbol]
+            current_long_price = prices['long_price']
+            current_short_price = prices['short_price']
+        else:
+            # Fallback to entry prices
+            current_long_price = pos.entry_long_price
+            current_short_price = pos.entry_short_price
+
+        # Calculate features
+        total_capital = pos.position_size_usd * 2
+
+        # 1. is_active
+        is_active = 1.0
+
+        # 2. net_pnl_pct
+        net_pnl_pct = pos.unrealized_pnl_pct / 100
+
+        # 3. hours_held_norm
+        hours_held_norm = pos.hours_held / 72.0
+
+        # 4. net_funding_ratio
+        net_funding_ratio = (pos.long_net_funding_usd + pos.short_net_funding_usd) / total_capital if total_capital > 0 else 0.0
+
+        # 5. net_funding_rate
+        net_funding_rate = pos.short_funding_rate - pos.long_funding_rate
+
+        # 6. current_spread_pct
+        avg_price = (current_long_price + current_short_price) / 2
+        current_spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
+
+        # 7. entry_spread_pct
+        avg_entry_price = (pos.entry_long_price + pos.entry_short_price) / 2
+        entry_spread_pct = abs(pos.entry_long_price - pos.entry_short_price) / avg_entry_price if avg_entry_price > 0 else 0.0
+
+        # 8. value_to_capital_ratio
+        value_to_capital_ratio = total_capital / self.total_capital if self.total_capital > 0 else 0.0
+
+        # 9. funding_efficiency
+        total_fees = pos.entry_fees_paid_usd + (pos.position_size_usd * 2 * pos.taker_fee)
+        net_funding_usd = pos.long_net_funding_usd + pos.short_net_funding_usd
+        funding_efficiency = net_funding_usd / total_fees if total_fees > 0 else 0.0
+
+        # 10. long_pnl_pct
+        long_pnl_pct = pos.long_pnl_pct / 100
+
+        # 11. short_pnl_pct
+        short_pnl_pct = pos.short_pnl_pct / 100
+
+        # 12. liquidation_distance_pct
+        liquidation_distance_pct = pos.get_liquidation_distance(current_long_price, current_short_price)
+
+        return np.array([
+            is_active,
+            net_pnl_pct,
+            hours_held_norm,
+            net_funding_ratio,
+            net_funding_rate,
+            current_spread_pct,
+            entry_spread_pct,
+            value_to_capital_ratio,
+            funding_efficiency,
+            long_pnl_pct,
+            short_pnl_pct,
+            liquidation_distance_pct
+        ], dtype=np.float32)
+
+    def get_all_execution_states(self, price_data: Dict[str, Dict[str, float]], max_positions: int = 5) -> np.ndarray:
+        """
+        Get execution state features for all 5 slots (60 dimensions total).
+
+        Args:
+            price_data: Current price data for all symbols
+            max_positions: Maximum number of position slots (default 5)
+
+        Returns:
+            60-dimensional array (5 slots × 12 features)
+        """
+        all_features = []
+        for i in range(max_positions):
+            exec_features = self.get_execution_state(i, price_data)
+            all_features.extend(exec_features)
+
+        return np.array(all_features, dtype=np.float32)
+
+    def can_open_position(self, size_per_side_usd: float, leverage: float = 1.0) -> bool:
         """
         Check if we can open a new arbitrage execution.
 
         Args:
             size_per_side_usd: Position size per side (total = 2x this)
+            leverage: Leverage multiplier (1-10x)
+
+        Returns:
+            True if position can be opened, False otherwise
         """
         # Position limit
         if len(self.positions) >= self.max_positions:
             return False
 
-        # Capital availability (need 2x for long + short)
-        total_size_needed = size_per_side_usd * 2
-        if total_size_needed > self.available_capital:
+        # Margin availability (with leverage, we need less capital)
+        margin_needed = (size_per_side_usd * 2) / leverage
+        if margin_needed > self.available_margin:
             return False
+
+        # REMOVED: Capital availability check (replaced by margin check above)
+        # With leverage, we don't need full capital, just margin
 
         # Position size limit per side
         max_size_per_side = self.total_capital * (self.max_position_size_pct / 100)
@@ -414,7 +660,7 @@ class Portfolio:
         Returns:
             True if position opened successfully, False otherwise
         """
-        if not self.can_open_position(position.position_size_usd):
+        if not self.can_open_position(position.position_size_usd, position.leverage):
             return False
 
         self.positions.append(position)

@@ -124,7 +124,11 @@
       "Bash(grep -i position|predict)",
       "Bash(psql:*)",
       "Bash(grep:*)",
-      "Bash(printf:*)"
+      "Bash(printf:*)",
+      "Bash(dotnet ef migrations:*)",
+      "Bash(head -1 echo \"\" echo \"Backend API Demo (port 5052):\")",
+      "Bash(head -1 echo \"\" echo \"Frontend (port 5173):\")",
+      "Bash(xargs kill:*)"
     ],
     "deny": [],
     "ask": []

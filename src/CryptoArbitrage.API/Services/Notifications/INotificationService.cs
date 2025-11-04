@@ -28,4 +28,9 @@ public interface INotificationService
     /// Send a notification for liquidation risk
     /// </summary>
     Task NotifyLiquidationRiskAsync(string userId, string symbol, string exchange, decimal marginPercent);
+
+    /// <summary>
+    /// Broadcast agent decision to user's connected clients
+    /// </summary>
+    Task BroadcastAgentDecisionAsync(string userId, object decision);
 }

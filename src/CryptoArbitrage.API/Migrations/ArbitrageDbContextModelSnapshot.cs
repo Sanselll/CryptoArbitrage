@@ -22,6 +22,196 @@ namespace CryptoArbitrage.API.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentConfiguration", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("MaxLeverage")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<int>("MaxPositions")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<int>("PredictionIntervalSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("TargetUtilization")
+                        .HasPrecision(5, 4)
+                        .HasColumnType("numeric(5,4)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("AgentConfigurations");
+                });
+
+            modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AgentConfigurationId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("FinalPnLPct")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<decimal?>("FinalPnLUsd")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<DateTime?>("PausedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("StoppedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("TotalPredictions")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TotalTrades")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AgentConfigurationId");
+
+                    b.HasIndex("StartedAt");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("AgentSessions");
+                });
+
+            modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentStats", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ActivePositions")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("AgentSessionId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("AveragePositionDurationHours")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<int>("EnterDecisions")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ExitDecisions")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("HoldDecisions")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LosingTrades")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaxActivePositions")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("MaxDrawdownPct")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<DateTime>("StatsPeriodStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("TodayPnLPct")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<decimal>("TodayPnLUsd")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<int>("TotalDecisions")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("TotalPnLPct")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<decimal>("TotalPnLUsd")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<int>("TotalTrades")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("WinRate")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<int>("WinningTrades")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AgentSessionId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("AgentStats");
+                });
+
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.ApplicationUser", b =>
                 {
                     b.Property<string>("Id")
@@ -584,6 +774,54 @@ namespace CryptoArbitrage.API.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentConfiguration", b =>
+                {
+                    b.HasOne("CryptoArbitrage.API.Data.Entities.ApplicationUser", "User")
+                        .WithMany("AgentConfigurations")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentSession", b =>
+                {
+                    b.HasOne("CryptoArbitrage.API.Data.Entities.AgentConfiguration", "AgentConfiguration")
+                        .WithMany()
+                        .HasForeignKey("AgentConfigurationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CryptoArbitrage.API.Data.Entities.ApplicationUser", "User")
+                        .WithMany("AgentSessions")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AgentConfiguration");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentStats", b =>
+                {
+                    b.HasOne("CryptoArbitrage.API.Data.Entities.AgentSession", "AgentSession")
+                        .WithMany()
+                        .HasForeignKey("AgentSessionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CryptoArbitrage.API.Data.Entities.ApplicationUser", "User")
+                        .WithMany("AgentStats")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AgentSession");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.Execution", b =>
                 {
                     b.HasOne("CryptoArbitrage.API.Data.Entities.ApplicationUser", "User")
@@ -699,6 +937,12 @@ namespace CryptoArbitrage.API.Migrations
 
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.ApplicationUser", b =>
                 {
+                    b.Navigation("AgentConfigurations");
+
+                    b.Navigation("AgentSessions");
+
+                    b.Navigation("AgentStats");
+
                     b.Navigation("ExchangeApiKeys");
 
                     b.Navigation("Executions");

@@ -1,8 +1,23 @@
 import * as signalR from '@microsoft/signalr';
 import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Notification, Order, Trade, Transaction } from '../types/index';
 import { notificationService } from './notificationService.tsx';
+import type { AgentStats, AgentDecision } from './apiService';
 
 type TradingMode = 'Demo' | 'Real';
+
+// Agent event types
+interface AgentStatusEvent {
+  status: string;
+  durationSeconds?: number;
+  isRunning: boolean;
+  errorMessage?: string;
+  timestamp: string;
+}
+
+interface AgentErrorEvent {
+  error: string;
+  timestamp: string;
+}
 
 // Get Hub URL based on trading mode from sessionStorage
 const getHubUrl = (): string => {
@@ -30,6 +45,10 @@ class SignalRService {
     onPnLUpdate: [] as ((data: { totalPnL: number; todayPnL: number }) => void)[],
     onAlert: [] as ((data: { message: string; severity: string; timestamp: string }) => void)[],
     onNotification: [] as ((data: Notification) => void)[],
+    onAgentStatus: [] as ((data: AgentStatusEvent) => void)[],
+    onAgentStats: [] as ((data: AgentStats) => void)[],
+    onAgentDecision: [] as ((data: AgentDecision) => void)[],
+    onAgentError: [] as ((data: AgentErrorEvent) => void)[],
   };
 
   async connect() {
@@ -47,6 +66,12 @@ class SignalRService {
     this.connecting = true;
 
     try {
+      // Clean up old connection if it exists
+      if (this.connection) {
+        await this.connection.stop();
+        this.connection = null;
+      }
+
       // Use single jwt_token key for all modes
       const token = localStorage.getItem('jwt_token');
       if (!token) {
@@ -69,6 +94,20 @@ class SignalRService {
 
       this.setupEventHandlers();
 
+      // Set up connection lifecycle handlers
+      this.connection.onreconnecting(() => {
+        console.log('SignalR Reconnecting...');
+      });
+
+      this.connection.onreconnected(() => {
+        console.log('SignalR Reconnected');
+      });
+
+      this.connection.onclose(() => {
+        console.log('SignalR Disconnected');
+        setTimeout(() => this.connect(), 5000);
+      });
+
       await this.connection.start();
       this.connecting = false;
       console.log('SignalR Connected to:', url);
@@ -77,24 +116,29 @@ class SignalRService {
       console.error('SignalR Connection Error: ', err);
       setTimeout(() => this.connect(), 5000);
     }
-
-    this.connection.onreconnecting(() => {
-      console.log('SignalR Reconnecting...');
-    });
-
-    this.connection.onreconnected(() => {
-      console.log('SignalR Reconnected');
-    });
-
-    this.connection.onclose(() => {
-      console.log('SignalR Disconnected');
-      setTimeout(() => this.connect(), 5000);
-    });
   }
 
   private setupEventHandlers() {
     if (!this.connection) return;
 
+    // Remove any existing handlers first
+    this.connection.off('ReceiveFundingRates');
+    this.connection.off('ReceivePositions');
+    this.connection.off('ReceiveOpportunities');
+    this.connection.off('ReceiveBalances');
+    this.connection.off('ReceivePnLUpdate');
+    this.connection.off('ReceiveAlert');
+    this.connection.off('ReceiveNotification');
+    this.connection.off('ReceiveOpenOrders');
+    this.connection.off('ReceiveOrderHistory');
+    this.connection.off('ReceiveTradeHistory');
+    this.connection.off('ReceiveTransactionHistory');
+    this.connection.off('ReceiveAgentStatus');
+    this.connection.off('ReceiveAgentStats');
+    this.connection.off('ReceiveAgentDecision');
+    this.connection.off('ReceiveAgentError');
+
+    // Register new handlers
     this.connection.on('ReceiveFundingRates', (data: FundingRate[]) => {
       this.callbacks.onFundingRates.forEach(cb => cb(data));
     });
@@ -145,6 +189,24 @@ class SignalRService {
 
     this.connection.on('ReceiveTransactionHistory', (data: Transaction[]) => {
       this.callbacks.onTransactionHistory.forEach(cb => cb(data));
+    });
+
+    // Agent events
+    this.connection.on('ReceiveAgentStatus', (data: AgentStatusEvent) => {
+      this.callbacks.onAgentStatus.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveAgentStats', (data: AgentStats) => {
+      this.callbacks.onAgentStats.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveAgentDecision', (data: AgentDecision) => {
+      console.log('[SignalR] ReceiveAgentDecision - callbacks count:', this.callbacks.onAgentDecision.length);
+      this.callbacks.onAgentDecision.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveAgentError', (data: AgentErrorEvent) => {
+      this.callbacks.onAgentError.forEach(cb => cb(data));
     });
   }
 
@@ -222,6 +284,36 @@ class SignalRService {
     this.callbacks.onTransactionHistory.push(callback);
     return () => {
       this.callbacks.onTransactionHistory = this.callbacks.onTransactionHistory.filter(cb => cb !== callback);
+    };
+  }
+
+  onAgentStatus(callback: (data: AgentStatusEvent) => void) {
+    this.callbacks.onAgentStatus.push(callback);
+    return () => {
+      this.callbacks.onAgentStatus = this.callbacks.onAgentStatus.filter(cb => cb !== callback);
+    };
+  }
+
+  onAgentStats(callback: (data: AgentStats) => void) {
+    this.callbacks.onAgentStats.push(callback);
+    return () => {
+      this.callbacks.onAgentStats = this.callbacks.onAgentStats.filter(cb => cb !== callback);
+    };
+  }
+
+  onAgentDecision(callback: (data: AgentDecision) => void) {
+    this.callbacks.onAgentDecision.push(callback);
+    console.log('[SignalR] Registered onAgentDecision callback. Total callbacks:', this.callbacks.onAgentDecision.length);
+    return () => {
+      this.callbacks.onAgentDecision = this.callbacks.onAgentDecision.filter(cb => cb !== callback);
+      console.log('[SignalR] Unregistered onAgentDecision callback. Remaining callbacks:', this.callbacks.onAgentDecision.length);
+    };
+  }
+
+  onAgentError(callback: (data: AgentErrorEvent) => void) {
+    this.callbacks.onAgentError.push(callback);
+    return () => {
+      this.callbacks.onAgentError = this.callbacks.onAgentError.filter(cb => cb !== callback);
     };
   }
 

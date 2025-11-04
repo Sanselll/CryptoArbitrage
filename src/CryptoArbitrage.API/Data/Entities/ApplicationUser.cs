@@ -13,4 +13,9 @@ public class ApplicationUser : IdentityUser
     public ICollection<Position> Positions { get; set; } = new List<Position>();
     public ICollection<Execution> Executions { get; set; } = new List<Execution>();
     public ICollection<PerformanceMetric> PerformanceMetrics { get; set; } = new List<PerformanceMetric>();
+
+    // Agent navigation properties
+    public ICollection<AgentConfiguration> AgentConfigurations { get; set; } = new List<AgentConfiguration>();
+    public ICollection<AgentSession> AgentSessions { get; set; } = new List<AgentSession>();
+    public ICollection<AgentStats> AgentStats { get; set; } = new List<AgentStats>();
 }

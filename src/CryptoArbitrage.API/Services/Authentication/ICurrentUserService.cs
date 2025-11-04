@@ -32,4 +32,13 @@ public interface ICurrentUserService
     /// <param name="resourceUserId">The UserId of the resource to validate ownership</param>
     /// <exception cref="UnauthorizedAccessException">Thrown if user is not authenticated or does not own the resource</exception>
     void ValidateUserOwnsResource(string resourceUserId);
+
+    /// <summary>
+    /// Sets the user context for background operations (e.g., agent trading).
+    /// Returns an IDisposable that restores the previous context when disposed.
+    /// IMPORTANT: Only use for trusted background operations like agent trading.
+    /// </summary>
+    /// <param name="userId">The user ID to set for this context</param>
+    /// <returns>IDisposable that restores the previous context</returns>
+    IDisposable SetBackgroundUserContext(string userId);
 }

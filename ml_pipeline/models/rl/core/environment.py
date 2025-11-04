@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Tuple
 from datetime import timedelta
 
 from .portfolio import Portfolio, Position
+from .config import TradingConfig
+from .reward_config import RewardConfig
 from common.data.price_history_loader import PriceHistoryLoader
 
 
@@ -36,16 +38,14 @@ class FundingArbitrageEnv(gym.Env):
                  price_history_path: str = None,
                  feature_scaler_path: str = None,
                  initial_capital: float = 10000.0,
-                 max_positions: int = 3,
+                 trading_config: Optional[TradingConfig] = None,
+                 sample_random_config: bool = False,
                  max_position_size_pct: float = 33.3,
                  episode_length_days: int = 3,
-                 max_opportunities_per_hour: int = 5,
+                 max_opportunities_per_hour: int = 10,
                  step_hours: int = 1,
-                 max_position_loss_pct: float = -1.5,
-                 pnl_reward_scale: float = 3.0,
-                 hold_bonus: float = 0.0,
-                 quality_entry_bonus: float = 0.5,
-                 quality_entry_penalty: float = -0.5,
+                 reward_config: Optional[RewardConfig] = None,
+                 pnl_reward_scale: float = None,  # Deprecated: use reward_config
                  use_full_range_episodes: bool = False,
                  simple_mode: bool = False,
                  fixed_position_size_usd: float = None,
@@ -58,44 +58,61 @@ class FundingArbitrageEnv(gym.Env):
             price_history_path: Path to price history directory (parquet files)
             feature_scaler_path: Path to fitted StandardScaler pickle file (optional)
             initial_capital: Starting capital in USD
-            max_positions: Max concurrent positions (overridden to 1 if simple_mode=True)
+            trading_config: TradingConfig instance (if None, uses default moderate config)
+            sample_random_config: If True, sample random config each episode (for training diversity)
             max_position_size_pct: Max % of capital per position side
             episode_length_days: Episode length in days (ignored if use_full_range_episodes=True)
-            max_opportunities_per_hour: Max opportunities to show per timestep (overridden to 1 if simple_mode=True)
+            max_opportunities_per_hour: Max opportunities to show per timestep (default 10, overridden to 1 if simple_mode=True)
             step_hours: Hours per timestep (default 1 = hourly)
-            max_position_loss_pct: Stop-loss threshold (e.g., -1.5 = close if loss exceeds 1.5%)
-            pnl_reward_scale: Scaling factor for P&L rewards (default 3.0 for absolute P&L optimization)
-            hold_bonus: DEPRECATED - set to 0.0 to avoid inaction bias
-            quality_entry_bonus: Bonus for entering high-quality opportunities (APR>150, spread<0.4%)
-            quality_entry_penalty: Penalty for entering low-quality opportunities (APR<75 or spread>0.5%)
+            pnl_reward_scale: Scaling factor for P&L rewards (default 3.0)
             use_full_range_episodes: If True, episodes span entire data range (data_start to data_end)
             simple_mode: If True, use simplified architecture (1 opportunity, 1 position, 3 actions)
             fixed_position_size_usd: If set, use this fixed size per side instead of capital-based sizing
         """
         super().__init__()
 
+        # Store simple mode flag
+        self.simple_mode = simple_mode
+
         # Apply simple mode overrides
         if simple_mode:
             max_opportunities_per_hour = 1
-            max_positions = 1
+
+        # Trading configuration
+        if trading_config is None:
+            # Default to moderate config if not provided
+            self.trading_config = TradingConfig.get_moderate()
+        else:
+            self.trading_config = trading_config
+
+        self.sample_random_config = sample_random_config  # Whether to sample new config each episode
+        self.current_config = self.trading_config  # Active config for current episode
 
         # Configuration
         self.verbose = verbose
         self.initial_capital = initial_capital
-        self.max_positions = max_positions
         self.max_position_size_pct = max_position_size_pct
         self.episode_length_hours = episode_length_days * 24
         self.max_opportunities = max_opportunities_per_hour
         self.step_hours = step_hours
-        self.max_position_loss_pct = max_position_loss_pct  # Stop-loss threshold
-        self.use_full_range_episodes = use_full_range_episodes  # Full-range episode mode
-        self.fixed_position_size_usd = fixed_position_size_usd  # Fixed position sizing (capital-independent)
+        self.use_full_range_episodes = use_full_range_episodes
+        self.fixed_position_size_usd = fixed_position_size_usd
 
-        # Reward shaping parameters
-        self.pnl_reward_scale = pnl_reward_scale
-        self.hold_bonus = hold_bonus
-        self.quality_entry_bonus = quality_entry_bonus
-        self.quality_entry_penalty = quality_entry_penalty
+        # Reward configuration (as per IMPLEMENTATION_PLAN.md)
+        if reward_config is None:
+            # Backward compatibility: use pnl_reward_scale if provided
+            if pnl_reward_scale is not None:
+                reward_config = RewardConfig(pnl_reward_scale=pnl_reward_scale)
+            else:
+                reward_config = RewardConfig()  # Use defaults
+
+        self.reward_config = reward_config
+
+        # Store individual scales for easy access
+        self.pnl_reward_scale = reward_config.pnl_reward_scale
+        self.entry_penalty_scale = reward_config.entry_penalty_scale
+        self.liquidation_penalty_scale = reward_config.liquidation_penalty_scale
+        self.stop_loss_penalty = reward_config.stop_loss_penalty
 
         # Load historical data
         self.data = self._load_data(data_path)
@@ -131,35 +148,37 @@ class FundingArbitrageEnv(gym.Env):
         self.current_opportunities: List[Dict] = []
 
         # Action space: Discrete actions
-        # 0 = Hold (do nothing)
-        # 1-N = Enter opportunity 0 to N-1
-        # N+1 to N+M = Exit position 0 to M-1
-        self.action_space = spaces.Discrete(
-            1 +  # Hold
-            self.max_opportunities +  # Enter opportunities
-            self.max_positions  # Exit positions
-        )
-
-        # Observation space: Portfolio state + opportunity features
-        # Portfolio: [capital_ratio, utilization, num_positions, pnl, drawdown,
-        #            pos1_pnl, pos1_hours, pos1_funding, pos2..., pos3...]
-        # Simple mode (execution-based): [capital_ratio, utilization, pnl, drawdown,
-        #                                  exec_net_pnl, exec_hours, exec_net_funding_ratio,
-        #                                  exec_net_funding_rate, exec_current_spread, exec_entry_spread,
-        #                                  exec_value_ratio, exec_funding_efficiency, exec_long_pnl, exec_short_pnl]
         if simple_mode:
-            # Execution mode: 4 portfolio base + 10 execution features = 14 dims
-            portfolio_dim = 14
+            # Simple mode: 3 actions (HOLD, ENTER, EXIT)
+            self.action_space = spaces.Discrete(3)
         else:
-            # Original: 5 general + (3 positions × 3 features) = 14 dims
-            portfolio_dim = 5 + (self.max_positions * 3)
+            # Full mode: 36 actions
+            # 0 = HOLD
+            # 1-10 = ENTER_OPP_0-9_SMALL (10% of max allowed size)
+            # 11-20 = ENTER_OPP_0-9_MEDIUM (20% of max allowed size)
+            # 21-30 = ENTER_OPP_0-9_LARGE (30% of max allowed size)
+            # 31-35 = EXIT_POS_0-4
+            self.action_space = spaces.Discrete(36)
 
-        # Opportunities: For each opportunity, we have its features
-        # 22 selected features per opportunity (19 base + 3 momentum features)
-        opportunity_features = 22
-        opportunities_dim = self.max_opportunities * opportunity_features
-
-        total_dim = portfolio_dim + opportunities_dim
+        # Observation space: Config + Portfolio + Executions + Opportunities
+        if simple_mode:
+            # Simple mode: 4 portfolio base + 10 execution features + 22 opportunity features = 36 dims
+            config_dim = 0  # No config in simple mode
+            portfolio_dim = 14
+            opportunity_features = 22
+            opportunities_dim = 1 * opportunity_features
+            total_dim = portfolio_dim + opportunities_dim
+        else:
+            # Full mode: 275 dimensions
+            # Config: 5 dims
+            # Portfolio: 10 dims
+            # Executions: 60 dims (5 slots × 12 features each)
+            # Opportunities: 200 dims (10 slots × 20 features each)
+            config_dim = 5
+            portfolio_dim = 10
+            executions_dim = 5 * 12  # 60
+            opportunities_dim = 10 * 20  # 200
+            total_dim = config_dim + portfolio_dim + executions_dim + opportunities_dim  # 275
 
         self.observation_space = spaces.Box(
             low=-np.inf,
@@ -167,9 +186,6 @@ class FundingArbitrageEnv(gym.Env):
             shape=(total_dim,),
             dtype=np.float32
         )
-
-        # Store simple mode flag
-        self.simple_mode = simple_mode
 
         if self.verbose:
             print(f"✅ Environment initialized")
@@ -196,9 +212,142 @@ class FundingArbitrageEnv(gym.Env):
 
         return df
 
+    def _calculate_composite_score(self, opp: Dict) -> float:
+        """
+        Calculate composite quality score for opportunity ranking.
+
+        Combines APR projection with quality indicators.
+
+        Args:
+            opp: Opportunity dictionary
+
+        Returns:
+            Composite score (higher is better)
+        """
+        # Use 24h APR projection if available, otherwise current APR
+        apr = opp.get('fundApr24hProj', opp.get('fund_apr', 0))
+
+        # Quality multiplier based on volume and spread
+        volume_score = 1.0 if opp.get('volume_24h', 0) > 1_000_000 else 0.5
+        spread_score = 1.0 if opp.get('bidAskSpreadPercent', 1.0) < 0.1 else 0.5
+
+        quality_multiplier = volume_score * spread_score
+
+        return apr * quality_multiplier
+
+    def _select_top_opportunities(self, all_opps: List[Dict], n: int = 10) -> List[Dict]:
+        """
+        Select top N opportunities by composite score.
+
+        Args:
+            all_opps: List of all available opportunities
+            n: Number of opportunities to select
+
+        Returns:
+            Top N opportunities (or all if fewer than N available)
+        """
+        if len(all_opps) == 0:
+            return []
+
+        # Score and sort opportunities
+        scored_opps = [(opp, self._calculate_composite_score(opp)) for opp in all_opps]
+        scored_opps.sort(key=lambda x: x[1], reverse=True)
+
+        # Return top N
+        return [opp for opp, score in scored_opps[:n]]
+
+    def _get_action_mask(self) -> np.ndarray:
+        """
+        Get boolean mask of valid actions for current state.
+
+        Returns:
+            Boolean array of shape (36,) where True = valid action
+
+        Action indices:
+            0: HOLD (always valid)
+            1-10: ENTER_OPP_0-9_SMALL
+            11-20: ENTER_OPP_0-9_MEDIUM
+            21-30: ENTER_OPP_0-9_LARGE
+            31-35: EXIT_POS_0-4
+        """
+        mask = np.zeros(36, dtype=bool)
+
+        # HOLD is always valid
+        mask[0] = True
+
+        # ENTER actions: valid if opportunity exists AND we can open position
+        num_positions = len(self.portfolio.positions)
+        max_positions = self.current_config.max_positions
+        has_capacity = num_positions < max_positions
+
+        if has_capacity:
+            for i in range(10):
+                if i < len(self.current_opportunities):
+                    # Check all three size variants for this opportunity
+                    # We'll do full validation in _enter_position
+                    mask[1 + i] = True      # SMALL
+                    mask[11 + i] = True     # MEDIUM
+                    mask[21 + i] = True     # LARGE
+
+        # EXIT actions: valid if position exists
+        for i in range(5):
+            if i < num_positions:
+                mask[31 + i] = True
+
+        return mask
+
+    def _calculate_position_size(self, action: int) -> float:
+        """
+        Calculate position size based on action and current config.
+
+        Args:
+            action: Action index (1-30 for ENTER actions)
+
+        Returns:
+            Position size in USD (per side)
+        """
+        # Determine size multiplier based on action
+        if 1 <= action <= 10:
+            # SMALL: 10% of max allowed
+            size_multiplier = 0.10
+        elif 11 <= action <= 20:
+            # MEDIUM: 20% of max allowed
+            size_multiplier = 0.20
+        elif 21 <= action <= 30:
+            # LARGE: 30% of max allowed
+            size_multiplier = 0.30
+        else:
+            raise ValueError(f"Invalid action for position sizing: {action}")
+
+        # Calculate max allowed size based on config
+        # max_allowed = (available_margin × target_utilization) / max_positions
+        available_margin = self.portfolio.available_margin
+        target_util = self.current_config.target_utilization
+        max_positions = self.current_config.max_positions
+        leverage = self.current_config.max_leverage
+
+        # With leverage, we can control more capital with less margin
+        # max_allowed_size = (available_margin × leverage × target_util) / max_positions
+        max_allowed_size = (available_margin * leverage * target_util) / max_positions
+
+        # Apply size multiplier
+        position_size = max_allowed_size * size_multiplier
+
+        # Ensure we don't exceed available margin
+        margin_needed = (position_size * 2) / leverage
+        if margin_needed > available_margin:
+            # Scale down to fit available margin
+            position_size = (available_margin * leverage) / 2
+
+        return position_size
+
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
         """
         Reset environment for new episode.
+
+        Args:
+            seed: Random seed for reproducibility
+            options: Optional dict that may contain 'trading_config' to override
 
         Returns:
             observation, info
@@ -211,6 +360,19 @@ class FundingArbitrageEnv(gym.Env):
             random.seed(seed)
 
         super().reset(seed=seed)
+
+        # Sample or set trading config for this episode
+        if options and 'trading_config' in options:
+            # Override with provided config
+            self.current_config = options['trading_config']
+        elif self.sample_random_config:
+            # Sample random config for training diversity
+            self.current_config = TradingConfig.sample_random(seed=seed)
+            if self.verbose:
+                print(f"   Sampled config: {self.current_config}")
+        else:
+            # Use default config
+            self.current_config = self.trading_config
 
         # Determine episode time range
         if self.use_full_range_episodes:
@@ -236,10 +398,11 @@ class FundingArbitrageEnv(gym.Env):
 
         self.current_time = self.episode_start
 
-        # Reset portfolio
+        # Reset portfolio (use config's max_positions in full mode, otherwise use 1 for simple mode)
+        max_positions = 1 if self.simple_mode else self.current_config.max_positions
         self.portfolio = Portfolio(
             initial_capital=self.initial_capital,
-            max_positions=self.max_positions,
+            max_positions=max_positions,
             max_position_size_pct=self.max_position_size_pct
         )
 
@@ -295,13 +458,22 @@ class FundingArbitrageEnv(gym.Env):
         stop_loss_reward = self._check_stop_loss(price_data)
         reward += stop_loss_reward
 
-        # REWARD STRUCTURE: Capital-independent percentage-based rewards
-        # V4 FIX: Convert P&L change from absolute USD to percentage of execution
-        # This ensures rewards are independent of capital amount
+        # REWARD STRUCTURE: As per IMPLEMENTATION_PLAN.md (lines 259-304)
+        # Component 1: Hourly P&L reward (MAIN SIGNAL)
+        # Component 2: Entry cost penalty (already added in _enter_position)
+        # Component 3: Liquidation risk penalty
+        # Component 4: Stop-loss penalty
 
-        # Base P&L reward (ONLY signal - no double-counting)
-        # This tracks unrealized P&L changes hour by hour as percentage of execution
-        # Exit fees will be penalized separately when positions close
+        # Initialize reward breakdown for logging
+        reward_breakdown = {
+            'hourly_pnl': 0.0,
+            'entry_penalty': 0.0,
+            'liquidation_penalty': 0.0,
+            'stop_loss_penalty': 0.0,
+        }
+
+        # Component 1: Hourly P&L reward
+        # Calculate hourly P&L as percentage of initial capital
         if len(self.portfolio.positions) > 0:
             # Calculate total execution size (sum of all position values)
             total_execution_size = sum(pos.position_size_usd * 2 for pos in self.portfolio.positions)
@@ -309,17 +481,25 @@ class FundingArbitrageEnv(gym.Env):
             if total_execution_size > 0:
                 # Convert USD change to percentage of execution
                 pnl_change_pct = (pnl_change / total_execution_size) * 100  # Percentage
-                base_reward = pnl_change_pct * self.pnl_reward_scale  # Scale by reward factor
-            else:
-                base_reward = 0.0
-        else:
-            # No positions open, no P&L change
-            base_reward = 0.0
+                hourly_pnl_reward = pnl_change_pct * self.pnl_reward_scale
+                reward += hourly_pnl_reward
+                reward_breakdown['hourly_pnl'] = hourly_pnl_reward
 
-        # NO portfolio-level reward - it's cumulative and double-counts with base_reward
-        # NO passivity penalty - waiting is free (hold action gets +0.1 bonus)
-        # NO diversity bonus - quality over quantity
-        reward += base_reward
+        # Component 3: Liquidation risk penalty (full mode only)
+        if not self.simple_mode and len(self.portfolio.positions) > 0:
+            min_liq_distance = self.portfolio.get_min_liquidation_distance(price_data)
+            liquidation_buffer = self.current_config.liquidation_buffer
+
+            if min_liq_distance < liquidation_buffer:
+                # Steep penalty when getting close to liquidation
+                # Penalty scales with how close we are
+                liq_penalty = -(liquidation_buffer - min_liq_distance) * self.liquidation_penalty_scale
+                reward += liq_penalty
+                reward_breakdown['liquidation_penalty'] = liq_penalty
+
+        # Component 4: Stop-loss penalty (track from _check_stop_loss)
+        if stop_loss_reward < 0:
+            reward_breakdown['stop_loss_penalty'] = stop_loss_reward
 
         # Check termination
         terminated = False
@@ -352,6 +532,7 @@ class FundingArbitrageEnv(gym.Env):
             'total_pnl_pct': self.portfolio.total_pnl_pct,
             'num_positions': len(self.portfolio.positions),
             'capital_utilization': self.portfolio.capital_utilization,
+            'reward_breakdown': reward_breakdown,  # For reward component analysis
         })
 
         # Add episode-level metrics for TensorBoard logging
@@ -372,69 +553,127 @@ class FundingArbitrageEnv(gym.Env):
         """
         Execute the agent's action.
 
+        Simple mode: 3 actions (HOLD, ENTER, EXIT)
+        Full mode: 36 actions (HOLD, 30 ENTER variants, 5 EXIT)
+
         Returns:
             (reward, info)
         """
         reward = 0.0
         info = {'action_type': 'hold'}
 
-        # Action 0: Hold (do nothing)
-        if action == 0:
-            info['action_type'] = 'hold'
-            # NO HOLD BONUS: Removed to avoid bias toward inaction
-            # Agent should learn to trade profitably without artificial hold incentive
-            return reward, info
+        if self.simple_mode:
+            # SIMPLE MODE: 3 actions (backward compatible)
+            if action == 0:
+                # Hold
+                info['action_type'] = 'hold'
+                return reward, info
+            elif action == 1:
+                # Enter (first opportunity)
+                if len(self.current_opportunities) > 0:
+                    reward = self._enter_position(0)
+                    info['action_type'] = 'enter'
+                    info['opportunity_idx'] = 0
+                else:
+                    info['action_type'] = 'invalid_enter'
+                    reward = -0.5
+            elif action == 2:
+                # Exit (first position)
+                if len(self.portfolio.positions) > 0:
+                    reward = self._exit_position(0)
+                    info['action_type'] = 'exit'
+                    info['position_idx'] = 0
+                else:
+                    info['action_type'] = 'invalid_exit'
+                    reward = -0.5
 
-        # Actions 1 to max_opportunities: Enter opportunity
-        elif 1 <= action <= self.max_opportunities:
-            opp_idx = action - 1
+        else:
+            # FULL MODE: 36 actions
+            # 0: HOLD
+            # 1-10: ENTER_OPP_0-9_SMALL
+            # 11-20: ENTER_OPP_0-9_MEDIUM
+            # 21-30: ENTER_OPP_0-9_LARGE
+            # 31-35: EXIT_POS_0-4
 
-            if opp_idx < len(self.current_opportunities):
-                reward = self._enter_position(opp_idx)
-                info['action_type'] = 'enter'
-                info['opportunity_idx'] = opp_idx
+            if action == 0:
+                # HOLD
+                info['action_type'] = 'hold'
+                return reward, info
+
+            elif 1 <= action <= 30:
+                # ENTER actions
+                # Decode opportunity index and size
+                if 1 <= action <= 10:
+                    opp_idx = action - 1
+                    size_type = 'small'
+                elif 11 <= action <= 20:
+                    opp_idx = action - 11
+                    size_type = 'medium'
+                else:  # 21-30
+                    opp_idx = action - 21
+                    size_type = 'large'
+
+                # Validate opportunity exists
+                if opp_idx < len(self.current_opportunities):
+                    reward = self._enter_position(opp_idx, action=action)
+                    info['action_type'] = f'enter_{size_type}'
+                    info['opportunity_idx'] = opp_idx
+                    info['size_type'] = size_type
+                else:
+                    # Invalid: opportunity doesn't exist
+                    info['action_type'] = 'invalid_enter'
+                    reward = -0.5
+
+            elif 31 <= action <= 35:
+                # EXIT actions
+                pos_idx = action - 31
+
+                # Validate position exists
+                if pos_idx < len(self.portfolio.positions):
+                    reward = self._exit_position(pos_idx)
+                    info['action_type'] = 'exit'
+                    info['position_idx'] = pos_idx
+                else:
+                    # Invalid: position doesn't exist
+                    info['action_type'] = 'invalid_exit'
+                    reward = -0.5
+
             else:
-                # Invalid action (opportunity doesn't exist)
-                # Penalize to discourage wasting learning on invalid actions
-                info['action_type'] = 'invalid_enter'
-                reward = -0.5
-
-        # Actions max_opportunities+1 to max_opportunities+max_positions: Exit position
-        elif self.max_opportunities < action < self.action_space.n:
-            pos_idx = action - self.max_opportunities - 1
-
-            if pos_idx < len(self.portfolio.positions):
-                reward = self._exit_position(pos_idx)
-                info['action_type'] = 'exit'
-                info['position_idx'] = pos_idx
-            else:
-                # Invalid action (position doesn't exist)
-                # Penalize to discourage wasting learning on invalid actions
-                info['action_type'] = 'invalid_exit'
-                reward = -0.5
+                # Should never happen (action out of range)
+                info['action_type'] = 'invalid'
+                reward = -1.0
 
         return reward, info
 
-    def _enter_position(self, opportunity_idx: int) -> float:
+    def _enter_position(self, opportunity_idx: int, action: Optional[int] = None) -> float:
         """
         Enter a new arbitrage execution.
 
+        Args:
+            opportunity_idx: Index of opportunity to enter
+            action: Action index (for full mode dynamic sizing)
+
         Returns:
-            Immediate reward (usually 0, but could penalize entry fees)
+            Immediate reward (entry fee penalty)
         """
         opp = self.current_opportunities[opportunity_idx]
+
+        # Determine leverage from config
+        leverage = 1.0 if self.simple_mode else self.current_config.max_leverage
 
         # Calculate position size
         if self.fixed_position_size_usd is not None:
             # Fixed size mode (capital-independent training)
             position_size = self.fixed_position_size_usd
+        elif not self.simple_mode and action is not None:
+            # Full mode: dynamic sizing based on action
+            position_size = self._calculate_position_size(action)
         else:
-            # Capital-based sizing (legacy mode)
+            # Simple mode or legacy: capital-based sizing
             max_size_per_side = self.portfolio.total_capital * (self.max_position_size_pct / 100)
-            position_size = min(
-                max_size_per_side,
-                self.portfolio.available_capital / 2  # Need 2x for long + short
-            )
+            # With leverage, we can control more with less capital
+            available_for_position = self.portfolio.available_margin * leverage / 2
+            position_size = min(max_size_per_side, available_for_position)
 
         # CRITICAL FIX: Fetch ACTUAL market prices at entry time from price history
         # CSV prices may be stale, averaged, or from a different source
@@ -498,6 +737,7 @@ class FundingArbitrageEnv(gym.Env):
             entry_long_price=entry_long_price,  # Use actual market price
             entry_short_price=entry_short_price,  # Use actual market price
             position_size_usd=position_size,
+            leverage=leverage,  # Use config leverage
             long_funding_rate=entry_long_rate,  # Use actual market rate
             short_funding_rate=entry_short_rate,  # Use actual market rate
             long_funding_interval_hours=opp['long_funding_interval_hours'],
@@ -510,23 +750,11 @@ class FundingArbitrageEnv(gym.Env):
         success = self.portfolio.open_position(position)
 
         if success:
-            # V4 FIX: CAPITAL-INDEPENDENT ENTRY FEE PENALTY
-            # Convert entry fee from absolute USD to percentage of execution
-            # This ensures rewards are independent of capital amount
-            execution_size = position.position_size_usd * 2  # Total capital used (long + short)
-            entry_fee_pct = (position.entry_fees_paid_usd / execution_size) * 100  # Convert to percentage
-            entry_fee_penalty = -entry_fee_pct * self.pnl_reward_scale
-
-            # Agent learns: "I paid X% to enter, better make it worth it!"
-            # This encourages selectivity - only enter when expected P&L > fee %
-            # Same percentage fee → same reward penalty regardless of capital
-
-            # V3 FIX: NO QUALITY BONUS
-            # Remove all quality-based bonuses/penalties (lines 390-416 in V2)
-            # Let agent learn purely from actual P&L outcomes:
-            # - Good symbols → positive P&L → agent learns to enter more
-            # - Bad symbols → negative P&L → agent learns to avoid
-            # - No forward-looking rewards, only backward-looking outcomes
+            # Entry fee penalty (as per IMPLEMENTATION_PLAN.md)
+            # Component 2: Entry cost penalty
+            execution_size = position.position_size_usd * 2
+            entry_fee_pct = (position.entry_fees_paid_usd / execution_size) * 100
+            entry_fee_penalty = -entry_fee_pct * self.entry_penalty_scale
 
             return entry_fee_penalty
         else:
@@ -539,7 +767,7 @@ class FundingArbitrageEnv(gym.Env):
         Exit an existing position.
 
         Returns:
-            Exit bonus only (P&L already rewarded hourly, avoid double-counting)
+            Major reward based on realized P&L (V5: outcome-based reward)
         """
         position = self.portfolio.positions[position_idx]
 
@@ -553,7 +781,6 @@ class FundingArbitrageEnv(gym.Env):
             symbol_prices = prices[position.symbol]
 
             # Close position (updates portfolio)
-            # P&L was already rewarded hourly through pnl_change in step()
             realized_pnl = self.portfolio.close_position(
                 position_idx,
                 self.current_time,
@@ -561,10 +788,9 @@ class FundingArbitrageEnv(gym.Env):
                 symbol_prices['short_price']
             )
 
-            # V3 FIX: NO EXIT BONUS
-            # Let agent learn optimal exit timing purely from cumulative P&L rewards
-            # Holding winners longer accumulates more P&L → agent naturally learns to hold
-            # Exiting early misses P&L accumulation → agent naturally learns not to exit early
+            # NO exit-specific reward (as per IMPLEMENTATION_PLAN.md)
+            # P&L is already rewarded hourly through Component 1
+            # Exit action provides no additional reward
             return 0.0
         else:
             # No price data available (shouldn't happen)
@@ -574,26 +800,31 @@ class FundingArbitrageEnv(gym.Env):
         """
         Check open positions for stop-loss violations and auto-close them.
 
+        Uses stop_loss_threshold from config.
+
         Args:
             price_data: Current price data for all symbols
 
         Returns:
-            Total reward from closed positions (usually negative)
+            Total reward from closed positions (stop-loss penalty)
         """
         total_reward = 0.0
         positions_to_close = []
 
+        # Get stop-loss threshold from config
+        stop_loss_threshold = self.current_config.stop_loss_threshold if not self.simple_mode else -0.015
+
         # Identify positions exceeding stop-loss threshold
         for idx, position in enumerate(self.portfolio.positions):
-            if position.unrealized_pnl_pct < self.max_position_loss_pct:
+            if position.unrealized_pnl_pct / 100 < stop_loss_threshold:  # Convert to decimal
                 positions_to_close.append((idx, position.symbol, position.unrealized_pnl_pct))
 
         # Close positions in reverse order to avoid index shifting
         for idx, symbol, loss_pct in reversed(positions_to_close):
             self._exit_position(idx)
             # STOP-LOSS PENALTY: Penalize positions that hit stop-loss
-            # Helps agent learn to avoid bad entries
-            total_reward += -1.0
+            # (Component 4 from IMPLEMENTATION_PLAN.md)
+            total_reward += self.stop_loss_penalty
 
         return total_reward
 
@@ -608,24 +839,27 @@ class FundingArbitrageEnv(gym.Env):
 
     def _get_opportunities_at_time(self, timestamp: pd.Timestamp) -> List[Dict]:
         """
-        Get opportunities detected at the current time.
+        Get top opportunities detected at the current time.
+
+        In full mode, selects top 10 by composite score.
+        In simple mode, selects top 1.
 
         Returns:
             List of opportunity dictionaries
         """
-        # Get opportunities detected in current hour
+        # Get ALL opportunities detected in current hour
         window_start = timestamp
         window_end = timestamp + timedelta(hours=self.step_hours)
 
-        opps = self.data[
+        all_opps_df = self.data[
             (self.data['entry_time'] >= window_start) &
             (self.data['entry_time'] < window_end)
-        ].head(self.max_opportunities)
+        ]
 
         # Convert to list of dicts
-        opportunities = []
-        for _, row in opps.iterrows():
-            opportunities.append({
+        all_opportunities = []
+        for _, row in all_opps_df.iterrows():
+            all_opportunities.append({
                 'opportunity_id': f"{row['entry_time']}_{row['symbol']}",
                 'symbol': row['symbol'],
                 'long_exchange': row['long_exchange'],
@@ -639,7 +873,7 @@ class FundingArbitrageEnv(gym.Env):
                 'long_next_funding_time': row['long_next_funding_time'],
                 'short_next_funding_time': row['short_next_funding_time'],
 
-                # Features for observation (19 features: 14 original + 5 critical additions)
+                # Features for observation
                 'fund_profit_8h': row.get('fund_profit_8h', 0),
                 'fundProfit8h24hProj': row.get('fundProfit8h24hProj', 0),
                 'fundProfit8h3dProj': row.get('fundProfit8h3dProj', 0),
@@ -659,7 +893,10 @@ class FundingArbitrageEnv(gym.Env):
                 'positionCostPercent': row.get('positionCostPercent', 0.2),  # Default 0.2%
             })
 
-        return opportunities
+        # Select top N opportunities by composite score
+        top_opportunities = self._select_top_opportunities(all_opportunities, n=self.max_opportunities)
+
+        return top_opportunities
 
     def _get_current_prices(self) -> Dict[str, Dict[str, float]]:
         """
@@ -767,42 +1004,35 @@ class FundingArbitrageEnv(gym.Env):
         """
         Get current observation (state).
 
+        Simple mode: 36 dimensions (portfolio + 1 opportunity)
+        Full mode: 275 dimensions (config + portfolio + 5 executions + 10 opportunities)
+
         Returns:
             Flattened numpy array of state features
         """
-        # Portfolio state
         if self.simple_mode:
-            # Simplified portfolio features (7 dims)
+            # SIMPLE MODE: 36 dimensions (backward compatible)
+            # Portfolio features (14 dims)
             features = [
                 self.portfolio.total_capital / self.portfolio.initial_capital,  # Capital ratio
                 self.portfolio.capital_utilization / 100,  # Utilization ratio
-                self.portfolio.get_execution_avg_pnl_pct() / 100,  # Execution avg P&L (capital-independent)
+                self.portfolio.get_execution_avg_pnl_pct() / 100,  # Execution avg P&L
                 self.portfolio.max_drawdown_pct / 100,  # Drawdown ratio
             ]
 
-            # Execution features (10 dims) - full execution info (long + short)
+            # Execution features (10 dims)
             if len(self.portfolio.positions) > 0:
                 pos = self.portfolio.positions[0]
-
-                # 1. Net P&L % (combined long + short + funding - fees)
                 features.append(pos.unrealized_pnl_pct / 100)
-
-                # 2. Hours held
                 features.append(pos.hours_held / 72.0)
 
-                # 3. Net funding ratio (cumulative funding / capital)
                 total_capital = pos.position_size_usd * 2
-                if total_capital > 0:
-                    net_funding_ratio = (pos.long_net_funding_usd + pos.short_net_funding_usd) / total_capital
-                else:
-                    net_funding_ratio = 0.0
+                net_funding_ratio = (pos.long_net_funding_usd + pos.short_net_funding_usd) / total_capital if total_capital > 0 else 0.0
                 features.append(net_funding_ratio)
 
-                # 4. Net funding rate (short_rate - long_rate) - KEY ARBITRAGE METRIC
                 net_funding_rate = pos.short_funding_rate - pos.long_funding_rate
                 features.append(net_funding_rate)
 
-                # 5. Current spread % (price difference between long/short)
                 prices = self._get_current_prices()
                 if pos.symbol in prices:
                     current_long_price = prices[pos.symbol]['long_price']
@@ -813,101 +1043,157 @@ class FundingArbitrageEnv(gym.Env):
                     current_spread_pct = 0.0
                 features.append(current_spread_pct)
 
-                # 6. Entry spread % (initial price difference)
                 avg_entry_price = (pos.entry_long_price + pos.entry_short_price) / 2
                 entry_spread_pct = abs(pos.entry_long_price - pos.entry_short_price) / avg_entry_price if avg_entry_price > 0 else 0.0
                 features.append(entry_spread_pct)
 
-                # 7. Value-to-capital ratio (position size / total capital)
                 value_to_capital_ratio = total_capital / self.portfolio.total_capital if self.portfolio.total_capital > 0 else 0.0
                 features.append(value_to_capital_ratio)
 
-                # 8. Funding efficiency (net funding / total fees)
-                total_fees = pos.entry_fees_paid_usd + (pos.position_size_usd * 2 * pos.taker_fee)  # entry + estimated exit
+                total_fees = pos.entry_fees_paid_usd + (pos.position_size_usd * 2 * pos.taker_fee)
                 net_funding_usd = pos.long_net_funding_usd + pos.short_net_funding_usd
                 funding_efficiency = net_funding_usd / total_fees if total_fees > 0 else 0.0
                 features.append(funding_efficiency)
 
-                # 9. Long side P&L %
                 features.append(pos.long_pnl_pct / 100)
-
-                # 10. Short side P&L %
                 features.append(pos.short_pnl_pct / 100)
             else:
-                # No position - all zeros
                 features.extend([0.0] * 10)
 
             portfolio_features = np.array(features, dtype=np.float32)
-        else:
-            # Original portfolio features (14 dims)
-            portfolio_features = self.portfolio.get_state_features()
 
-        # Opportunity features (padded to max_opportunities)
+        else:
+            # FULL MODE: 275 dimensions
+            all_features = []
+
+            # 1. Config features (5 dims)
+            config_features = self.current_config.to_array()
+            all_features.extend(config_features)
+
+            # 2. Portfolio features (10 dims)
+            price_data = self._get_current_prices()
+            min_liq_distance = self.portfolio.get_min_liquidation_distance(price_data)
+
+            portfolio_features = [
+                self.portfolio.total_capital / self.portfolio.initial_capital,  # capital_ratio
+                self.portfolio.available_margin / self.portfolio.total_capital if self.portfolio.total_capital > 0 else 1.0,  # available_ratio
+                self.portfolio.margin_utilization / 100,  # used_margin_ratio
+                len(self.portfolio.positions) / self.current_config.max_positions,  # num_positions_ratio
+                self.portfolio.get_execution_avg_pnl_pct() / 100 if len(self.portfolio.closed_positions) > 0 else 0.0,  # avg_position_pnl_pct
+                self.portfolio.total_pnl_pct / 100,  # portfolio_total_pnl_pct
+                self.portfolio.max_drawdown_pct / 100,  # max_drawdown_pct
+                self.step_count / self.episode_length_hours if self.episode_length_hours > 0 else 0.0,  # episode_progress
+                min_liq_distance,  # min_liquidation_distance
+                self.portfolio.capital_utilization / 100,  # capital_utilization
+            ]
+            all_features.extend(portfolio_features)
+
+            # 3. Execution features (60 dims: 5 slots × 12 features)
+            exec_features = self.portfolio.get_all_execution_states(price_data, max_positions=5)
+            all_features.extend(exec_features)
+
+            # At this point: 5 + 10 + 60 = 75 dims
+
+        # 4. Opportunity features
         opportunity_features = []
 
-        for i in range(self.max_opportunities):
+        if self.simple_mode:
+            # Simple mode: 1 opportunity × 22 features
+            n_opps = 1
+            n_features_per_opp = 22
+        else:
+            # Full mode: 10 opportunities × 20 features
+            n_opps = 10
+            n_features_per_opp = 20
+
+        for i in range(n_opps):
             if i < len(self.current_opportunities):
                 opp = self.current_opportunities[i]
 
-                # Extract 22 RAW features per opportunity (NO manual scaling)
-                # These will be standardized by the scaler if available
-                opp_feats = [
-                    # Funding rates (RAW - no scaling)
-                    opp.get('long_funding_rate', 0),
-                    opp.get('short_funding_rate', 0),
-                    # Funding intervals (normalized to 8-hour base)
-                    opp.get('long_funding_interval_hours', 8) / 8,
-                    opp.get('short_funding_interval_hours', 8) / 8,
-                    # Funding profit projections (RAW)
-                    opp.get('fund_profit_8h', 0),
-                    opp.get('fundProfit8h24hProj', 0),
-                    opp.get('fundProfit8h3dProj', 0),
-                    # APR projections (RAW)
-                    opp.get('fund_apr', 0),
-                    opp.get('fundApr24hProj', 0),
-                    opp.get('fundApr3dProj', 0),
-                    # Spread statistics (RAW)
-                    opp.get('spread30SampleAvg', 0),
-                    opp.get('priceSpread24hAvg', 0),
-                    opp.get('priceSpread3dAvg', 0),
-                    opp.get('spread_volatility_stddev', 0),
-
-                    # Critical additions for opportunity quality (5 features)
-                    np.log10(max(float(opp.get('volume_24h', 1e6) or 1e6), 1e5)),
-                    float(opp.get('bidAskSpreadPercent', 0) or 0),
-                    np.log10(max(float(opp.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
-                    float(opp.get('estimatedProfitPercentage', 0) or 0),
-                    float(opp.get('positionCostPercent', 0.2) or 0.2),
-
-                    # Momentum/Trend features (3 features)
-                    opp.get('spread30SampleAvg', 0) - opp.get('priceSpread24hAvg', 0),
-                    opp.get('fund_apr', 0) - opp.get('fundApr24hProj', 0),
-                    opp.get('priceSpread24hAvg', 0) - opp.get('priceSpread3dAvg', 0),
-                ]
+                if self.simple_mode:
+                    # 22 features (backward compatible with simple mode training)
+                    opp_feats = [
+                        opp.get('long_funding_rate', 0),
+                        opp.get('short_funding_rate', 0),
+                        opp.get('long_funding_interval_hours', 8) / 8,
+                        opp.get('short_funding_interval_hours', 8) / 8,
+                        opp.get('fund_profit_8h', 0),
+                        opp.get('fundProfit8h24hProj', 0),
+                        opp.get('fundProfit8h3dProj', 0),
+                        opp.get('fund_apr', 0),
+                        opp.get('fundApr24hProj', 0),
+                        opp.get('fundApr3dProj', 0),
+                        opp.get('spread30SampleAvg', 0),
+                        opp.get('priceSpread24hAvg', 0),
+                        opp.get('priceSpread3dAvg', 0),
+                        opp.get('spread_volatility_stddev', 0),
+                        np.log10(max(float(opp.get('volume_24h', 1e6) or 1e6), 1e5)),
+                        float(opp.get('bidAskSpreadPercent', 0) or 0),
+                        np.log10(max(float(opp.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
+                        float(opp.get('estimatedProfitPercentage', 0) or 0),
+                        float(opp.get('positionCostPercent', 0.2) or 0.2),
+                        opp.get('spread30SampleAvg', 0) - opp.get('priceSpread24hAvg', 0),
+                        opp.get('fund_apr', 0) - opp.get('fundApr24hProj', 0),
+                        opp.get('priceSpread24hAvg', 0) - opp.get('priceSpread3dAvg', 0),
+                    ]
+                else:
+                    # 20 features for full mode (no momentum, standardized only)
+                    opp_feats = [
+                        opp.get('long_funding_rate', 0),
+                        opp.get('short_funding_rate', 0),
+                        opp.get('long_funding_interval_hours', 8) / 8,
+                        opp.get('short_funding_interval_hours', 8) / 8,
+                        opp.get('fund_profit_8h', 0),
+                        opp.get('fundProfit8h24hProj', 0),
+                        opp.get('fundProfit8h3dProj', 0),
+                        opp.get('fund_apr', 0),
+                        opp.get('fundApr24hProj', 0),
+                        opp.get('fundApr3dProj', 0),
+                        opp.get('spread30SampleAvg', 0),
+                        opp.get('priceSpread24hAvg', 0),
+                        opp.get('priceSpread3dAvg', 0),
+                        opp.get('spread_volatility_stddev', 0),
+                        np.log10(max(float(opp.get('volume_24h', 1e6) or 1e6), 1e5)),
+                        float(opp.get('bidAskSpreadPercent', 0) or 0),
+                        np.log10(max(float(opp.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
+                        float(opp.get('estimatedProfitPercentage', 0) or 0),
+                        float(opp.get('positionCostPercent', 0.2) or 0.2),
+                        opp.get('short_funding_rate', 0) - opp.get('long_funding_rate', 0),  # Net funding rate
+                    ]
 
                 # Convert to float32 and ensure no NaN/inf
                 opp_feats = [float(np.nan_to_num(x, nan=0.0, posinf=100.0, neginf=-100.0)) for x in opp_feats]
                 opportunity_features.extend(opp_feats)
             else:
-                # No opportunity at this index
-                opportunity_features.extend([0.0] * 22)
+                # No opportunity at this index - pad with zeros
+                opportunity_features.extend([0.0] * n_features_per_opp)
 
-        # Apply StandardScaler to opportunity features if available
+        # Apply StandardScaler to opportunity features if available (simple mode only)
         opportunity_features_array = np.array(opportunity_features, dtype=np.float32)
 
-        if self.feature_scaler is not None:
-            # Reshape to (max_opportunities, 22) for scaling
-            opp_reshaped = opportunity_features_array.reshape(self.max_opportunities, 22)
-            # Scale each opportunity's features
+        if self.simple_mode and self.feature_scaler is not None:
+            # Only apply scaler in simple mode (backward compatibility)
+            # Reshape to (1, 22) for scaling
+            opp_reshaped = opportunity_features_array.reshape(1, 22)
+            # Scale
             opp_scaled = self.feature_scaler.transform(opp_reshaped)
             # Flatten back to 1D
             opportunity_features_array = opp_scaled.flatten()
 
         # Concatenate all features
-        observation = np.concatenate([
-            portfolio_features,
-            opportunity_features_array
-        ]).astype(np.float32)
+        if self.simple_mode:
+            # Simple mode: portfolio_features (14) + opportunity_features (22) = 36
+            observation = np.concatenate([
+                portfolio_features,
+                opportunity_features_array
+            ]).astype(np.float32)
+        else:
+            # Full mode: all_features already contains config+portfolio+executions (75)
+            # Add opportunity features (200) for total of 275
+            observation = np.concatenate([
+                all_features,  # Contains config+portfolio+executions = 75
+                opportunity_features_array  # 200
+            ]).astype(np.float32)
 
         return observation
 

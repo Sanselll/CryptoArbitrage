@@ -17,6 +17,11 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<PerformanceMetric> PerformanceMetrics { get; set; }
     public DbSet<UserExchangeApiKey> UserExchangeApiKeys { get; set; }
 
+    // Agent tables
+    public DbSet<AgentConfiguration> AgentConfigurations { get; set; }
+    public DbSet<AgentSession> AgentSessions { get; set; }
+    public DbSet<AgentStats> AgentStats { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder); // IMPORTANT: Call base for Identity tables
@@ -143,5 +148,77 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
 
         modelBuilder.Entity<UserExchangeApiKey>()
             .HasIndex(k => new { k.UserId, k.ExchangeName });
+
+        // ===================================================================
+        // Agent entity configurations
+        // ===================================================================
+
+        // AgentConfiguration
+        modelBuilder.Entity<AgentConfiguration>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+
+            entity.Property(e => e.MaxLeverage).HasPrecision(5, 2);
+            entity.Property(e => e.TargetUtilization).HasPrecision(5, 4);
+
+            // One-to-many relationship with ApplicationUser
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.AgentConfigurations)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // AgentSession
+        modelBuilder.Entity<AgentSession>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => new { e.UserId, e.Status });
+            entity.HasIndex(e => e.StartedAt);
+
+            entity.Property(e => e.FinalPnLUsd).HasPrecision(18, 8);
+            entity.Property(e => e.FinalPnLPct).HasPrecision(18, 8);
+
+            // One-to-many relationship with ApplicationUser
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.AgentSessions)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Many-to-one relationship with AgentConfiguration
+            entity.HasOne(e => e.AgentConfiguration)
+                .WithMany()
+                .HasForeignKey(e => e.AgentConfigurationId)
+                .OnDelete(DeleteBehavior.Restrict);  // Don't delete config if sessions exist
+        });
+
+        // AgentStats
+        modelBuilder.Entity<AgentStats>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.AgentSessionId);
+
+            entity.Property(e => e.WinRate).HasPrecision(5, 2);
+            entity.Property(e => e.TotalPnLUsd).HasPrecision(18, 8);
+            entity.Property(e => e.TotalPnLPct).HasPrecision(18, 8);
+            entity.Property(e => e.TodayPnLUsd).HasPrecision(18, 8);
+            entity.Property(e => e.TodayPnLPct).HasPrecision(18, 8);
+            entity.Property(e => e.MaxDrawdownPct).HasPrecision(18, 8);
+            entity.Property(e => e.AveragePositionDurationHours).HasPrecision(18, 8);
+
+            // One-to-many relationship with ApplicationUser
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.AgentStats)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Many-to-one relationship with AgentSession (nullable)
+            entity.HasOne(e => e.AgentSession)
+                .WithMany()
+                .HasForeignKey(e => e.AgentSessionId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
     }
 }

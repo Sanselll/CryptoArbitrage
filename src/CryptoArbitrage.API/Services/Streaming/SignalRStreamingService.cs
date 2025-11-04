@@ -206,4 +206,60 @@ public class SignalRStreamingService : ISignalRStreamingService
             _logger.LogError(ex, "Error broadcasting transaction history to user {UserId}", userId);
         }
     }
+
+    /// <summary>
+    /// Broadcast agent status to a specific user
+    /// </summary>
+    public async Task BroadcastAgentStatusAsync(string userId, string status, int durationSeconds, bool hasData, string? errorMessage, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var statusUpdate = new
+            {
+                status,
+                durationSeconds,
+                hasData,
+                errorMessage
+            };
+
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveAgentStatus", statusUpdate, cancellationToken);
+            _logger.LogDebug("Broadcasted agent status to user {UserId}: {Status}", userId, status);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting agent status to user {UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// Broadcast agent stats to a specific user
+    /// </summary>
+    public async Task BroadcastAgentStatsAsync(string userId, object stats, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveAgentStats", stats, cancellationToken);
+            _logger.LogDebug("Broadcasted agent stats to user {UserId}", userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting agent stats to user {UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// Broadcast agent decision to a specific user
+    /// </summary>
+    public async Task BroadcastAgentDecisionAsync(string userId, object decision, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveAgentDecision", decision, cancellationToken);
+            _logger.LogDebug("Broadcasted agent decision to user {UserId}", userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting agent decision to user {UserId}", userId);
+        }
+    }
 }

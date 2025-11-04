@@ -361,6 +361,19 @@ public class NotificationService : INotificationService
             _logger.LogError(ex, "Error sending liquidation risk notification");
         }
     }
+
+    public async Task BroadcastAgentDecisionAsync(string userId, object decision)
+    {
+        try
+        {
+            await _signalRService.BroadcastAgentDecisionAsync(userId, decision);
+            _logger.LogDebug("Broadcast agent decision to user {UserId}", userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting agent decision to user {UserId}", userId);
+        }
+    }
 }
 
 public class NotificationSettings

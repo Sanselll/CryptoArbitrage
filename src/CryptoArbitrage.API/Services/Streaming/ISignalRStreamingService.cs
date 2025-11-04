@@ -61,4 +61,19 @@ public interface ISignalRStreamingService
     /// Broadcast transaction history to a specific user
     /// </summary>
     Task BroadcastTransactionHistoryToUserAsync(string userId, List<TransactionDto> transactions, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcast agent status to a specific user
+    /// </summary>
+    Task BroadcastAgentStatusAsync(string userId, string status, int durationSeconds, bool hasData, string? errorMessage, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcast agent stats to a specific user
+    /// </summary>
+    Task BroadcastAgentStatsAsync(string userId, object stats, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcast agent decision to a specific user
+    /// </summary>
+    Task BroadcastAgentDecisionAsync(string userId, object decision, CancellationToken cancellationToken = default);
 }

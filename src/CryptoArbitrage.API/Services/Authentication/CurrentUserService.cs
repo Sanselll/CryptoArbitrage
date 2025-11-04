@@ -11,6 +11,7 @@ public class CurrentUserService : ICurrentUserService
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<CurrentUserService> _logger;
+    private static readonly AsyncLocal<string?> _backgroundUserId = new AsyncLocal<string?>();
 
     public CurrentUserService(IHttpContextAccessor httpContextAccessor, ILogger<CurrentUserService> logger)
     {
@@ -20,9 +21,23 @@ public class CurrentUserService : ICurrentUserService
 
     /// <summary>
     /// Gets the authenticated user's ID from the NameIdentifier claim in the JWT token.
+    /// For background operations, returns the ID set via SetBackgroundUserContext.
     /// </summary>
-    public string? UserId => _httpContextAccessor.HttpContext?.User
-        ?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    public string? UserId
+    {
+        get
+        {
+            // First check if we're in a background context
+            if (_backgroundUserId.Value != null)
+            {
+                return _backgroundUserId.Value;
+            }
+
+            // Otherwise, get from HTTP context (JWT token)
+            return _httpContextAccessor.HttpContext?.User
+                ?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        }
+    }
 
     /// <summary>
     /// Gets the authenticated user's email from the Email claim in the JWT token.
@@ -58,5 +73,48 @@ public class CurrentUserService : ICurrentUserService
         }
 
         _logger.LogDebug("User {UserId} validated ownership of resource", UserId);
+    }
+
+    /// <summary>
+    /// Sets the user context for background operations (e.g., agent trading).
+    /// Returns an IDisposable that restores the previous context when disposed.
+    /// IMPORTANT: Only use for trusted background operations like agent trading.
+    /// </summary>
+    public IDisposable SetBackgroundUserContext(string userId)
+    {
+        if (string.IsNullOrEmpty(userId))
+        {
+            throw new ArgumentException("User ID cannot be null or empty", nameof(userId));
+        }
+
+        _logger.LogDebug("Setting background user context for user {UserId}", userId);
+
+        var previousUserId = _backgroundUserId.Value;
+        _backgroundUserId.Value = userId;
+
+        return new BackgroundUserContextScope(previousUserId, _logger);
+    }
+
+    private class BackgroundUserContextScope : IDisposable
+    {
+        private readonly string? _previousUserId;
+        private readonly ILogger _logger;
+        private bool _disposed;
+
+        public BackgroundUserContextScope(string? previousUserId, ILogger logger)
+        {
+            _previousUserId = previousUserId;
+            _logger = logger;
+        }
+
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _backgroundUserId.Value = _previousUserId;
+                _logger.LogDebug("Restored previous background user context");
+                _disposed = true;
+            }
+        }
     }
 }

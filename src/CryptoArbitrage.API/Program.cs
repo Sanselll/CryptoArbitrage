@@ -26,6 +26,7 @@ using CryptoArbitrage.API.Services.Streaming;
 using CryptoArbitrage.API.Services.ML;
 using CryptoArbitrage.API.Services.Reconciliation;
 using CryptoArbitrage.API.Services.Reconciliation.Configuration;
+using CryptoArbitrage.API.Services.Agent;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -343,6 +344,16 @@ builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 
 // ML Services - Using HTTP API to call Python Flask server
 builder.Services.AddSingleton<RLPredictionService>();
+
+// ============================================================================
+// AGENT SERVICES - Autonomous trading agent
+// ============================================================================
+
+// Agent Configuration Service
+builder.Services.AddScoped<IAgentConfigurationService, AgentConfigurationService>();
+
+// Agent Background Service - continuous autonomous trading
+builder.Services.AddHostedService<AgentBackgroundService>();
 
 // ============================================================================
 

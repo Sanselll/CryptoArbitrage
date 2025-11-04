@@ -1,0 +1,423 @@
+"""
+Train PPO agent on Funding Arbitrage Environment
+
+IMPORTANT: Uses separate train and test data to prevent data leakage.
+- Trains on train_data_path
+- Evaluates on test_data_path (held-out test set)
+
+Example usage:
+    python train_ppo.py --num-episodes 1000
+    python train_ppo.py --train-data-path data/rl_train.csv --test-data-path data/rl_test.csv --num-episodes 2000
+"""
+
+import argparse
+import os
+from pathlib import Path
+import time
+from datetime import datetime
+import torch
+import numpy as np
+
+from models.rl.core.environment import FundingArbitrageEnv
+from models.rl.core.config import TradingConfig
+from models.rl.core.reward_config import RewardConfig
+from models.rl.networks.modular_ppo import ModularPPONetwork
+from models.rl.algorithms.ppo_trainer import PPOTrainer
+
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description='Train PPO agent on Funding Arbitrage')
+
+    # Data
+    parser.add_argument('--train-data-path', type=str, default='data/rl_train.csv',
+                        help='Path to training opportunities CSV file')
+    parser.add_argument('--test-data-path', type=str, default='data/rl_test.csv',
+                        help='Path to test opportunities CSV file (for evaluation)')
+    parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
+                        help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
+    parser.add_argument('--feature-scaler-path', type=str, default=None,
+                        help='Path to fitted StandardScaler pickle')
+
+    # Environment
+    parser.add_argument('--initial-capital', type=float, default=10000.0,
+                        help='Initial capital in USD')
+    parser.add_argument('--episode-length-days', type=int, default=3,
+                        help='Episode length in days')
+    parser.add_argument('--sample-random-config', action='store_true',
+                        help='Sample random TradingConfig each episode for diversity')
+
+    # Trading config (if not sampling random)
+    parser.add_argument('--max-leverage', type=float, default=1.0,
+                        help='Maximum leverage (1-10x)')
+    parser.add_argument('--target-utilization', type=float, default=0.6,
+                        help='Target capital utilization (0-1)')
+    parser.add_argument('--max-positions', type=int, default=3,
+                        help='Maximum concurrent positions (1-5)')
+
+    # Reward config (as per IMPLEMENTATION_PLAN.md)
+    parser.add_argument('--pnl-reward-scale', type=float, default=3.0,
+                        help='Scale for hourly P&L reward (Component 1)')
+    parser.add_argument('--entry-penalty-scale', type=float, default=3.0,
+                        help='Scale for entry fee penalty (Component 2)')
+    parser.add_argument('--liquidation-penalty-scale', type=float, default=20.0,
+                        help='Scale for liquidation risk penalty (Component 3)')
+    parser.add_argument('--stop-loss-penalty', type=float, default=-2.0,
+                        help='Penalty when position hits stop-loss (Component 4)')
+
+    # PPO hyperparameters
+    parser.add_argument('--learning-rate', type=float, default=3e-4,
+                        help='Learning rate')
+    parser.add_argument('--gamma', type=float, default=0.99,
+                        help='Discount factor')
+    parser.add_argument('--gae-lambda', type=float, default=0.95,
+                        help='GAE lambda')
+    parser.add_argument('--clip-range', type=float, default=0.2,
+                        help='PPO clip range')
+    parser.add_argument('--value-coef', type=float, default=0.5,
+                        help='Value loss coefficient')
+    parser.add_argument('--entropy-coef', type=float, default=0.01,
+                        help='Entropy coefficient')
+    parser.add_argument('--n-epochs', type=int, default=4,
+                        help='Number of epochs per update')
+    parser.add_argument('--batch-size', type=int, default=64,
+                        help='Mini-batch size')
+
+    # Training
+    parser.add_argument('--num-episodes', type=int, default=1000,
+                        help='Number of training episodes')
+    parser.add_argument('--eval-every', type=int, default=50,
+                        help='Evaluate every N episodes')
+    parser.add_argument('--save-every', type=int, default=100,
+                        help='Save checkpoint every N episodes')
+    parser.add_argument('--device', type=str, default='cpu',
+                        choices=['cpu', 'cuda', 'mps'],
+                        help='Device to use (cpu, cuda, or mps)')
+
+    # Checkpointing
+    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints',
+                        help='Directory to save checkpoints')
+    parser.add_argument('--resume-from', type=str, default=None,
+                        help='Path to checkpoint to resume from')
+
+    # Logging
+    parser.add_argument('--log-interval', type=int, default=10,
+                        help='Log every N episodes')
+
+    return parser.parse_args()
+
+
+def create_environment(args, data_path: str, verbose: bool = True):
+    """Create environment (train or test)."""
+    # Create TradingConfig
+    if args.sample_random_config:
+        trading_config = None  # Will sample random each episode
+    else:
+        trading_config = TradingConfig(
+            max_leverage=args.max_leverage,
+            target_utilization=args.target_utilization,
+            max_positions=args.max_positions,
+        )
+
+    # Create RewardConfig (as per IMPLEMENTATION_PLAN.md)
+    reward_config = RewardConfig(
+        pnl_reward_scale=args.pnl_reward_scale,
+        entry_penalty_scale=args.entry_penalty_scale,
+        liquidation_penalty_scale=args.liquidation_penalty_scale,
+        stop_loss_penalty=args.stop_loss_penalty,
+    )
+
+    # Create environment
+    env = FundingArbitrageEnv(
+        data_path=data_path,
+        price_history_path=args.price_history_path,
+        feature_scaler_path=args.feature_scaler_path,
+        initial_capital=args.initial_capital,
+        trading_config=trading_config,
+        reward_config=reward_config,
+        sample_random_config=args.sample_random_config,
+        episode_length_days=args.episode_length_days,
+        simple_mode=False,  # Always use full mode for training
+        verbose=verbose,
+    )
+
+    return env
+
+
+def evaluate(trainer, env, num_episodes: int = 5):
+    """Evaluate the agent with detailed trading metrics."""
+    # Episode-level metrics
+    eval_rewards = []
+    eval_lengths = []
+
+    # Trading metrics
+    total_pnls = []
+    total_pnl_pcts = []
+    num_trades = []
+    num_winning_trades = []
+    num_losing_trades = []
+    avg_trade_durations = []
+    max_drawdowns = []
+    opportunities_seen = []
+    trades_executed = []
+
+    for _ in range(num_episodes):
+        obs, info = env.reset()
+        episode_reward = 0.0
+        episode_length = 0
+        done = False
+
+        opportunities_count = 0
+
+        while not done:
+            # Count opportunities available at this step
+            if hasattr(env, 'current_opportunities'):
+                opportunities_count += len(env.current_opportunities)
+
+            # Get action mask
+            if hasattr(env, '_get_action_mask'):
+                action_mask = env._get_action_mask()
+            else:
+                action_mask = None
+
+            # Select action (deterministic)
+            action, _, _ = trainer.select_action(obs, action_mask, deterministic=True)
+
+            # Step
+            obs, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+
+            episode_reward += reward
+            episode_length += 1
+
+        # Collect portfolio metrics after episode
+        portfolio = env.portfolio
+
+        eval_rewards.append(episode_reward)
+        eval_lengths.append(episode_length)
+        total_pnls.append(portfolio.total_pnl_usd)
+        total_pnl_pcts.append(portfolio.total_pnl_pct)
+        max_drawdowns.append(portfolio.max_drawdown_pct)
+        opportunities_seen.append(opportunities_count)
+
+        # Trade statistics
+        total_closed = len(portfolio.closed_positions)
+        num_trades.append(total_closed)
+
+        if total_closed > 0:
+            winning = sum(1 for p in portfolio.closed_positions if p.realized_pnl_usd > 0)
+            losing = sum(1 for p in portfolio.closed_positions if p.realized_pnl_usd <= 0)
+            num_winning_trades.append(winning)
+            num_losing_trades.append(losing)
+
+            # Average trade duration in hours
+            durations = [p.hours_held for p in portfolio.closed_positions]
+            avg_trade_durations.append(np.mean(durations))
+        else:
+            num_winning_trades.append(0)
+            num_losing_trades.append(0)
+            avg_trade_durations.append(0.0)
+
+        # Trades executed (total positions opened = currently open + closed)
+        trades_executed.append(len(portfolio.positions) + len(portfolio.closed_positions))
+
+    # Calculate aggregate statistics
+    total_trades_sum = sum(num_trades)
+    total_winning = sum(num_winning_trades)
+    total_losing = sum(num_losing_trades)
+
+    win_rate = (total_winning / total_trades_sum * 100) if total_trades_sum > 0 else 0.0
+
+    return {
+        # Episode metrics
+        'mean_reward': np.mean(eval_rewards),
+        'std_reward': np.std(eval_rewards),
+        'mean_length': np.mean(eval_lengths),
+
+        # P&L metrics
+        'mean_pnl_usd': np.mean(total_pnls),
+        'mean_pnl_pct': np.mean(total_pnl_pcts),
+        'total_pnl_usd': np.sum(total_pnls),
+
+        # Trade metrics
+        'total_trades': total_trades_sum,
+        'mean_trades_per_episode': np.mean(num_trades),
+        'total_winning_trades': total_winning,
+        'total_losing_trades': total_losing,
+        'win_rate': win_rate,
+
+        # Duration metrics
+        'mean_trade_duration_hours': np.mean([d for d in avg_trade_durations if d > 0]) if any(avg_trade_durations) else 0.0,
+
+        # Opportunity metrics
+        'mean_opportunities_per_episode': np.mean(opportunities_seen),
+        'mean_trades_executed_per_episode': np.mean(trades_executed),
+
+        # Risk metrics
+        'mean_max_drawdown_pct': np.mean(max_drawdowns),
+    }
+
+
+def train(args):
+    """Main training loop."""
+    # Create checkpoint directory
+    checkpoint_dir = Path(args.checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create train and test environments (separate data to prevent leakage)
+    print("\n" + "=" * 80)
+    print("CREATING TRAIN ENVIRONMENT")
+    print("=" * 80)
+    train_env = create_environment(args, data_path=args.train_data_path, verbose=True)
+
+    print("\n" + "=" * 80)
+    print("CREATING TEST ENVIRONMENT (for evaluation)")
+    print("=" * 80)
+    test_env = create_environment(args, data_path=args.test_data_path, verbose=True)
+
+    # Create network
+    print("\n" + "=" * 80)
+    print("CREATING NETWORK")
+    print("=" * 80)
+    network = ModularPPONetwork()
+    total_params = sum(p.numel() for p in network.parameters())
+    print(f"Network parameters: {total_params:,}")
+
+    # Create trainer
+    print("\n" + "=" * 80)
+    print("CREATING TRAINER")
+    print("=" * 80)
+    trainer = PPOTrainer(
+        network=network,
+        learning_rate=args.learning_rate,
+        gamma=args.gamma,
+        gae_lambda=args.gae_lambda,
+        clip_range=args.clip_range,
+        value_coef=args.value_coef,
+        entropy_coef=args.entropy_coef,
+        n_epochs=args.n_epochs,
+        batch_size=args.batch_size,
+        device=args.device,
+    )
+
+    # Resume from checkpoint if specified
+    start_episode = 0
+    if args.resume_from:
+        print(f"\nResuming from checkpoint: {args.resume_from}")
+        trainer.load(args.resume_from)
+        start_episode = trainer.num_updates  # Approximate
+
+    # Training loop
+    print("\n" + "=" * 80)
+    print("STARTING TRAINING")
+    print("=" * 80)
+    print(f"Training for {args.num_episodes} episodes")
+    print(f"Device: {args.device}")
+    print()
+
+    best_composite_score = -float('inf')
+    start_time = time.time()
+
+    for episode in range(start_episode, args.num_episodes):
+        episode_start_time = time.time()
+
+        # Train one episode (on TRAIN data)
+        stats = trainer.train_episode(train_env, max_steps=1000)
+
+        episode_time = time.time() - episode_start_time
+
+        # Logging
+        if (episode + 1) % args.log_interval == 0:
+            elapsed_time = time.time() - start_time
+            fps = trainer.total_timesteps / elapsed_time
+
+            print(f"Episode {episode + 1}/{args.num_episodes}")
+            print(f"  Reward: {stats['episode_reward']:8.2f}  |  Length: {stats['episode_length']:4d}  |  Mean(100): {stats['mean_reward_100']:8.2f}")
+            print(f"  Loss: {stats['loss']:6.4f}  |  Policy: {stats['policy_loss']:6.4f}  |  Value: {stats['value_loss']:6.4f}  |  Entropy: {stats['entropy']:6.4f}")
+            print(f"  KL: {stats['approx_kl']:6.4f}  |  Clipfrac: {stats['clipfrac']:6.4f}")
+            print(f"  Time: {episode_time:.2f}s  |  FPS: {fps:.0f}  |  Total steps: {trainer.total_timesteps}")
+            print()
+
+        # Evaluation (on TEST data to prevent overfitting)
+        if (episode + 1) % args.eval_every == 0:
+            print(f"\n{'='*80}")
+            print(f"EVALUATION ON TEST SET (Episode {episode + 1})")
+            print(f"{'='*80}")
+            eval_stats = evaluate(trainer, test_env, num_episodes=5)
+
+            # Display comprehensive metrics
+            print(f"\n📊 Episode Metrics:")
+            print(f"  Mean Reward:     {eval_stats['mean_reward']:8.2f} ± {eval_stats['std_reward']:.2f}")
+            print(f"  Mean Length:     {eval_stats['mean_length']:8.1f} hours")
+
+            print(f"\n💰 P&L Metrics:")
+            print(f"  Mean P&L (USD):  ${eval_stats['mean_pnl_usd']:8.2f}")
+            print(f"  Mean P&L (%):    {eval_stats['mean_pnl_pct']:8.2f}%")
+            print(f"  Total P&L:       ${eval_stats['total_pnl_usd']:8.2f}")
+
+            print(f"\n📈 Trading Metrics:")
+            print(f"  Total Trades:    {eval_stats['total_trades']:8.0f}")
+            print(f"  Winning Trades:  {eval_stats['total_winning_trades']:8.0f}")
+            print(f"  Losing Trades:   {eval_stats['total_losing_trades']:8.0f}")
+            print(f"  Win Rate:        {eval_stats['win_rate']:8.1f}%")
+            print(f"  Avg Duration:    {eval_stats['mean_trade_duration_hours']:8.1f} hours")
+
+            print(f"\n🎯 Opportunity Metrics:")
+            print(f"  Opportunities/Ep: {eval_stats['mean_opportunities_per_episode']:7.0f}")
+            print(f"  Trades/Episode:   {eval_stats['mean_trades_per_episode']:7.1f}")
+            print(f"  Execution Rate:   {(eval_stats['mean_trades_per_episode'] / eval_stats['mean_opportunities_per_episode'] * 100) if eval_stats['mean_opportunities_per_episode'] > 0 else 0:.1f}%")
+
+            print(f"\n⚠️  Risk Metrics:")
+            print(f"  Max Drawdown:    {eval_stats['mean_max_drawdown_pct']:8.2f}%")
+
+            # Calculate composite score for model selection
+            # V6 FIX: Remove reward from composite (it's training signal, not goal)
+            # Weights: 50% P&L, 30% Win Rate, 20% Low Drawdown
+            pnl_score = eval_stats['mean_pnl_pct'] / 5.0  # Normalize: 5% P&L = 1.0
+            winrate_score = eval_stats['win_rate'] / 100.0  # Already 0-1
+            drawdown_score = 1.0 - (eval_stats['mean_max_drawdown_pct'] / 100.0)  # Lower is better
+
+            composite_score = (
+                0.50 * pnl_score +
+                0.30 * winrate_score +
+                0.20 * drawdown_score
+            )
+
+            print(f"\n🎯 Composite Score: {composite_score:.4f}")
+            print(f"   (P&L: {pnl_score:.3f} | WinRate: {winrate_score:.3f} | Drawdown: {drawdown_score:.3f})")
+            print()
+
+            # Save best model based on composite score
+            if composite_score > best_composite_score:
+                prev_best = best_composite_score
+                best_composite_score = composite_score
+                best_path = checkpoint_dir / 'best_model.pt'
+                trainer.save(str(best_path))
+                print(f"✅ New best model saved: {best_path}")
+                if prev_best > -float('inf'):
+                    print(f"   Score improved: {prev_best:.4f} → {composite_score:.4f} (+{composite_score - prev_best:.4f})")
+                print()
+
+        # Save checkpoint
+        if (episode + 1) % args.save_every == 0:
+            checkpoint_path = checkpoint_dir / f'checkpoint_ep{episode + 1}.pt'
+            trainer.save(str(checkpoint_path))
+            print(f"💾 Checkpoint saved: {checkpoint_path}\n")
+
+    # Save final model
+    final_path = checkpoint_dir / 'final_model.pt'
+    trainer.save(str(final_path))
+
+    total_time = time.time() - start_time
+    print("\n" + "=" * 80)
+    print("TRAINING COMPLETE")
+    print("=" * 80)
+    print(f"Total time: {total_time / 3600:.2f} hours")
+    print(f"Total timesteps: {trainer.total_timesteps:,}")
+    print(f"Best composite score: {best_composite_score:.4f}")
+    print(f"Final model saved: {final_path}")
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    train(args)

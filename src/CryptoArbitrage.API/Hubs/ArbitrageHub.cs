@@ -275,4 +275,53 @@ public class ArbitrageHub : Hub
         await Clients.Group($"user_{userId}").SendAsync("ReceiveAlert",
             new { message, severity, timestamp = DateTime.UtcNow });
     }
+
+    // ============================================================================
+    // AGENT BROADCAST METHODS
+    // ============================================================================
+
+    /// <summary>
+    /// Broadcasts agent status update to a SPECIFIC USER ONLY.
+    /// Called when agent starts, stops, pauses, resumes, or errors.
+    /// </summary>
+    public async Task SendAgentStatus(string userId, string status, int? durationSeconds, bool isRunning, string? errorMessage = null)
+    {
+        await Clients.Group($"user_{userId}").SendAsync("ReceiveAgentStatus",
+            new
+            {
+                status,
+                durationSeconds,
+                isRunning,
+                errorMessage,
+                timestamp = DateTime.UtcNow
+            });
+    }
+
+    /// <summary>
+    /// Broadcasts agent statistics update to a SPECIFIC USER ONLY.
+    /// Called after each prediction cycle with updated P&L and trade stats.
+    /// </summary>
+    public async Task SendAgentStats(string userId, object stats)
+    {
+        await Clients.Group($"user_{userId}").SendAsync("ReceiveAgentStats", stats);
+    }
+
+    /// <summary>
+    /// Broadcasts agent decision to a SPECIFIC USER ONLY.
+    /// Called after each prediction cycle with the action taken.
+    /// </summary>
+    public async Task SendAgentDecision(string userId, object decision)
+    {
+        await Clients.Group($"user_{userId}").SendAsync("ReceiveAgentDecision", decision);
+    }
+
+    /// <summary>
+    /// Broadcasts agent error to a SPECIFIC USER ONLY.
+    /// Called when agent encounters an error during operation.
+    /// </summary>
+    public async Task SendAgentError(string userId, string error)
+    {
+        await Clients.Group($"user_{userId}").SendAsync("ReceiveAgentError",
+            new { error, timestamp = DateTime.UtcNow });
+    }
 }
