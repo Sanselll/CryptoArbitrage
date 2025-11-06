@@ -22,14 +22,16 @@ def parse_args():
                         help='Max leverage (default: 1.0x)')
     parser.add_argument('--utilization', type=float, default=0.9,
                         help='Capital utilization (default: 0.9 = 90%%)')
-    parser.add_argument('--max-positions', type=int, default=3,
-                        help='Max concurrent positions (default: 3)')
+    parser.add_argument('--max-positions', type=int, default=5,
+                        help='Max concurrent positions (default: 5)')
 
     # Test configuration
     parser.add_argument('--num-episodes', type=int, default=1,
                         help='Number of episodes to test (default: 1)')
     parser.add_argument('--episode-length-days', type=int, default=7,
                         help='Episode length in days (default: 7)')
+    parser.add_argument('--step-minutes', type=int, default=5,
+                        help='Minutes per prediction step (default: 5 = 5-minute intervals)')
     parser.add_argument('--test-data-path', type=str, default='data/rl_test.csv',
                         help='Path to test data')
     parser.add_argument('--checkpoint', type=str, default='checkpoints/best_model.pt',
@@ -40,6 +42,8 @@ def parse_args():
                         help='Output CSV file for trade records (default: trades_inference.csv)')
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed for reproducible results (default: 42)')
 
     return parser.parse_args()
 
@@ -49,6 +53,11 @@ def test_model_inference(args):
     print("=" * 80)
     print("TESTING MODEL INFERENCE ON TEST SET")
     print("=" * 80)
+
+    # Set random seed for reproducibility
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    print(f"\n🎲 Random seed: {args.seed}")
 
     # Create environment (use test data)
     print("\n1. Creating test environment...")
@@ -62,24 +71,33 @@ def test_model_inference(args):
         liquidation_buffer=0.15,    # 15% liquidation buffer
     )
 
+    # Convert step minutes to hours for the environment
+    step_hours = args.step_minutes / 60.0
+
     env = FundingArbitrageEnv(
         data_path=args.test_data_path,
         initial_capital=args.initial_capital,
         trading_config=trading_config,
         episode_length_days=args.episode_length_days,
+        step_hours=step_hours,
         price_history_path=args.price_history_path,
         simple_mode=False,
         verbose=False,
     )
+
+    # Calculate total steps
+    total_steps = int((args.episode_length_days * 24 * 60) / args.step_minutes)
+
     print("✅ Test environment created")
     print(f"   Data: {args.test_data_path}")
-    print(f"   Episode length: {args.episode_length_days} days ({args.episode_length_days * 24} hours)")
+    print(f"   Episode length: {args.episode_length_days} days ({total_steps} steps at {args.step_minutes}-minute intervals)")
+    print(f"   Step interval: {args.step_minutes} minute(s) ({step_hours:.4f} hours)")
     print(f"   Initial capital: ${args.initial_capital:,.2f}")
     print(f"   Leverage: {args.leverage}x")
     print(f"   Utilization: {args.utilization:.0%}")
     print(f"   Max Positions: {args.max_positions}")
     if args.price_history_path:
-        print(f"   Price History: {args.price_history_path} (hourly funding updates enabled)")
+        print(f"   Price History: {args.price_history_path} (dynamic funding updates enabled)")
 
     # Create network
     print("\n2. Creating network...")
@@ -127,6 +145,10 @@ def test_model_inference(args):
 
     # Trade tracking (for CSV export)
     all_trades = []
+
+    # Profit factor metrics
+    all_winning_pnl = []
+    all_losing_pnl = []
 
     for episode in range(args.num_episodes):
         obs, info = env.reset()
@@ -201,6 +223,13 @@ def test_model_inference(args):
         # Trades executed (total positions opened = currently open + closed)
         trades_executed.append(len(portfolio.positions) + len(portfolio.closed_positions))
 
+        # Collect P&L for profit factor calculation
+        for position in portfolio.closed_positions:
+            if position.realized_pnl_usd > 0:
+                all_winning_pnl.append(position.realized_pnl_usd)
+            else:
+                all_losing_pnl.append(abs(position.realized_pnl_usd))
+
         # Track config used
         configs_used.append({
             'leverage': config.max_leverage,
@@ -208,7 +237,15 @@ def test_model_inference(args):
             'max_positions': config.max_positions,
         })
 
-        print(f"   Episode {episode + 1}: Reward={episode_reward:7.2f}, P&L=${portfolio.total_pnl_usd:7.2f} ({portfolio.total_pnl_pct:.2f}%), Trades={total_closed:2d}, Length={episode_length:3d}h")
+        # Show length in appropriate unit
+        if args.step_minutes == 1:
+            length_str = f"{episode_length:5d} min"
+        elif args.step_minutes == 60:
+            length_str = f"{episode_length:3d}h"
+        else:
+            length_str = f"{episode_length:3d} steps"
+
+        print(f"   Episode {episode + 1}: Reward={episode_reward:7.2f}, P&L=${portfolio.total_pnl_usd:7.2f} ({portfolio.total_pnl_pct:.2f}%), Trades={total_closed:2d}, Length={length_str}")
 
     # Calculate aggregate statistics
     total_trades_sum = sum(num_trades)
@@ -223,7 +260,14 @@ def test_model_inference(args):
 
     print(f"\n📊 Episode Metrics:")
     print(f"  Mean Reward:     {np.mean(eval_rewards):8.2f} ± {np.std(eval_rewards):.2f}")
-    print(f"  Mean Length:     {np.mean(eval_lengths):8.1f} hours")
+
+    # Show length in appropriate unit
+    if args.step_minutes == 1:
+        print(f"  Mean Length:     {np.mean(eval_lengths):8.1f} minutes")
+    elif args.step_minutes == 60:
+        print(f"  Mean Length:     {np.mean(eval_lengths):8.1f} hours")
+    else:
+        print(f"  Mean Length:     {np.mean(eval_lengths):8.1f} steps ({args.step_minutes} min/step)")
 
     print(f"\n💰 P&L Metrics:")
     print(f"  Mean P&L (USD):  ${np.mean(total_pnls):8.2f}")
@@ -245,25 +289,40 @@ def test_model_inference(args):
     print(f"\n⚠️  Risk Metrics:")
     print(f"  Max Drawdown:    {np.mean(max_drawdowns):8.2f}%")
 
+    # Calculate profit factor
+    total_wins = sum(all_winning_pnl) if all_winning_pnl else 0.0
+    total_losses = sum(all_losing_pnl) if all_losing_pnl else 0.001
+    profit_factor = total_wins / total_losses
+
+    print(f"\n📊 Profitability Metrics:")
+    print(f"  Profit Factor:   {profit_factor:8.2f}")
+
     print(f"\n⚙️  Configuration Used:")
     avg_config = configs_used[0]  # Assuming same config for all episodes
     print(f"  Leverage:        {avg_config['leverage']:.1f}x")
     print(f"  Utilization:     {avg_config['utilization']:.0%}")
     print(f"  Max Positions:   {avg_config['max_positions']}")
 
-    # Calculate composite score
-    pnl_score = np.mean(total_pnl_pcts) / 5.0  # Normalize: 5% P&L = 1.0
-    winrate_score = win_rate / 100.0
-    drawdown_score = 1.0 - (np.mean(max_drawdowns) / 100.0)
+    # Calculate composite score (IMPROVED VERSION)
+    # Weights: 50% P&L, 30% Profit Factor, 20% Low Drawdown
+
+    # 1. P&L Score: Bounded using tanh to prevent domination
+    pnl_score = np.tanh(np.mean(total_pnl_pcts) / 5.0)
+
+    # 2. Profit Factor Score: Normalize (2.0 = 1.0, capped at 1.0)
+    profit_factor_score = min(profit_factor / 2.0, 1.0)
+
+    # 3. Drawdown Score: Lower is better, floored at 0.0
+    drawdown_score = max(0.0, 1.0 - (np.mean(max_drawdowns) / 100.0))
 
     composite_score = (
         0.50 * pnl_score +
-        0.30 * winrate_score +
+        0.30 * profit_factor_score +
         0.20 * drawdown_score
     )
 
     print(f"\n🎯 Composite Score: {composite_score:.4f}")
-    print(f"   (P&L: {pnl_score:.3f} | WinRate: {winrate_score:.3f} | Drawdown: {drawdown_score:.3f})")
+    print(f"   (P&L: {pnl_score:.3f} | ProfitFactor: {profit_factor_score:.3f} | Drawdown: {drawdown_score:.3f})")
 
     # Write trades to CSV
     if all_trades:

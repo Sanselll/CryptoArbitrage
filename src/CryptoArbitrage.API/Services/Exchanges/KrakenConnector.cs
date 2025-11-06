@@ -590,7 +590,11 @@ public class KrakenConnector : IExchangeConnector
                     Quantity = p.Quantity,
                     Leverage = p.MaxFixedLeverage ?? 1m, // Default to 1x if not specified
                     InitialMargin = 0, // Not directly available, would need calculation
-                    RealizedPnL = 0, // Not available in position data
+                    FundingEarnedUsd = 0,
+                TradingFeesUsd = 0,
+                PricePnLUsd = 0,
+                RealizedPnLUsd = 0,
+                RealizedPnLPct = 0, // Not available in position data
                     UnrealizedPnL = 0, // Would need current price to calculate
                     TotalFundingFeePaid = p.UnrealizedFunding < 0 ? Math.Abs(p.UnrealizedFunding ?? 0) : 0,
                     TotalFundingFeeReceived = p.UnrealizedFunding > 0 ? p.UnrealizedFunding ?? 0 : 0,

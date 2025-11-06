@@ -11,9 +11,14 @@ public class Position
     public string UserId { get; set; } = string.Empty;
     public ApplicationUser User { get; set; } = null!;
 
-    // Link to Execution (nullable for historical positions)
-    public int? ExecutionId { get; set; }
-    public Execution? Execution { get; set; }
+    // Link to Execution (REQUIRED - every position must belong to an execution)
+    [Required]
+    public int ExecutionId { get; set; }
+    public Execution Execution { get; set; } = null!;
+
+    // Link to AgentSession (optional - null for manual trades, set for agent trades)
+    public Guid? AgentSessionId { get; set; }
+    public AgentSession? AgentSession { get; set; }
 
     // Position identification
     public string Symbol { get; set; } = string.Empty;
@@ -29,9 +34,13 @@ public class Position
     public decimal Leverage { get; set; } = 1m;  // Spot positions default to 1x
     public decimal InitialMargin { get; set; }
 
-    // P&L tracking
-    public decimal RealizedPnL { get; set; }
-    public decimal UnrealizedPnL { get; set; }
+    // P&L tracking - Detailed breakdown
+    public decimal FundingEarnedUsd { get; set; }  // Total funding fees earned (can be negative if paid)
+    public decimal TradingFeesUsd { get; set; }    // Total trading fees paid (entry + exit)
+    public decimal PricePnLUsd { get; set; }        // P&L from price movements only
+    public decimal RealizedPnLUsd { get; set; }     // Total = FundingEarned + PricePnL - TradingFees
+    public decimal RealizedPnLPct { get; set; }     // Percentage return on capital used
+    public decimal UnrealizedPnL { get; set; }      // For open positions only
 
     // Fee tracking: Calculated on-the-fly from PositionTransaction table (no storage needed)
 

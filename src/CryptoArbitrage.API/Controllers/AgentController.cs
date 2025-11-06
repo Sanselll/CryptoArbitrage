@@ -74,8 +74,15 @@ public class AgentController : BaseController
                 AgentConfigurationId = agentConfig.Id,
                 Status = AgentStatus.Running,
                 StartedAt = DateTime.UtcNow,
-                TotalPredictions = 0,
-                TotalTrades = 0,
+                HoldDecisions = 0,
+                EnterDecisions = 0,
+                ExitDecisions = 0,
+                WinningTrades = 0,
+                LosingTrades = 0,
+                SessionPnLUsd = 0,
+                SessionPnLPct = 0,
+                ActivePositions = 0,
+                MaxActivePositions = 0,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -250,7 +257,7 @@ public class AgentController : BaseController
     }
 
     /// <summary>
-    /// Get agent statistics for current user.
+    /// Get agent statistics for current user (from current session).
     /// </summary>
     [HttpGet("stats")]
     public async Task<ActionResult<AgentStatsDto>> GetStats()
@@ -259,12 +266,12 @@ public class AgentController : BaseController
         {
             var userId = _currentUser.UserId!;
 
-            var stats = await _context.AgentStats
+            var session = await _context.AgentSessions
                 .Where(s => s.UserId == userId)
-                .OrderByDescending(s => s.UpdatedAt)
+                .OrderByDescending(s => s.CreatedAt)
                 .FirstOrDefaultAsync();
 
-            if (stats == null)
+            if (session == null)
             {
                 return new AgentStatsDto
                 {
@@ -274,21 +281,25 @@ public class AgentController : BaseController
                 };
             }
 
+            var totalDecisions = session.HoldDecisions + session.EnterDecisions + session.ExitDecisions;
+            var totalTrades = session.WinningTrades + session.LosingTrades;
+            var winRate = totalTrades > 0 ? (decimal)session.WinningTrades / totalTrades : 0m;
+
             return new AgentStatsDto
             {
-                TotalDecisions = stats.TotalDecisions,
-                HoldDecisions = stats.HoldDecisions,
-                EnterDecisions = stats.EnterDecisions,
-                ExitDecisions = stats.ExitDecisions,
-                TotalTrades = stats.TotalTrades,
-                WinningTrades = stats.WinningTrades,
-                LosingTrades = stats.LosingTrades,
-                WinRate = stats.WinRate,
-                TotalPnLUsd = stats.TotalPnLUsd,
-                TotalPnLPct = stats.TotalPnLPct,
-                TodayPnLUsd = stats.TodayPnLUsd,
-                TodayPnLPct = stats.TodayPnLPct,
-                ActivePositions = stats.ActivePositions
+                TotalDecisions = totalDecisions,
+                HoldDecisions = session.HoldDecisions,
+                EnterDecisions = session.EnterDecisions,
+                ExitDecisions = session.ExitDecisions,
+                TotalTrades = totalTrades,
+                WinningTrades = session.WinningTrades,
+                LosingTrades = session.LosingTrades,
+                WinRate = winRate,
+                TotalPnLUsd = session.SessionPnLUsd,
+                TotalPnLPct = session.SessionPnLPct,
+                TodayPnLUsd = session.SessionPnLUsd, // Session stats = today's stats
+                TodayPnLPct = session.SessionPnLPct,
+                ActivePositions = session.ActivePositions
             };
         }, "get-agent-stats");
     }
@@ -369,10 +380,10 @@ public class AgentController : BaseController
             ? (int)(DateTime.UtcNow - session.StartedAt.Value).TotalSeconds
             : 0;
 
-        var stats = await _context.AgentStats
-            .Where(s => s.UserId == userId)
-            .OrderByDescending(s => s.UpdatedAt)
-            .FirstOrDefaultAsync();
+        // Calculate stats from session data
+        var totalDecisions = session.HoldDecisions + session.EnterDecisions + session.ExitDecisions;
+        var totalTrades = session.WinningTrades + session.LosingTrades;
+        var winRate = totalTrades > 0 ? (decimal)session.WinningTrades / totalTrades : 0m;
 
         return new AgentStatusDto
         {
@@ -381,7 +392,7 @@ public class AgentController : BaseController
             PausedAt = session.PausedAt,
             DurationSeconds = durationSeconds,
             ErrorMessage = session.ErrorMessage,
-            TotalPredictions = session.TotalPredictions,
+            TotalPredictions = totalDecisions,
             Config = session.AgentConfiguration != null ? new AgentConfigDto
             {
                 MaxLeverage = session.AgentConfiguration.MaxLeverage,
@@ -389,22 +400,22 @@ public class AgentController : BaseController
                 MaxPositions = session.AgentConfiguration.MaxPositions,
                 PredictionIntervalSeconds = session.AgentConfiguration.PredictionIntervalSeconds
             } : null,
-            Stats = stats != null ? new AgentStatsDto
+            Stats = new AgentStatsDto
             {
-                TotalDecisions = stats.TotalDecisions,
-                HoldDecisions = stats.HoldDecisions,
-                EnterDecisions = stats.EnterDecisions,
-                ExitDecisions = stats.ExitDecisions,
-                TotalTrades = stats.TotalTrades,
-                WinningTrades = stats.WinningTrades,
-                LosingTrades = stats.LosingTrades,
-                WinRate = stats.WinRate,
-                TotalPnLUsd = stats.TotalPnLUsd,
-                TotalPnLPct = stats.TotalPnLPct,
-                TodayPnLUsd = stats.TodayPnLUsd,
-                TodayPnLPct = stats.TodayPnLPct,
-                ActivePositions = stats.ActivePositions
-            } : null
+                TotalDecisions = totalDecisions,
+                HoldDecisions = session.HoldDecisions,
+                EnterDecisions = session.EnterDecisions,
+                ExitDecisions = session.ExitDecisions,
+                TotalTrades = totalTrades,
+                WinningTrades = session.WinningTrades,
+                LosingTrades = session.LosingTrades,
+                WinRate = winRate,
+                TotalPnLUsd = session.SessionPnLUsd,
+                TotalPnLPct = session.SessionPnLPct,
+                TodayPnLUsd = session.SessionPnLUsd,
+                TodayPnLPct = session.SessionPnLPct,
+                ActivePositions = session.ActivePositions
+            }
         };
     }
 }

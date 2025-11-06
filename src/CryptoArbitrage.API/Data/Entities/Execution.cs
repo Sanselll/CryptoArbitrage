@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using CryptoArbitrage.API.Models;
 
 namespace CryptoArbitrage.API.Data.Entities;
 
@@ -12,7 +13,20 @@ public class Execution
     public ApplicationUser User { get; set; } = null!;
 
     public string Symbol { get; set; } = string.Empty;
+
+    // NOTE: Exchange field is kept for backward compatibility
+    // For SpotPerpetual: Exchange is the single exchange name
+    // For CrossExchange: Exchange is "{LongExchange}/{ShortExchange}" format (legacy)
     public string Exchange { get; set; } = string.Empty;
+
+    // Strategy metadata (added for ML context)
+    public ArbitrageStrategy Strategy { get; set; } = ArbitrageStrategy.CrossExchange;
+    public StrategySubType SubType { get; set; } = StrategySubType.CrossExchangeFuturesFutures;
+
+    // Exchange details for cross-exchange strategies (provides clarity)
+    public string? LongExchange { get; set; }  // Exchange where long position is opened
+    public string? ShortExchange { get; set; } // Exchange where short position is opened
+
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
     public DateTime? StoppedAt { get; set; }
     public ExecutionState State { get; set; } = ExecutionState.Running;

@@ -358,7 +358,7 @@ class ModularRLPredictor:
 
     def _get_action_mask(
         self,
-        num_opportunities: int,
+        opportunities: List[Dict],
         num_positions: int,
         max_positions: int
     ) -> np.ndarray:
@@ -366,7 +366,7 @@ class ModularRLPredictor:
         Generate action mask (36 dimensions).
 
         Args:
-            num_opportunities: Number of available opportunities
+            opportunities: List of opportunity dicts (includes has_existing_position flag)
             num_positions: Current number of open positions
             max_positions: Maximum allowed positions
 
@@ -378,16 +378,22 @@ class ModularRLPredictor:
         # HOLD is always valid
         mask[0] = True
 
-        # ENTER actions: valid if opportunity exists AND we can open position
+        # ENTER actions: valid if opportunity exists AND we can open position AND no existing position
         has_capacity = num_positions < max_positions
 
         if has_capacity:
             for i in range(10):
-                if i < num_opportunities:
-                    # Enable all three size variants for this opportunity
-                    mask[1 + i] = True      # SMALL
-                    mask[11 + i] = True     # MEDIUM
-                    mask[21 + i] = True     # LARGE
+                if i < len(opportunities):
+                    opp = opportunities[i]
+                    # CRITICAL: Check if opportunity already has an open position
+                    # This prevents duplicate ENTER actions on the same opportunity
+                    has_existing_position = opp.get('has_existing_position', False)
+
+                    if not has_existing_position:
+                        # Enable all three size variants for this opportunity
+                        mask[1 + i] = True      # SMALL
+                        mask[11 + i] = True     # MEDIUM
+                        mask[21 + i] = True     # LARGE
 
         # EXIT actions: valid if position exists
         for i in range(5):
@@ -489,11 +495,10 @@ class ModularRLPredictor:
         # Build observation
         obs = self._build_observation(trading_config, portfolio, opportunities)
 
-        # Build action mask
-        num_opportunities = len(opportunities)
+        # Build action mask (includes checking for existing positions)
         num_positions = len(portfolio.get('positions', []))
         max_positions = trading_config.get('max_positions', 3)
-        action_mask = self._get_action_mask(num_opportunities, num_positions, max_positions)
+        action_mask = self._get_action_mask(opportunities, num_positions, max_positions)
 
         # Select action (deterministic = greedy)
         action, value, log_prob = self.trainer.select_action(

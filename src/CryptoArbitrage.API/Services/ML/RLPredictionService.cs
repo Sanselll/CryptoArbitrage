@@ -142,6 +142,12 @@ public class RLPredictionService : IDisposable
         var result = new Dictionary<int, RLPredictionDto>();
         var posList = positions.ToList();
 
+        // DEPRECATED: This method uses the legacy /rl/predict/positions endpoint which is no longer supported
+        // Position evaluation is now handled through the opportunities endpoint in Modular Mode
+        _logger.LogDebug("EvaluatePositionsAsync called but is deprecated - returning empty results. Use opportunities endpoint instead.");
+        return await Task.FromResult(result);
+
+        /* LEGACY CODE - DISABLED
         if (posList.Count == 0)
             return result;
 
@@ -149,8 +155,7 @@ public class RLPredictionService : IDisposable
         {
             // Group positions by ExecutionId to create execution-level features
             var executionGroups = posList
-                .Where(p => p.ExecutionId.HasValue)
-                .GroupBy(p => p.ExecutionId!.Value)
+                .GroupBy(p => p.ExecutionId)
                 .Select(g => g.ToList())
                 .ToList(); // Process ALL executions
 
@@ -268,6 +273,7 @@ public class RLPredictionService : IDisposable
             _logger.LogError(ex, "Failed to get RL predictions for positions");
             return result;
         }
+        */
     }
 
     /// <summary>

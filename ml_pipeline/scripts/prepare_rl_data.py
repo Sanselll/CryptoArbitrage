@@ -1,19 +1,22 @@
 """
-Prepare RL Training Dataset with 1-Hour Interval Data from Klines
+Prepare RL Training Dataset with Configurable Interval Data from Klines
 
-This script creates clean training data for RL with 1-hour intervals:
+This script creates clean training data for RL with configurable time intervals:
 1. Extracts opportunities (entry points for RL episodes)
 2. For each symbol in opportunities:
    - Loads minute-level prices from klines data
-   - Resamples to 1-hour intervals
+   - Resamples to specified interval (5min, 15min, 1h, 4h, etc.)
    - Combines prices with funding rates from opportunities
    - Adds funding payment flags (when fees are actually charged)
 3. Saves symbol data as CSV files with columns:
    timestamp, binance_price, bybit_price, binance_funding_rate,
    bybit_funding_rate, binance_funding_paid, bybit_funding_paid
 
-This provides exactly what the RL environment needs: hourly prices and funding payment times.
-Uses klines (minute-level price data) instead of perpPrices for more complete coverage.
+This provides exactly what the RL environment needs: price data at configurable intervals
+and funding payment times. Uses klines (minute-level price data) for complete coverage.
+
+Note: When using non-hourly intervals (e.g., 5min), make sure to train the RL model
+with matching step_hours parameter (e.g., --step-minutes 5 in train_ppo.py).
 """
 
 import pandas as pd
@@ -287,14 +290,22 @@ def load_price_and_funding_data(
     return price_data, funding_data
 
 
-def create_hourly_symbol_data(
+def create_symbol_data(
     symbol: str,
     price_data: List[dict],
     funding_data_binance: List[dict],
-    funding_data_bybit: List[dict]
+    funding_data_bybit: List[dict],
+    resample_interval: str = '1h'
 ) -> pd.DataFrame:
     """
-    Create 1-hour interval data for a symbol combining prices and funding rates.
+    Create resampled interval data for a symbol combining prices and funding rates.
+
+    Args:
+        symbol: Symbol name
+        price_data: List of price dictionaries
+        funding_data_binance: Binance funding rate records
+        funding_data_bybit: Bybit funding rate records
+        resample_interval: Resample interval (e.g., '5min', '15min', '1h'). Default: '1h'
 
     Returns:
         DataFrame with columns: timestamp, binance_price, bybit_price,
@@ -315,57 +326,57 @@ def create_hourly_symbol_data(
         aggfunc='first'
     )
 
-    # Resample to 1-hour intervals (take first value in each hour)
-    hourly_prices = price_pivot.resample('1h').first()
+    # Resample to specified interval (take first value in each interval)
+    resampled_prices = price_pivot.resample(resample_interval).first()
 
-    # Forward-fill missing prices (limit to 2 hours)
-    hourly_prices = hourly_prices.ffill(limit=2)
+    # Forward-fill missing prices (limit to 2 intervals)
+    resampled_prices = resampled_prices.ffill(limit=2)
 
     # Rename columns
-    hourly_prices.columns = [f'{col}_price' for col in hourly_prices.columns]
+    resampled_prices.columns = [f'{col}_price' for col in resampled_prices.columns]
 
     # Process funding rates for Binance
     # Only set rate when funding payment occurs (based on fundingTime)
-    binance_rates = pd.Series(0.0, index=hourly_prices.index)
+    binance_rates = pd.Series(0.0, index=resampled_prices.index)
     if funding_data_binance:
         funding_df_binance = pd.DataFrame(funding_data_binance)
         funding_df_binance['funding_time'] = pd.to_datetime(funding_df_binance['funding_time'], utc=True, format='mixed')
 
-        # For each funding event, match it to the hour when it occurs
+        # For each funding event, match it to the interval when it occurs
         for _, row in funding_df_binance.iterrows():
             funding_time = row['funding_time']
             rate = row['rate']
 
-            # Round funding time to hour (ignoring seconds/minutes)
-            hour_timestamp = funding_time.floor('1h')
+            # Round funding time to the resampled interval
+            interval_timestamp = funding_time.floor(resample_interval)
 
-            # Set rate at the hour when funding is paid
-            if hour_timestamp in binance_rates.index:
-                binance_rates[hour_timestamp] = rate
+            # Set rate at the interval when funding is paid
+            if interval_timestamp in binance_rates.index:
+                binance_rates[interval_timestamp] = rate
 
     # Process funding rates for Bybit
-    bybit_rates = pd.Series(0.0, index=hourly_prices.index)
+    bybit_rates = pd.Series(0.0, index=resampled_prices.index)
     if funding_data_bybit:
         funding_df_bybit = pd.DataFrame(funding_data_bybit)
         funding_df_bybit['funding_time'] = pd.to_datetime(funding_df_bybit['funding_time'], utc=True, format='mixed')
 
-        # For each funding event, match it to the hour when it occurs
+        # For each funding event, match it to the interval when it occurs
         for _, row in funding_df_bybit.iterrows():
             funding_time = row['funding_time']
             rate = row['rate']
 
-            # Round funding time to hour (ignoring seconds/minutes)
-            hour_timestamp = funding_time.floor('1h')
+            # Round funding time to the resampled interval
+            interval_timestamp = funding_time.floor(resample_interval)
 
-            # Set rate at the hour when funding is paid
-            if hour_timestamp in bybit_rates.index:
-                bybit_rates[hour_timestamp] = rate
+            # Set rate at the interval when funding is paid
+            if interval_timestamp in bybit_rates.index:
+                bybit_rates[interval_timestamp] = rate
 
     # Combine everything (no *_funding_paid columns)
     result = pd.DataFrame({
-        'timestamp': hourly_prices.index,
-        'binance_price': hourly_prices.get('binance_price', np.nan),
-        'bybit_price': hourly_prices.get('bybit_price', np.nan),
+        'timestamp': resampled_prices.index,
+        'binance_price': resampled_prices.get('binance_price', np.nan),
+        'bybit_price': resampled_prices.get('bybit_price', np.nan),
         'binance_funding_rate': binance_rates,
         'bybit_funding_rate': bybit_rates
     })
@@ -421,10 +432,11 @@ def prepare_rl_dataset(
     raw_data_dir: str,
     output_dir: str,
     start_date: datetime = None,
-    end_date: datetime = None
+    end_date: datetime = None,
+    resample_interval: str = '1h'
 ):
     """
-    Main function to prepare RL dataset with 1-hour interval data.
+    Main function to prepare RL dataset with configurable interval data.
 
     Args:
         opportunities_dir: Path to opportunities directory (for funding rates and opportunities)
@@ -432,16 +444,18 @@ def prepare_rl_dataset(
         output_dir: Output directory for processed data
         start_date: Optional start date filter
         end_date: Optional end date filter
+        resample_interval: Resample interval (e.g., '5min', '15min', '1h', '4h'). Default: '1h'
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*80}")
-    print(f"PREPARING RL DATASET (1-HOUR INTERVALS)")
+    print(f"PREPARING RL DATASET (INTERVAL: {resample_interval})")
     print(f"{'='*80}")
     print(f"Opportunities: {opportunities_dir}")
     print(f"Klines (raw): {raw_data_dir}")
     print(f"Output: {output_dir}")
+    print(f"Resample interval: {resample_interval}")
     print(f"{'='*80}\n")
 
     # Step 1: Load opportunities
@@ -467,8 +481,8 @@ def prepare_rl_dataset(
         end_date
     )
 
-    # Step 4: Create 1-hour interval CSVs for each symbol
-    print(f"[4/5] Creating 1-hour interval data for each symbol...")
+    # Step 4: Create resampled interval CSVs for each symbol
+    print(f"[4/5] Creating {resample_interval} interval data for each symbol...")
     symbol_data_dir = output_path / 'symbol_data'
     symbol_data_dir.mkdir(exist_ok=True)
 
@@ -481,26 +495,27 @@ def prepare_rl_dataset(
             funding_binance = funding_data.get(('Binance', symbol), [])
             funding_bybit = funding_data.get(('Bybit', symbol), [])
 
-            # Create hourly data
-            hourly_df = create_hourly_symbol_data(
+            # Create resampled data
+            resampled_df = create_symbol_data(
                 symbol,
                 price_data.get(symbol, []),
                 funding_binance,
-                funding_bybit
+                funding_bybit,
+                resample_interval
             )
 
-            if hourly_df.empty:
+            if resampled_df.empty:
                 symbols_with_issues.append(symbol)
                 continue
 
             # Save as CSV
             output_file = symbol_data_dir / f"{symbol}.csv"
-            hourly_df.to_csv(output_file, index=False)
+            resampled_df.to_csv(output_file, index=False)
 
             symbols_saved += 1
 
             if (idx + 1) % 20 == 0 or idx == len(symbols) - 1:
-                print(f"Saved {idx + 1}/{len(symbols)}: {symbol} ({len(hourly_df)} hours)")
+                print(f"Saved {idx + 1}/{len(symbols)}: {symbol} ({len(resampled_df)} intervals)")
 
         except Exception as e:
             print(f"Warning: Could not create data for {symbol}: {e}")
@@ -577,11 +592,11 @@ def prepare_rl_dataset(
     print(f"  Full dataset: {opportunities_file} ({len(opportunities_df):,} opportunities)")
     print(f"  Train set: {train_file} ({len(train_df):,} opportunities)")
     print(f"  Test set: {test_file} ({len(test_df):,} opportunities)")
-    print(f"  Symbol data (CSV, 1h intervals): {symbol_data_dir}/ ({symbols_saved} symbols)")
+    print(f"  Symbol data (CSV, {resample_interval} intervals): {symbol_data_dir}/ ({symbols_saved} symbols)")
     print(f"  Price history (Parquet): {price_history_dir}/ ({parquet_count} symbols)")
     print(f"\nData format:")
     print(f"  Each symbol CSV/parquet contains:")
-    print(f"    - timestamp (1-hour intervals)")
+    print(f"    - timestamp ({resample_interval} intervals)")
     print(f"    - binance_price, bybit_price")
     print(f"    - binance_funding_rate, bybit_funding_rate")
     print(f"\nUsage:")
@@ -595,21 +610,27 @@ def prepare_rl_dataset(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Prepare RL training dataset with 1-hour interval data',
+        description='Prepare RL training dataset with configurable interval data',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process all available data
+  # Process all available data (default: 1-hour intervals)
   python prepare_rl_data.py
 
-  # Process last 30 days
-  python prepare_rl_data.py --days 30
+  # Process last 30 days with 5-minute intervals
+  python prepare_rl_data.py --days 30 --resample-interval 5min
 
-  # Process specific date range
+  # Process last 30 days with 15-minute intervals
+  python prepare_rl_data.py --days 30 --resample-interval 15min
+
+  # Process specific date range with 1-hour intervals (default)
   python prepare_rl_data.py --start-date 2025-09-01 --end-date 2025-09-30
 
-  # Custom output directory
-  python prepare_rl_data.py --output-dir data/rl_sept --days 30
+  # Custom output directory with 5-minute intervals
+  python prepare_rl_data.py --output-dir data/rl_sept --days 30 --resample-interval 5min
+
+Note: When training with non-hourly intervals, use matching --step-minutes in train_ppo.py
+  Example: python train_ppo.py --step-minutes 5 (for 5-minute data)
         """
     )
 
@@ -652,6 +673,13 @@ Examples:
         help='Process last N days (alternative to start/end dates)'
     )
 
+    parser.add_argument(
+        '--resample-interval',
+        type=str,
+        default='1h',
+        help='Resample interval for price data (e.g., "5min", "15min", "1h", "4h"). Default: "1h"'
+    )
+
     args = parser.parse_args()
 
     # Parse date arguments
@@ -663,5 +691,6 @@ Examples:
         raw_data_dir=args.raw_data_dir,
         output_dir=args.output_dir,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        resample_interval=args.resample_interval
     )

@@ -278,20 +278,7 @@ public class SignalRBroadcaster : IHostedService
                                     currentOpportunities
                                 );
 
-                                foreach (var pos in openPositions)
-                                {
-                                    if (rlPredictions.TryGetValue(pos.Id, out var prediction))
-                                    {
-                                        pos.RLExitProbability = prediction.ActionProbability;
-                                        pos.RLHoldProbability = prediction.HoldProbability;
-                                        pos.RLConfidence = prediction.Confidence;
-                                        pos.RLStateValue = prediction.StateValue;
-                                        pos.RLModelVersion = prediction.ModelVersion;
-
-                                        _logger.LogDebug("Enriched position {Id} with EXIT={Exit}%, HOLD={Hold}%",
-                                            pos.Id, prediction.ActionProbability * 100, prediction.HoldProbability * 100);
-                                    }
-                                }
+                                // RL prediction enrichment removed - fields no longer exist in PositionDto
 
                                 _logger.LogInformation("Successfully enriched {Count} positions with RL predictions for user {UserId}",
                                     rlPredictions.Count, userId);

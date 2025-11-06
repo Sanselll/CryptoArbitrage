@@ -128,7 +128,12 @@
       "Bash(dotnet ef migrations:*)",
       "Bash(head -1 echo \"\" echo \"Backend API Demo (port 5052):\")",
       "Bash(head -1 echo \"\" echo \"Frontend (port 5173):\")",
-      "Bash(xargs kill:*)"
+      "Bash(xargs kill:*)",
+      "Bash(if [ -f /tmp/ml_decisions.log ])",
+      "Bash(then wc -l /tmp/ml_decisions.log echo \"\" echo \"=== First Decision Entry ===\" head -1 /tmp/ml_decisions.log)",
+      "Bash(dotnet ef database:*)",
+      "Bash(export PGPASSWORD='sansel123':*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"\"\"File: {}\"\"\"\" && cat {} | python3 -m json.tool | head -50')"
     ],
     "deny": [],
     "ask": []

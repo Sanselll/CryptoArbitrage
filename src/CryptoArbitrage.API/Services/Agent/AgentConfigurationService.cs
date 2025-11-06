@@ -120,7 +120,7 @@ public class AgentConfigurationService : IAgentConfigurationService
 
         if (maxPositions < 1 || maxPositions > 3)
         {
-            return (false, "Max positions must be between 1 and 3");
+            return (false, "Max positions (executions) must be between 1 and 3. Each execution opens 2 positions (long + short hedge).");
         }
 
         return (true, null);

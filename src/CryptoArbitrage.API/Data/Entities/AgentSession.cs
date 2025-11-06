@@ -8,7 +8,7 @@ namespace CryptoArbitrage.API.Data.Entities;
 /// </summary>
 public class AgentSession
 {
-    public int Id { get; set; }
+    public Guid Id { get; set; }
 
     // Multi-user support
     [Required]
@@ -28,11 +28,26 @@ public class AgentSession
     // Error tracking
     public string? ErrorMessage { get; set; }
 
-    // Statistics (snapshot at session end)
-    public int TotalPredictions { get; set; }
-    public int TotalTrades { get; set; }
-    public decimal? FinalPnLUsd { get; set; }
-    public decimal? FinalPnLPct { get; set; }
+    // Session-only statistics (live-updated during session)
+    // Decision counts
+    public int HoldDecisions { get; set; }
+    public int EnterDecisions { get; set; }
+    public int ExitDecisions { get; set; }
+
+    // Trade outcomes
+    public int WinningTrades { get; set; }
+    public int LosingTrades { get; set; }
+
+    // P&L tracking
+    public decimal SessionPnLUsd { get; set; }
+    public decimal SessionPnLPct { get; set; }
+
+    // Position tracking
+    public int ActivePositions { get; set; }
+    public int MaxActivePositions { get; set; }
+
+    // Navigation properties
+    public ICollection<Position> Positions { get; set; } = new List<Position>();
 
     // Timestamps
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

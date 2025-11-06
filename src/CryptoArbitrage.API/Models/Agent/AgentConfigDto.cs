@@ -7,12 +7,15 @@ namespace CryptoArbitrage.API.Models.Agent;
 /// </summary>
 public class AgentConfigDto
 {
+    /// <summary>Maximum leverage per position (1-5x)</summary>
     [Range(1.0, 5.0)]
     public decimal MaxLeverage { get; set; } = 1.0m;
 
+    /// <summary>Target capital utilization (0.5-1.0 = 50%-100%)</summary>
     [Range(0.5, 1.0)]
     public decimal TargetUtilization { get; set; } = 0.9m;
 
+    /// <summary>Maximum concurrent executions (1-3). Each execution opens 2 positions (long + short hedge).</summary>
     [Range(1, 3)]
     public int MaxPositions { get; set; } = 3;
 

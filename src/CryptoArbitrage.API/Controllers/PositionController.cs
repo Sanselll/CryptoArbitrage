@@ -87,7 +87,11 @@ public class PositionController : BaseController
                     Quantity = p.Quantity,
                     Leverage = p.Leverage,
                     InitialMargin = p.InitialMargin,
-                    RealizedPnL = p.RealizedPnL,
+                    FundingEarnedUsd = p.FundingEarnedUsd,
+                    TradingFeesUsd = p.TradingFeesUsd,
+                    PricePnLUsd = p.PricePnLUsd,
+                    RealizedPnLUsd = p.RealizedPnLUsd,
+                    RealizedPnLPct = p.RealizedPnLPct,
                     UnrealizedPnL = p.UnrealizedPnL,
                     // Calculate fees from PositionTransaction (single source of truth)
                     TotalFundingFeePaid = positionTransactions
@@ -127,23 +131,7 @@ public class PositionController : BaseController
 
                     Logger.LogInformation("Received {Count} RL predictions from service", rlPredictions.Count);
 
-                    foreach (var pos in openPositions)
-                    {
-                        if (rlPredictions.TryGetValue(pos.Id, out var prediction))
-                        {
-                            pos.RLExitProbability = prediction.ActionProbability;
-                            pos.RLHoldProbability = prediction.HoldProbability;
-                            pos.RLConfidence = prediction.Confidence;
-                            pos.RLStateValue = prediction.StateValue;
-                            pos.RLModelVersion = prediction.ModelVersion;
-                            Logger.LogInformation("Enriched position {Id} with EXIT={Exit}%, HOLD={Hold}%",
-                                pos.Id, prediction.ActionProbability * 100, prediction.HoldProbability * 100);
-                        }
-                        else
-                        {
-                            Logger.LogWarning("No RL prediction returned for position {Id}", pos.Id);
-                        }
-                    }
+                    // RL prediction enrichment removed - fields no longer exist in PositionDto
 
                     Logger.LogInformation("Successfully enriched {Count} open positions with RL predictions", openPositions.Count);
                 }
@@ -205,7 +193,11 @@ public class PositionController : BaseController
                 Quantity = position.Quantity,
                 Leverage = position.Leverage,
                 InitialMargin = position.InitialMargin,
-                RealizedPnL = position.RealizedPnL,
+                FundingEarnedUsd = position.FundingEarnedUsd,
+                TradingFeesUsd = position.TradingFeesUsd,
+                PricePnLUsd = position.PricePnLUsd,
+                RealizedPnLUsd = position.RealizedPnLUsd,
+                RealizedPnLPct = position.RealizedPnLPct,
                 UnrealizedPnL = position.UnrealizedPnL,
                 // Calculate fees from PositionTransaction (single source of truth)
                 TotalFundingFeePaid = positionTransactions

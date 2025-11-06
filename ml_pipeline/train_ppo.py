@@ -42,24 +42,34 @@ def parse_args():
     # Environment
     parser.add_argument('--initial-capital', type=float, default=10000.0,
                         help='Initial capital in USD')
-    parser.add_argument('--episode-length-days', type=int, default=3,
+    parser.add_argument('--episode-length-days', type=int, default=7,
                         help='Episode length in days')
+    parser.add_argument('--step-minutes', type=int, default=5,
+                        help='Minutes per prediction step (default: 5 = 5-minute intervals)')
     parser.add_argument('--sample-random-config', action='store_true',
                         help='Sample random TradingConfig each episode for diversity')
 
     # Trading config (if not sampling random)
     parser.add_argument('--max-leverage', type=float, default=1.0,
                         help='Maximum leverage (1-10x)')
-    parser.add_argument('--target-utilization', type=float, default=0.6,
+    parser.add_argument('--target-utilization', type=float, default=0.9,
                         help='Target capital utilization (0-1)')
-    parser.add_argument('--max-positions', type=int, default=3,
+    parser.add_argument('--max-positions', type=int, default=5,
                         help='Maximum concurrent positions (1-5)')
 
     # Reward config (as per IMPLEMENTATION_PLAN.md)
-    parser.add_argument('--pnl-reward-scale', type=float, default=3.0,
-                        help='Scale for hourly P&L reward (Component 1)')
-    parser.add_argument('--entry-penalty-scale', type=float, default=3.0,
-                        help='Scale for entry fee penalty (Component 2)')
+    parser.add_argument('--pnl-reward-scale', type=float, default=2.0,
+                        help='Scale for hourly P&L reward (reduced to make switching competitive)')
+    parser.add_argument('--entry-penalty-scale', type=float, default=0.8,
+                        help='Scale for entry fee penalty (reduced to encourage entries)')
+    parser.add_argument('--exit-reward-scale', type=float, default=1.5,
+                        help='Scale for exit reward (increased to encourage exits)')
+    parser.add_argument('--inactivity-penalty-scale', type=float, default=1.0,
+                        help='Scale for inactivity penalty (increased for stronger penalty)')
+    parser.add_argument('--turnover-reward-scale', type=float, default=0.8,
+                        help='Scale for turnover reward (increased to encourage rotation)')
+    parser.add_argument('--opportunity-cost-scale', type=float, default=2.0,
+                        help='Scale for opportunity cost penalty when holding inferior positions')
     parser.add_argument('--liquidation-penalty-scale', type=float, default=20.0,
                         help='Scale for liquidation risk penalty (Component 3)')
     parser.add_argument('--stop-loss-penalty', type=float, default=-2.0,
@@ -104,6 +114,10 @@ def parse_args():
     parser.add_argument('--log-interval', type=int, default=10,
                         help='Log every N episodes')
 
+    # Reproducibility
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed for reproducible results (default: 42)')
+
     return parser.parse_args()
 
 
@@ -123,9 +137,16 @@ def create_environment(args, data_path: str, verbose: bool = True):
     reward_config = RewardConfig(
         pnl_reward_scale=args.pnl_reward_scale,
         entry_penalty_scale=args.entry_penalty_scale,
+        exit_reward_scale=args.exit_reward_scale,
+        inactivity_penalty_scale=args.inactivity_penalty_scale,
+        turnover_reward_scale=args.turnover_reward_scale,
+        opportunity_cost_scale=args.opportunity_cost_scale,
         liquidation_penalty_scale=args.liquidation_penalty_scale,
         stop_loss_penalty=args.stop_loss_penalty,
     )
+
+    # Convert step minutes to hours for the environment
+    step_hours = args.step_minutes / 60.0
 
     # Create environment
     env = FundingArbitrageEnv(
@@ -137,9 +158,15 @@ def create_environment(args, data_path: str, verbose: bool = True):
         reward_config=reward_config,
         sample_random_config=args.sample_random_config,
         episode_length_days=args.episode_length_days,
+        step_hours=step_hours,
         simple_mode=False,  # Always use full mode for training
         verbose=verbose,
     )
+
+    if verbose:
+        total_steps = int((args.episode_length_days * 24 * 60) / args.step_minutes)
+        print(f"Step interval: {args.step_minutes} minute(s) ({step_hours:.4f} hours)")
+        print(f"Episode: {args.episode_length_days} days = {total_steps} steps")
 
     return env
 
@@ -160,6 +187,10 @@ def evaluate(trainer, env, num_episodes: int = 5):
     max_drawdowns = []
     opportunities_seen = []
     trades_executed = []
+
+    # Profit factor metrics
+    all_winning_pnl = []
+    all_losing_pnl = []
 
     for _ in range(num_episodes):
         obs, info = env.reset()
@@ -221,12 +252,24 @@ def evaluate(trainer, env, num_episodes: int = 5):
         # Trades executed (total positions opened = currently open + closed)
         trades_executed.append(len(portfolio.positions) + len(portfolio.closed_positions))
 
+        # Collect P&L for profit factor calculation
+        for position in portfolio.closed_positions:
+            if position.realized_pnl_usd > 0:
+                all_winning_pnl.append(position.realized_pnl_usd)
+            else:
+                all_losing_pnl.append(abs(position.realized_pnl_usd))
+
     # Calculate aggregate statistics
     total_trades_sum = sum(num_trades)
     total_winning = sum(num_winning_trades)
     total_losing = sum(num_losing_trades)
 
     win_rate = (total_winning / total_trades_sum * 100) if total_trades_sum > 0 else 0.0
+
+    # Calculate profit factor (total wins / total losses)
+    total_wins = sum(all_winning_pnl) if all_winning_pnl else 0.0
+    total_losses = sum(all_losing_pnl) if all_losing_pnl else 0.001  # Avoid division by zero
+    profit_factor = total_wins / total_losses
 
     return {
         # Episode metrics
@@ -245,6 +288,7 @@ def evaluate(trainer, env, num_episodes: int = 5):
         'total_winning_trades': total_winning,
         'total_losing_trades': total_losing,
         'win_rate': win_rate,
+        'profit_factor': profit_factor,
 
         # Duration metrics
         'mean_trade_duration_hours': np.mean([d for d in avg_trade_durations if d > 0]) if any(avg_trade_durations) else 0.0,
@@ -260,6 +304,11 @@ def evaluate(trainer, env, num_episodes: int = 5):
 
 def train(args):
     """Main training loop."""
+    # Set random seed for reproducibility
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    print(f"🎲 Random seed: {args.seed}\n")
+
     # Create checkpoint directory
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -343,12 +392,19 @@ def train(args):
             print(f"\n{'='*80}")
             print(f"EVALUATION ON TEST SET (Episode {episode + 1})")
             print(f"{'='*80}")
-            eval_stats = evaluate(trainer, test_env, num_episodes=5)
+            eval_stats = evaluate(trainer, test_env, num_episodes=1)
 
             # Display comprehensive metrics
             print(f"\n📊 Episode Metrics:")
             print(f"  Mean Reward:     {eval_stats['mean_reward']:8.2f} ± {eval_stats['std_reward']:.2f}")
-            print(f"  Mean Length:     {eval_stats['mean_length']:8.1f} hours")
+
+            # Show length in appropriate unit
+            if args.step_minutes == 1:
+                print(f"  Mean Length:     {eval_stats['mean_length']:8.1f} minutes")
+            elif args.step_minutes == 60:
+                print(f"  Mean Length:     {eval_stats['mean_length']:8.1f} hours")
+            else:
+                print(f"  Mean Length:     {eval_stats['mean_length']:8.1f} steps ({args.step_minutes} min/step)")
 
             print(f"\n💰 P&L Metrics:")
             print(f"  Mean P&L (USD):  ${eval_stats['mean_pnl_usd']:8.2f}")
@@ -370,21 +426,31 @@ def train(args):
             print(f"\n⚠️  Risk Metrics:")
             print(f"  Max Drawdown:    {eval_stats['mean_max_drawdown_pct']:8.2f}%")
 
-            # Calculate composite score for model selection
-            # V6 FIX: Remove reward from composite (it's training signal, not goal)
-            # Weights: 50% P&L, 30% Win Rate, 20% Low Drawdown
-            pnl_score = eval_stats['mean_pnl_pct'] / 5.0  # Normalize: 5% P&L = 1.0
-            winrate_score = eval_stats['win_rate'] / 100.0  # Already 0-1
-            drawdown_score = 1.0 - (eval_stats['mean_max_drawdown_pct'] / 100.0)  # Lower is better
+            print(f"\n📊 Profitability Metrics:")
+            print(f"  Profit Factor:   {eval_stats['profit_factor']:8.2f}")
+
+            # Calculate composite score for model selection (IMPROVED VERSION)
+            # Weights: 50% P&L, 30% Profit Factor, 20% Low Drawdown
+
+            # 1. P&L Score: Bounded using tanh to prevent domination
+            #    tanh(x/5) maps: 5% → 0.76, 10% → 0.96, 20% → 0.999
+            pnl_score = np.tanh(eval_stats['mean_pnl_pct'] / 5.0)
+
+            # 2. Profit Factor Score: Normalize (2.0 = 1.0, capped at 1.0)
+            #    Profit Factor > 2.0 is excellent, > 1.5 is good
+            profit_factor_score = min(eval_stats['profit_factor'] / 2.0, 1.0)
+
+            # 3. Drawdown Score: Lower is better, floored at 0.0
+            drawdown_score = max(0.0, 1.0 - (eval_stats['mean_max_drawdown_pct'] / 100.0))
 
             composite_score = (
                 0.50 * pnl_score +
-                0.30 * winrate_score +
+                0.30 * profit_factor_score +
                 0.20 * drawdown_score
             )
 
             print(f"\n🎯 Composite Score: {composite_score:.4f}")
-            print(f"   (P&L: {pnl_score:.3f} | WinRate: {winrate_score:.3f} | Drawdown: {drawdown_score:.3f})")
+            print(f"   (P&L: {pnl_score:.3f} | ProfitFactor: {profit_factor_score:.3f} | Drawdown: {drawdown_score:.3f})")
             print()
 
             # Save best model based on composite score

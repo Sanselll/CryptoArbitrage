@@ -306,8 +306,7 @@ public class OpportunityAggregator : IHostedService
 
             // Group positions by execution to find pairs
             var positionGroups = openPositions
-                .Where(p => p.ExecutionId.HasValue)
-                .GroupBy(p => p.ExecutionId!.Value)
+                .GroupBy(p => p.ExecutionId)
                 .ToList();
 
             foreach (var group in positionGroups)
@@ -381,18 +380,7 @@ public class OpportunityAggregator : IHostedService
                 opportunities,
                 portfolioState);
 
-            // Attach predictions to opportunities
-            foreach (var opp in opportunities)
-            {
-                if (predictions.TryGetValue(opp.UniqueKey, out var prediction))
-                {
-                    opp.RLEnterProbability = prediction.ActionProbability;
-                    opp.RLHoldProbability = prediction.HoldProbability;
-                    opp.RLConfidence = prediction.Confidence;
-                    opp.RLStateValue = prediction.StateValue;
-                    opp.RLModelVersion = prediction.ModelVersion;
-                }
-            }
+            // RL prediction enrichment removed - fields no longer exist in ArbitrageOpportunityDto
 
             _logger.LogInformation(
                 "Enriched {Count} opportunities with RL predictions",
@@ -423,7 +411,7 @@ public class OpportunityAggregator : IHostedService
 
             // Calculate portfolio metrics
             decimal totalCapital = 10000m; // Default initial capital
-            decimal totalPnL = openPositions.Sum(p => p.RealizedPnL + p.UnrealizedPnL);
+            decimal totalPnL = openPositions.Sum(p => p.RealizedPnLUsd + p.UnrealizedPnL);
             decimal totalMargin = openPositions.Sum(p => p.InitialMargin);
 
             var portfolioState = new RLPortfolioState

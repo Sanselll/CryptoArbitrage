@@ -66,11 +66,12 @@ namespace CryptoArbitrage.API.Migrations
 
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentSession", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("uuid");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    b.Property<int>("ActivePositions")
+                        .HasColumnType("integer");
 
                     b.Property<int>("AgentConfigurationId")
                         .HasColumnType("integer");
@@ -78,75 +79,11 @@ namespace CryptoArbitrage.API.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("text");
-
-                    b.Property<decimal?>("FinalPnLPct")
-                        .HasPrecision(18, 8)
-                        .HasColumnType("numeric(18,8)");
-
-                    b.Property<decimal?>("FinalPnLUsd")
-                        .HasPrecision(18, 8)
-                        .HasColumnType("numeric(18,8)");
-
-                    b.Property<DateTime?>("PausedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("StartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("StoppedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("TotalPredictions")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("TotalTrades")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AgentConfigurationId");
-
-                    b.HasIndex("StartedAt");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("UserId", "Status");
-
-                    b.ToTable("AgentSessions");
-                });
-
-            modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentStats", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ActivePositions")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("AgentSessionId")
-                        .HasColumnType("integer");
-
-                    b.Property<decimal>("AveragePositionDurationHours")
-                        .HasPrecision(18, 8)
-                        .HasColumnType("numeric(18,8)");
-
                     b.Property<int>("EnterDecisions")
                         .HasColumnType("integer");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
 
                     b.Property<int>("ExitDecisions")
                         .HasColumnType("integer");
@@ -160,34 +97,25 @@ namespace CryptoArbitrage.API.Migrations
                     b.Property<int>("MaxActivePositions")
                         .HasColumnType("integer");
 
-                    b.Property<decimal>("MaxDrawdownPct")
-                        .HasPrecision(18, 8)
-                        .HasColumnType("numeric(18,8)");
-
-                    b.Property<DateTime>("StatsPeriodStart")
+                    b.Property<DateTime?>("PausedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<decimal>("TodayPnLPct")
+                    b.Property<decimal>("SessionPnLPct")
                         .HasPrecision(18, 8)
                         .HasColumnType("numeric(18,8)");
 
-                    b.Property<decimal>("TodayPnLUsd")
+                    b.Property<decimal>("SessionPnLUsd")
                         .HasPrecision(18, 8)
                         .HasColumnType("numeric(18,8)");
 
-                    b.Property<int>("TotalDecisions")
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
                         .HasColumnType("integer");
 
-                    b.Property<decimal>("TotalPnLPct")
-                        .HasPrecision(18, 8)
-                        .HasColumnType("numeric(18,8)");
-
-                    b.Property<decimal>("TotalPnLUsd")
-                        .HasPrecision(18, 8)
-                        .HasColumnType("numeric(18,8)");
-
-                    b.Property<int>("TotalTrades")
-                        .HasColumnType("integer");
+                    b.Property<DateTime?>("StoppedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -196,20 +124,20 @@ namespace CryptoArbitrage.API.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<decimal>("WinRate")
-                        .HasPrecision(5, 2)
-                        .HasColumnType("numeric(5,2)");
-
                     b.Property<int>("WinningTrades")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AgentSessionId");
+                    b.HasIndex("AgentConfigurationId");
+
+                    b.HasIndex("StartedAt");
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("AgentStats");
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("AgentSessions");
                 });
 
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.ApplicationUser", b =>
@@ -302,6 +230,9 @@ namespace CryptoArbitrage.API.Migrations
                         .HasPrecision(18, 8)
                         .HasColumnType("numeric(18,8)");
 
+                    b.Property<string>("LongExchange")
+                        .HasColumnType("text");
+
                     b.Property<string>("PerpOrderId")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -309,6 +240,9 @@ namespace CryptoArbitrage.API.Migrations
                     b.Property<decimal>("PositionSizeUsd")
                         .HasPrecision(18, 8)
                         .HasColumnType("numeric(18,8)");
+
+                    b.Property<string>("ShortExchange")
+                        .HasColumnType("text");
 
                     b.Property<string>("SpotOrderId")
                         .HasMaxLength(100)
@@ -322,6 +256,12 @@ namespace CryptoArbitrage.API.Migrations
 
                     b.Property<DateTime?>("StoppedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Strategy")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SubType")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Symbol")
                         .IsRequired()
@@ -432,6 +372,9 @@ namespace CryptoArbitrage.API.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<Guid?>("AgentSessionId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("CloseOrderId")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -451,10 +394,14 @@ namespace CryptoArbitrage.API.Migrations
                     b.Property<string>("ExchangePositionId")
                         .HasColumnType("text");
 
-                    b.Property<int?>("ExecutionId")
+                    b.Property<int>("ExecutionId")
                         .HasColumnType("integer");
 
                     b.Property<decimal?>("ExitPrice")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<decimal>("FundingEarnedUsd")
                         .HasPrecision(18, 8)
                         .HasColumnType("numeric(18,8)");
 
@@ -476,11 +423,19 @@ namespace CryptoArbitrage.API.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<decimal>("PricePnLUsd")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 8)
                         .HasColumnType("numeric(18,8)");
 
-                    b.Property<decimal>("RealizedPnL")
+                    b.Property<decimal>("RealizedPnLPct")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<decimal>("RealizedPnLUsd")
                         .HasPrecision(18, 8)
                         .HasColumnType("numeric(18,8)");
 
@@ -501,6 +456,10 @@ namespace CryptoArbitrage.API.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<decimal>("TradingFeesUsd")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
                     b.Property<int>("Type")
                         .HasColumnType("integer");
 
@@ -513,6 +472,8 @@ namespace CryptoArbitrage.API.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AgentSessionId");
 
                     b.HasIndex("UserId");
 
@@ -804,24 +765,6 @@ namespace CryptoArbitrage.API.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentStats", b =>
-                {
-                    b.HasOne("CryptoArbitrage.API.Data.Entities.AgentSession", "AgentSession")
-                        .WithMany()
-                        .HasForeignKey("AgentSessionId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("CryptoArbitrage.API.Data.Entities.ApplicationUser", "User")
-                        .WithMany("AgentStats")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AgentSession");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.Execution", b =>
                 {
                     b.HasOne("CryptoArbitrage.API.Data.Entities.ApplicationUser", "User")
@@ -846,16 +789,24 @@ namespace CryptoArbitrage.API.Migrations
 
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.Position", b =>
                 {
+                    b.HasOne("CryptoArbitrage.API.Data.Entities.AgentSession", "AgentSession")
+                        .WithMany("Positions")
+                        .HasForeignKey("AgentSessionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("CryptoArbitrage.API.Data.Entities.Execution", "Execution")
                         .WithMany()
                         .HasForeignKey("ExecutionId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .IsRequired();
 
                     b.HasOne("CryptoArbitrage.API.Data.Entities.ApplicationUser", "User")
                         .WithMany("Positions")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("AgentSession");
 
                     b.Navigation("Execution");
 
@@ -935,13 +886,16 @@ namespace CryptoArbitrage.API.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.AgentSession", b =>
+                {
+                    b.Navigation("Positions");
+                });
+
             modelBuilder.Entity("CryptoArbitrage.API.Data.Entities.ApplicationUser", b =>
                 {
                     b.Navigation("AgentConfigurations");
 
                     b.Navigation("AgentSessions");
-
-                    b.Navigation("AgentStats");
 
                     b.Navigation("ExchangeApiKeys");
 

@@ -50,8 +50,11 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
     ? (opportunity.fundingRate || 0)
     : ((opportunity.longFundingRate || 0) - (opportunity.shortFundingRate || 0));
 
-  // Calculate estimated 8h earnings: position size * funding rate
-  const estimated8hEarnings = positionSize * Math.abs(effectiveFundingRate);
+  // Calculate estimated 8h earnings based on notional value
+  // For spot-perp: positionSize = spot capital ≈ notional (assuming spot price ≈ perp price)
+  // For cross-exchange: notional = positionSize (total margin) * leverage
+  const notionalValue = isCrossFutures ? positionSize * leverage : positionSize;
+  const estimated8hEarnings = notionalValue * Math.abs(effectiveFundingRate);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,31 +80,33 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
   const secondaryBalance = isCrossFutures ? getExchangeBalance(secondaryExchange) : null;
 
   // Calculate requirements based on strategy
-  const requiredSpot = isSpotPerp ? positionSize : 0;
-  const requiredMargin = positionSize / leverage;
+  // NOTE: positionSize now represents MARGIN/CAPITAL to use (not notional)
+  const requiredSpot = isSpotPerp ? positionSize : 0; // Spot capital for spot-perp
+  const requiredPerpMargin = isSpotPerp ? positionSize / leverage : 0; // Approx perp margin (assuming spot ≈ perp price)
+  const requiredMarginPerExchange = isCrossFutures ? positionSize / 2 : 0; // For cross-exchange: split total margin between two exchanges
 
-  // For spot-perp: need both spot and futures margin
-  // For cross-futures: only need futures margin on both exchanges
+  // For spot-perp: need both spot capital and futures margin
+  // For cross-exchange: need futures margin on both exchanges
   let canExecute = false;
   let balanceMessage = '';
 
   if (isSpotPerp && primaryBalance) {
     const spotSufficient = primaryBalance.spotAvailableUsd >= requiredSpot;
-    const marginSufficient = primaryBalance.futuresAvailableUsd >= requiredMargin;
+    const marginSufficient = primaryBalance.futuresAvailableUsd >= requiredPerpMargin;
     canExecute = spotSufficient && marginSufficient;
     if (!canExecute) {
       balanceMessage = !spotSufficient
         ? `Insufficient spot USDT (need $${requiredSpot.toFixed(2)})`
-        : `Insufficient futures margin (need $${requiredMargin.toFixed(2)})`;
+        : `Insufficient futures margin (need $${requiredPerpMargin.toFixed(2)})`;
     }
   } else if (isCrossFutures && primaryBalance && secondaryBalance) {
-    const longSufficient = primaryBalance.futuresAvailableUsd >= requiredMargin;
-    const shortSufficient = secondaryBalance.futuresAvailableUsd >= requiredMargin;
+    const longSufficient = primaryBalance.futuresAvailableUsd >= requiredMarginPerExchange;
+    const shortSufficient = secondaryBalance.futuresAvailableUsd >= requiredMarginPerExchange;
     canExecute = longSufficient && shortSufficient;
     if (!canExecute) {
       balanceMessage = !longSufficient
-        ? `Insufficient ${primaryExchange} futures (need $${requiredMargin.toFixed(2)})`
-        : `Insufficient ${secondaryExchange} futures (need $${requiredMargin.toFixed(2)})`;
+        ? `Insufficient ${primaryExchange} futures (need $${requiredMarginPerExchange.toFixed(2)})`
+        : `Insufficient ${secondaryExchange} futures (need $${requiredMarginPerExchange.toFixed(2)})`;
     }
   }
 
@@ -193,7 +198,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
                     <ExchangeBadge exchange={primaryExchange} size="small" />
                     <span className="text-[8px] text-binance-text-secondary">Futures</span>
                   </div>
-                  <p className={`font-mono font-bold ${primaryBalance.futuresAvailableUsd >= requiredMargin ? 'text-binance-green' : 'text-binance-red'}`}>
+                  <p className={`font-mono font-bold ${primaryBalance.futuresAvailableUsd >= requiredPerpMargin ? 'text-binance-green' : 'text-binance-red'}`}>
                     ${primaryBalance.futuresAvailableUsd.toFixed(2)}
                   </p>
                 </div>
@@ -208,7 +213,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
                     <ExchangeBadge exchange={primaryExchange} size="small" />
                     <span className="text-[8px] text-binance-text-secondary">Futures</span>
                   </div>
-                  <p className={`font-mono font-bold ${primaryBalance.futuresAvailableUsd >= requiredMargin ? 'text-binance-green' : 'text-binance-red'}`}>
+                  <p className={`font-mono font-bold ${primaryBalance.futuresAvailableUsd >= requiredMarginPerExchange ? 'text-binance-green' : 'text-binance-red'}`}>
                     ${primaryBalance.futuresAvailableUsd.toFixed(2)}
                   </p>
                 </div>
@@ -217,7 +222,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
                     <ExchangeBadge exchange={secondaryExchange} size="small" />
                     <span className="text-[8px] text-binance-text-secondary">Futures</span>
                   </div>
-                  <p className={`font-mono font-bold ${secondaryBalance.futuresAvailableUsd >= requiredMargin ? 'text-binance-green' : 'text-binance-red'}`}>
+                  <p className={`font-mono font-bold ${secondaryBalance.futuresAvailableUsd >= requiredMarginPerExchange ? 'text-binance-green' : 'text-binance-red'}`}>
                     ${secondaryBalance.futuresAvailableUsd.toFixed(2)}
                   </p>
                 </div>
@@ -239,7 +244,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
           <div>
             <label className="flex items-center gap-1 text-[11px] font-semibold text-binance-text mb-1">
               <DollarSign className="w-3 h-3 text-binance-yellow" />
-              Position Size (USD)
+              {isCrossFutures ? 'Total Margin (USD)' : 'Capital (USD)'}
             </label>
             <input
               type="text"
@@ -305,7 +310,7 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
             />
             <div className="flex justify-between text-[10px] text-binance-text-secondary mt-0.5">
               <span>1x</span>
-              <span>Margin: ${requiredMargin.toFixed(2)}</span>
+              <span>Notional: ${notionalValue.toFixed(2)}</span>
               <span>5x</span>
             </div>
           </div>
@@ -315,31 +320,31 @@ export const ExecuteDialog = ({ isOpen, onClose, onExecute, opportunity, isExecu
             {isSpotPerp ? (
               <>
                 <div className="flex justify-between">
-                  <span className="text-binance-text-secondary">Spot Purchase:</span>
+                  <span className="text-binance-text-secondary">Spot Capital:</span>
                   <span className="font-mono font-bold text-binance-text">${requiredSpot.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-binance-text-secondary">Perp Margin:</span>
-                  <span className="font-mono font-bold text-binance-text">${requiredMargin.toFixed(2)}</span>
+                  <span className="text-binance-text-secondary">Perp Margin (approx):</span>
+                  <span className="font-mono font-bold text-binance-text">${requiredPerpMargin.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between border-t border-binance-border pt-1">
                   <span className="text-binance-text">Total Required:</span>
-                  <span className="font-mono font-bold text-binance-text">${(requiredSpot + requiredMargin).toFixed(2)}</span>
+                  <span className="font-mono font-bold text-binance-text">${(requiredSpot + requiredPerpMargin).toFixed(2)}</span>
                 </div>
               </>
             ) : (
               <>
                 <div className="flex justify-between">
                   <span className="text-binance-text-secondary">{primaryExchange} Margin:</span>
-                  <span className="font-mono font-bold text-binance-text">${requiredMargin.toFixed(2)}</span>
+                  <span className="font-mono font-bold text-binance-text">${requiredMarginPerExchange.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-binance-text-secondary">{secondaryExchange} Margin:</span>
-                  <span className="font-mono font-bold text-binance-text">${requiredMargin.toFixed(2)}</span>
+                  <span className="font-mono font-bold text-binance-text">${requiredMarginPerExchange.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between border-t border-binance-border pt-1">
                   <span className="text-binance-text">Total Margin:</span>
-                  <span className="font-mono font-bold text-binance-text">${(requiredMargin * 2).toFixed(2)}</span>
+                  <span className="font-mono font-bold text-binance-text">${positionSize.toFixed(2)}</span>
                 </div>
               </>
             )}

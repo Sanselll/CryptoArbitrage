@@ -788,7 +788,11 @@ public class BybitConnector : IExchangeConnector
                             Quantity = p.Quantity,
                             Leverage = p.Leverage ?? 1,
                             UnrealizedPnL = unrealizedPnl,
-                            RealizedPnL = 0, // Realized P&L not available in position list API
+                            FundingEarnedUsd = 0,
+                TradingFeesUsd = 0,
+                PricePnLUsd = 0,
+                RealizedPnLUsd = 0,
+                RealizedPnLPct = 0, // Realized P&L not available in position list API
                             OpenedAt = p.CreateTime ?? DateTime.UtcNow
                         };
                     })

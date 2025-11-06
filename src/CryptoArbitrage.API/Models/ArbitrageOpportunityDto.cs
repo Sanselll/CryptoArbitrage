@@ -95,13 +95,6 @@ public class ArbitrageOpportunityDto
     // Position tracking
     public bool IsExistingPosition { get; set; } = false;  // true if this represents an open position
 
-    // RL Predictions (Reinforcement Learning)
-    public float? RLEnterProbability { get; set; }              // RL model probability of ENTER action (0-1)
-    public float? RLHoldProbability { get; set; }               // RL model probability of HOLD action (0-1)
-    public string? RLConfidence { get; set; }                   // RL prediction confidence: HIGH/MEDIUM/LOW
-    public float? RLStateValue { get; set; }                    // RL state value estimate
-    public string? RLModelVersion { get; set; }                 // RL model version used
-
     // Computed unique key for frontend tracking (not stored in DB)
     public string UniqueKey => Strategy == ArbitrageStrategy.SpotPerpetual
         ? $"{Symbol}-{Exchange}-{SubType}"

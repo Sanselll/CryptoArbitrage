@@ -109,19 +109,16 @@ public class SnapshotGenerator
             var entryVolume = opportunity.Volume24h;
             var volumeChangeRatio = entryVolume > 0 ? checkpoint.Volume24h / entryVolume : 1m;
 
-            // Calculate position maturity
-            var positionMaturity = opportunity.MLPredictedDurationHours.HasValue && opportunity.MLPredictedDurationHours.Value > 0
-                ? timeInPositionHours / opportunity.MLPredictedDurationHours.Value
-                : (decimal?)null;
+            // Calculate position maturity (ML prediction fields removed, using null)
+            decimal? positionMaturity = null;
 
             // Calculate hold efficiency
             var holdEfficiency = timeInPositionHours > 0
                 ? checkpoint.UnrealizedPnLPercent / timeInPositionHours
                 : 0m;
 
-            // Check if optimal time reached
-            var optimalTimeReached = opportunity.MLPredictedDurationHours.HasValue
-                && timeInPositionHours >= opportunity.MLPredictedDurationHours.Value;
+            // Check if optimal time reached (ML prediction fields removed, always false)
+            var optimalTimeReached = false;
 
             // Calculate hours until optimal exit
             var hoursUntilExit = i < optimalExitIndex
@@ -174,10 +171,10 @@ public class SnapshotGenerator
                 EntryBidAskSpreadPercent = opportunity.BidAskSpreadPercent,
                 EntryOrderbookDepthUsd = opportunity.OrderbookDepthUsd,
 
-                // ML predictions at entry (static)
-                MLPredictedProfitPercent = opportunity.MLPredictedProfitPercent,
-                MLPredictedSuccessProbability = opportunity.MLSuccessProbability,
-                MLPredictedDurationHours = opportunity.MLPredictedDurationHours,
+                // ML predictions at entry (fields removed from DTO)
+                MLPredictedProfitPercent = null,
+                MLPredictedSuccessProbability = null,
+                MLPredictedDurationHours = null,
 
                 // Dynamic features (current position state)
                 TimeInPositionHours = timeInPositionHours,

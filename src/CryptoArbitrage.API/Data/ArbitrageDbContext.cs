@@ -20,7 +20,6 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
     // Agent tables
     public DbSet<AgentConfiguration> AgentConfigurations { get; set; }
     public DbSet<AgentSession> AgentSessions { get; set; }
-    public DbSet<AgentStats> AgentStats { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -74,7 +73,11 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(e => e.Quantity).HasPrecision(18, 8);
             entity.Property(e => e.Leverage).HasPrecision(5, 2);
             entity.Property(e => e.InitialMargin).HasPrecision(18, 8);
-            entity.Property(e => e.RealizedPnL).HasPrecision(18, 8);
+            entity.Property(e => e.FundingEarnedUsd).HasPrecision(18, 8);
+            entity.Property(e => e.TradingFeesUsd).HasPrecision(18, 8);
+            entity.Property(e => e.PricePnLUsd).HasPrecision(18, 8);
+            entity.Property(e => e.RealizedPnLUsd).HasPrecision(18, 8);
+            entity.Property(e => e.RealizedPnLPct).HasPrecision(18, 8);
             entity.Property(e => e.UnrealizedPnL).HasPrecision(18, 8);
             entity.Property(e => e.OrderId).HasMaxLength(100);
             entity.Property(e => e.CloseOrderId).HasMaxLength(100);
@@ -96,6 +99,12 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
                 .WithOne(t => t.Position)
                 .HasForeignKey(t => t.PositionId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Optional foreign key to AgentSession (nullable - null for manual trades)
+            entity.HasOne(e => e.AgentSession)
+                .WithMany(s => s.Positions)
+                .HasForeignKey(e => e.AgentSessionId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // PositionTransaction configuration
@@ -177,8 +186,8 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
             entity.HasIndex(e => new { e.UserId, e.Status });
             entity.HasIndex(e => e.StartedAt);
 
-            entity.Property(e => e.FinalPnLUsd).HasPrecision(18, 8);
-            entity.Property(e => e.FinalPnLPct).HasPrecision(18, 8);
+            entity.Property(e => e.SessionPnLUsd).HasPrecision(18, 8);
+            entity.Property(e => e.SessionPnLPct).HasPrecision(18, 8);
 
             // One-to-many relationship with ApplicationUser
             entity.HasOne(e => e.User)
@@ -193,32 +202,5 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
                 .OnDelete(DeleteBehavior.Restrict);  // Don't delete config if sessions exist
         });
 
-        // AgentStats
-        modelBuilder.Entity<AgentStats>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.UserId);
-            entity.HasIndex(e => e.AgentSessionId);
-
-            entity.Property(e => e.WinRate).HasPrecision(5, 2);
-            entity.Property(e => e.TotalPnLUsd).HasPrecision(18, 8);
-            entity.Property(e => e.TotalPnLPct).HasPrecision(18, 8);
-            entity.Property(e => e.TodayPnLUsd).HasPrecision(18, 8);
-            entity.Property(e => e.TodayPnLPct).HasPrecision(18, 8);
-            entity.Property(e => e.MaxDrawdownPct).HasPrecision(18, 8);
-            entity.Property(e => e.AveragePositionDurationHours).HasPrecision(18, 8);
-
-            // One-to-many relationship with ApplicationUser
-            entity.HasOne(e => e.User)
-                .WithMany(u => u.AgentStats)
-                .HasForeignKey(e => e.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Many-to-one relationship with AgentSession (nullable)
-            entity.HasOne(e => e.AgentSession)
-                .WithMany()
-                .HasForeignKey(e => e.AgentSessionId)
-                .OnDelete(DeleteBehavior.SetNull);
-        });
     }
 }

@@ -59,18 +59,17 @@ interface AgentConfig {
 
 interface AgentStats {
   totalDecisions: number;
-  holdDecisions?: number;
-  enterDecisions?: number;
-  exitDecisions?: number;
+  holdDecisions: number;
+  enterDecisions: number;
+  exitDecisions: number;
   totalTrades: number;
-  winningTrades?: number;
-  losingTrades?: number;
+  winningTrades: number;
+  losingTrades: number;
   winRate: number;
-  totalPnLUsd: number;
-  totalPnLPct: number;
-  todayPnLUsd: number;
-  todayPnLPct: number;
+  sessionPnLUsd: number;
+  sessionPnLPct: number;
   activePositions: number;
+  maxActivePositions: number;
 }
 
 interface AgentStatus {

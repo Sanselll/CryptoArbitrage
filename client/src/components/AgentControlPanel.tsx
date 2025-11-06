@@ -13,10 +13,12 @@ export function AgentControlPanel() {
   const setAgentConfig = useArbitrageStore((state) => state.setAgentConfig);
   const addAgentDecision = useArbitrageStore((state) => state.addAgentDecision);
   const [isLoading, setIsLoading] = useState(false);
+  const [realtimeDuration, setRealtimeDuration] = useState(0);
   const [config, setConfig] = useState({
     maxLeverage: 1.0,
     targetUtilization: 0.9,
     maxPositions: 3,
+    predictionIntervalSeconds: 3600, // 1 hour to match training environment
   });
 
   // Fetch agent config and status on mount
@@ -31,6 +33,7 @@ export function AgentControlPanel() {
           maxLeverage: configData.maxLeverage,
           targetUtilization: configData.targetUtilization,
           maxPositions: configData.maxPositions,
+          predictionIntervalSeconds: configData.predictionIntervalSeconds,
         });
 
         // Update Zustand store with fetched status
@@ -62,6 +65,26 @@ export function AgentControlPanel() {
       unsubscribe();
     };
   }, [addAgentDecision]);
+
+  // Sync realtime duration with backend updates
+  useEffect(() => {
+    if (agent.durationSeconds !== undefined) {
+      setRealtimeDuration(agent.durationSeconds);
+    }
+  }, [agent.durationSeconds]);
+
+  // Realtime timer - increment duration every second when agent is running
+  useEffect(() => {
+    if (agent.status !== 'running') {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setRealtimeDuration((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [agent.status]);
 
   const handleStart = async () => {
     setIsLoading(true);
@@ -138,6 +161,7 @@ export function AgentControlPanel() {
         maxLeverage: updatedConfig.maxLeverage,
         targetUtilization: updatedConfig.targetUtilization,
         maxPositions: updatedConfig.maxPositions,
+        predictionIntervalSeconds: updatedConfig.predictionIntervalSeconds,
       });
     } catch (error: any) {
       console.error('Error updating config:', error);
@@ -191,11 +215,11 @@ export function AgentControlPanel() {
                 </span>
               </div>
 
-              {agent.durationSeconds !== undefined && agent.durationSeconds > 0 && (
+              {realtimeDuration > 0 && (
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-binance-text-secondary">Running:</span>
                   <span className="text-sm text-binance-text">
-                    {formatDuration(agent.durationSeconds)}
+                    {formatDuration(realtimeDuration)}
                   </span>
                 </div>
               )}
@@ -211,42 +235,32 @@ export function AgentControlPanel() {
             {agent.stats && (
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-binance-bg rounded-lg p-3">
-                  <div className="text-xs text-binance-text-secondary">Total P&L</div>
-                  <div className={`text-lg font-bold ${agent.stats.totalPnLUsd >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
-                    ${agent.stats.totalPnLUsd.toFixed(2)}
+                  <div className="text-xs text-binance-text-secondary">Session P&L</div>
+                  <div className={`text-lg font-bold ${(agent.stats.sessionPnLUsd ?? 0) >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
+                    ${(agent.stats.sessionPnLUsd ?? 0).toFixed(2)}
                   </div>
-                  <div className={`text-xs ${agent.stats.totalPnLPct >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
-                    {agent.stats.totalPnLPct >= 0 ? '+' : ''}{agent.stats.totalPnLPct.toFixed(2)}%
-                  </div>
-                </div>
-
-                <div className="bg-binance-bg rounded-lg p-3">
-                  <div className="text-xs text-binance-text-secondary">Today P&L</div>
-                  <div className={`text-lg font-bold ${agent.stats.todayPnLUsd >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
-                    ${agent.stats.todayPnLUsd.toFixed(2)}
-                  </div>
-                  <div className={`text-xs ${agent.stats.todayPnLPct >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
-                    {agent.stats.todayPnLPct >= 0 ? '+' : ''}{agent.stats.todayPnLPct.toFixed(2)}%
+                  <div className={`text-xs ${(agent.stats.sessionPnLPct ?? 0) >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
+                    {(agent.stats.sessionPnLPct ?? 0) >= 0 ? '+' : ''}{(agent.stats.sessionPnLPct ?? 0).toFixed(2)}%
                   </div>
                 </div>
 
                 <div className="bg-binance-bg rounded-lg p-3">
                   <div className="text-xs text-binance-text-secondary">Win Rate</div>
                   <div className="text-lg font-bold text-binance-text">
-                    {agent.stats.winRate.toFixed(1)}%
+                    {(agent.stats.winRate ?? 0).toFixed(1)}%
                   </div>
                   <div className="text-xs text-binance-text-secondary">
-                    {agent.stats.winningTrades || 0}W / {agent.stats.losingTrades || 0}L
+                    {agent.stats.winningTrades ?? 0}W / {agent.stats.losingTrades ?? 0}L
                   </div>
                 </div>
 
                 <div className="bg-binance-bg rounded-lg p-3">
                   <div className="text-xs text-binance-text-secondary">Trades</div>
                   <div className="text-lg font-bold text-binance-text">
-                    {agent.stats.totalTrades}
+                    {agent.stats.totalTrades ?? 0}
                   </div>
                   <div className="text-xs text-binance-text-secondary">
-                    {agent.stats.activePositions} active
+                    {agent.stats.activePositions ?? 0} active
                   </div>
                 </div>
 
@@ -254,13 +268,13 @@ export function AgentControlPanel() {
                   <div className="text-xs text-binance-text-secondary mb-1">Decisions</div>
                   <div className="flex justify-between text-xs">
                     <span className="text-binance-text-secondary">
-                      Hold: {agent.stats.holdDecisions || 0}
+                      Hold: {agent.stats.holdDecisions ?? 0}
                     </span>
                     <span className="text-binance-green">
-                      Enter: {agent.stats.enterDecisions || 0}
+                      Enter: {agent.stats.enterDecisions ?? 0}
                     </span>
                     <span className="text-binance-red">
-                      Exit: {agent.stats.exitDecisions || 0}
+                      Exit: {agent.stats.exitDecisions ?? 0}
                     </span>
                   </div>
                 </div>

@@ -218,11 +218,14 @@ public class ArbitrageExecutionService
     /// </summary>
     private async Task<BalanceValidationResult> ValidateBalanceForSpotPerpetualAsync(ExecuteOpportunityRequest request)
     {
+        // NOTE: PositionSizeUsd represents SPOT CAPITAL/MARGIN to use
+        // Spot leg uses full PositionSizeUsd (spot has no leverage)
+        // Perp leg shorts same notional ≈ PositionSizeUsd (if prices similar), requiring PositionSizeUsd/leverage margin
         var result = new BalanceValidationResult
         {
             Exchange = request.Exchange,
-            RequiredSpotUsdt = request.PositionSizeUsd,
-            RequiredFuturesMargin = request.PositionSizeUsd / request.Leverage,
+            RequiredSpotUsdt = request.PositionSizeUsd,  // Spot capital
+            RequiredFuturesMargin = request.PositionSizeUsd / request.Leverage,  // Approx perp margin (assuming spot price ≈ perp price)
             TotalRequired = request.PositionSizeUsd + (request.PositionSizeUsd / request.Leverage)
         };
 
@@ -294,12 +297,14 @@ public class ArbitrageExecutionService
     /// </summary>
     private async Task<BalanceValidationResult> ValidateBalanceForCrossExchangeAsync(ExecuteOpportunityRequest request)
     {
+        // NOTE: PositionSizeUsd now represents total margin/capital to use
+        // Split equally between long and short exchanges
         var result = new BalanceValidationResult
         {
             LongExchange = request.LongExchange,
             ShortExchange = request.ShortExchange,
-            RequiredFuturesMargin = request.PositionSizeUsd / request.Leverage,
-            TotalRequired = (request.PositionSizeUsd / request.Leverage) * 2 // Both exchanges need margin
+            RequiredFuturesMargin = request.PositionSizeUsd / 2,  // Half of total margin per leg
+            TotalRequired = request.PositionSizeUsd  // Total margin/capital to use
         };
 
         try
@@ -426,8 +431,16 @@ public class ArbitrageExecutionService
             // CRITICAL: Both legs MUST use EXACTLY the same quantity to maintain a proper hedge
 
             // Step 1: Calculate base quantity from position size and spot price
-            // PositionSizeUsd is the amount to invest in coins (same coin quantity on both spot and perpetual)
-            var baseQuantity = request.PositionSizeUsd / spotPrice;
+            // NOTE: PositionSizeUsd represents SPOT CAPITAL to use (spot has no leverage)
+            // Perp will match the same notional value with leverage applied
+            var spotCapital = request.PositionSizeUsd;
+            var baseQuantity = spotCapital / spotPrice;
+            var perpNotional = baseQuantity * perpPrice;  // Perp matches spot notional
+            var perpMargin = perpNotional / request.Leverage;  // Margin needed for perp
+
+            _logger.LogInformation(
+                "Spot-Perp position sizing for {Symbol}: SpotCapital=${SpotCapital}, Quantity={Quantity}, PerpNotional=${PerpNotional}, PerpMargin=${PerpMargin}, Leverage={Leverage}x, TotalCapitalNeeded=${Total}",
+                request.Symbol, spotCapital, baseQuantity, perpNotional, perpMargin, request.Leverage, spotCapital + perpMargin);
 
             // Step 2: Get instrument info for BOTH spot and perpetual to validate quantity
             decimal finalQuantity;
@@ -543,7 +556,12 @@ public class ArbitrageExecutionService
                 FundingEarned = 0,
                 PositionSizeUsd = request.PositionSizeUsd,
                 SpotOrderId = spotOrderId,
-                PerpOrderId = perpOrderId
+                PerpOrderId = perpOrderId,
+                // Strategy metadata for ML context
+                Strategy = ArbitrageStrategy.SpotPerpetual,
+                SubType = StrategySubType.SpotPerpetualSameExchange,
+                LongExchange = null,  // Not applicable for same-exchange
+                ShortExchange = null  // Not applicable for same-exchange
             };
 
             _dbContext.Executions.Add(execution);
@@ -571,8 +589,12 @@ public class ArbitrageExecutionService
                 EntryPrice = perpPrice,
                 Quantity = perpQuantity, // Use the rounded/adjusted perpetual quantity
                 Leverage = request.Leverage > 0 ? request.Leverage : 1m,
-                InitialMargin = request.Leverage > 0 ? request.PositionSizeUsd / request.Leverage : request.PositionSizeUsd,
-                RealizedPnL = 0,
+                InitialMargin = perpMargin,  // Use calculated perp margin (perpNotional / leverage)
+                FundingEarnedUsd = 0,
+                TradingFeesUsd = 0,
+                PricePnLUsd = 0,
+                RealizedPnLUsd = 0,
+                RealizedPnLPct = 0,
                 UnrealizedPnL = 0,
                 OrderId = perpOrderId,
                 ExchangePositionId = request.Symbol, // For perpetual positions, the symbol IS the position identifier on the exchange
@@ -591,8 +613,12 @@ public class ArbitrageExecutionService
                 EntryPrice = spotPrice,
                 Quantity = actualFilledQuantity,
                 Leverage = 1m, // Spot positions don't use leverage
-                InitialMargin = request.PositionSizeUsd,
-                RealizedPnL = 0,
+                InitialMargin = spotCapital,  // Spot capital (PositionSizeUsd represents spot margin)
+                FundingEarnedUsd = 0,
+                TradingFeesUsd = 0,
+                PricePnLUsd = 0,
+                RealizedPnLUsd = 0,
+                RealizedPnLPct = 0,
                 UnrealizedPnL = 0,
                 OrderId = spotOrderId,
                 OpenedAt = DateTime.UtcNow
@@ -632,7 +658,11 @@ public class ArbitrageExecutionService
                     ExitPrice = p.ExitPrice,
                     Leverage = p.Leverage,
                     InitialMargin = p.InitialMargin,
-                    RealizedPnL = p.RealizedPnL,
+                    FundingEarnedUsd = p.FundingEarnedUsd,
+                    TradingFeesUsd = p.TradingFeesUsd,
+                    PricePnLUsd = p.PricePnLUsd,
+                    RealizedPnLUsd = p.RealizedPnLUsd,
+                    RealizedPnLPct = p.RealizedPnLPct,
                     UnrealizedPnL = p.UnrealizedPnL,
                     OpenedAt = p.OpenedAt,
                     ClosedAt = p.ClosedAt
@@ -714,8 +744,16 @@ public class ArbitrageExecutionService
             }
 
             // Calculate quantities - use same quantity for both legs to maintain proper hedge
+            // NOTE: PositionSizeUsd now represents MARGIN/CAPITAL to use (not notional)
+            // For cross-exchange: split margin between both legs, calculate notional with leverage
             var avgPrice = (longPrice + shortPrice) / 2;
-            var baseQuantity = request.PositionSizeUsd / avgPrice;
+            var marginPerLeg = request.PositionSizeUsd / 2;  // Split total margin between long and short
+            var notionalPerLeg = marginPerLeg * request.Leverage;  // Calculate notional with leverage
+            var baseQuantity = notionalPerLeg / avgPrice;
+
+            _logger.LogInformation(
+                "Cross-exchange position sizing for {Symbol}: TotalMargin=${TotalMargin}, MarginPerLeg=${MarginPerLeg}, Leverage={Leverage}x, NotionalPerLeg=${Notional}, Quantity={Quantity}",
+                request.Symbol, request.PositionSizeUsd, marginPerLeg, request.Leverage, notionalPerLeg, baseQuantity);
 
             // Get instrument info from both exchanges to ensure proper quantity precision
             decimal finalQuantity;
@@ -942,7 +980,12 @@ public class ArbitrageExecutionService
                 FundingEarned = 0,
                 PositionSizeUsd = isSpotFutures ? request.PositionSizeUsd : request.PositionSizeUsd * 2, // Spot/Futures uses single size, Futures/Futures uses both legs
                 SpotOrderId = isSpotFutures ? longOrderId : null, // For Spot/Futures, store spot order ID here
-                PerpOrderId = isSpotFutures ? shortOrderId : $"{longOrderId},{shortOrderId}" // Store both order IDs
+                PerpOrderId = isSpotFutures ? shortOrderId : $"{longOrderId},{shortOrderId}", // Store both order IDs
+                // Strategy metadata for ML context
+                Strategy = request.Strategy,
+                SubType = request.SubType,
+                LongExchange = request.LongExchange,
+                ShortExchange = request.ShortExchange
             };
 
             _dbContext.Executions.Add(execution);
@@ -970,8 +1013,12 @@ public class ArbitrageExecutionService
                 EntryPrice = longPrice,
                 Quantity = isSpotFutures ? actualLongQuantity : quantity, // Use actual filled quantity for spot
                 Leverage = isSpotFutures ? 1m : request.Leverage, // Spot has no leverage
-                InitialMargin = isSpotFutures ? request.PositionSizeUsd : request.PositionSizeUsd / request.Leverage,
-                RealizedPnL = 0,
+                InitialMargin = isSpotFutures ? request.PositionSizeUsd : marginPerLeg,  // For Futures/Futures: marginPerLeg = PositionSizeUsd / 2
+                FundingEarnedUsd = 0,
+                TradingFeesUsd = 0,
+                PricePnLUsd = 0,
+                RealizedPnLUsd = 0,
+                RealizedPnLPct = 0,
                 UnrealizedPnL = 0,
                 OrderId = longOrderId,
                 ExchangePositionId = isSpotFutures ? null : request.Symbol, // Only perpetual positions have exchange position IDs
@@ -990,8 +1037,12 @@ public class ArbitrageExecutionService
                 EntryPrice = shortPrice,
                 Quantity = quantity,
                 Leverage = request.Leverage > 0 ? request.Leverage : 1m,
-                InitialMargin = request.Leverage > 0 ? request.PositionSizeUsd / request.Leverage : request.PositionSizeUsd,
-                RealizedPnL = 0,
+                InitialMargin = isSpotFutures ? (quantity * shortPrice / request.Leverage) : marginPerLeg,  // For Futures/Futures: marginPerLeg, for Spot/Futures: calculate from actual notional
+                FundingEarnedUsd = 0,
+                TradingFeesUsd = 0,
+                PricePnLUsd = 0,
+                RealizedPnLUsd = 0,
+                RealizedPnLPct = 0,
                 UnrealizedPnL = 0,
                 OrderId = shortOrderId,
                 ExchangePositionId = request.Symbol, // For perpetual positions, the symbol IS the position identifier
@@ -1034,7 +1085,11 @@ public class ArbitrageExecutionService
                     ExitPrice = p.ExitPrice,
                     Leverage = p.Leverage,
                     InitialMargin = p.InitialMargin,
-                    RealizedPnL = p.RealizedPnL,
+                    FundingEarnedUsd = p.FundingEarnedUsd,
+                    TradingFeesUsd = p.TradingFeesUsd,
+                    PricePnLUsd = p.PricePnLUsd,
+                    RealizedPnLUsd = p.RealizedPnLUsd,
+                    RealizedPnLPct = p.RealizedPnLPct,
                     UnrealizedPnL = p.UnrealizedPnL,
                     OpenedAt = p.OpenedAt,
                     ClosedAt = p.ClosedAt
@@ -1335,7 +1390,11 @@ public class ArbitrageExecutionService
                     ExitPrice = p.ExitPrice,
                     Leverage = p.Leverage,
                     InitialMargin = p.InitialMargin,
-                    RealizedPnL = p.RealizedPnL,
+                    FundingEarnedUsd = p.FundingEarnedUsd,
+                    TradingFeesUsd = p.TradingFeesUsd,
+                    PricePnLUsd = p.PricePnLUsd,
+                    RealizedPnLUsd = p.RealizedPnLUsd,
+                    RealizedPnLPct = p.RealizedPnLPct,
                     UnrealizedPnL = p.UnrealizedPnL,
                     ReconciliationStatus = p.ReconciliationStatus,
                     ReconciliationCompletedAt = p.ReconciliationCompletedAt,
@@ -1488,7 +1547,11 @@ public class ArbitrageExecutionService
                 ExitPrice = p.ExitPrice,
                 Leverage = p.Leverage,
                 InitialMargin = p.InitialMargin,
-                RealizedPnL = p.RealizedPnL,
+                FundingEarnedUsd = p.FundingEarnedUsd,
+                TradingFeesUsd = p.TradingFeesUsd,
+                PricePnLUsd = p.PricePnLUsd,
+                RealizedPnLUsd = p.RealizedPnLUsd,
+                RealizedPnLPct = p.RealizedPnLPct,
                 UnrealizedPnL = p.UnrealizedPnL,
                 ReconciliationStatus = p.ReconciliationStatus,
                 ReconciliationCompletedAt = p.ReconciliationCompletedAt,

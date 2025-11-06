@@ -81,7 +81,13 @@ public class PositionReconciliationService
 
             // Step 3: Fees are now calculated on-the-fly from PositionTransaction table (no storage needed)
 
-            // Step 4: Determine new reconciliation status
+            // Step 4: Calculate and persist P&L breakdown for closed positions
+            if (position.Status == PositionStatus.Closed && position.ClosedAt.HasValue && position.ExitPrice.HasValue)
+            {
+                CalculateAndPersistPnL(position, dbContext);
+            }
+
+            // Step 5: Determine new reconciliation status
             var newStatus = DetermineReconciliationStatus(position, dbContext);
             position.ReconciliationStatus = newStatus;
 
@@ -335,6 +341,65 @@ public class PositionReconciliationService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Calculate and persist P&L breakdown on the Position entity
+    /// Formula: RealizedPnL = FundingEarned + PricePnL - TradingFees
+    /// </summary>
+    private void CalculateAndPersistPnL(Position position, ArbitrageDbContext dbContext)
+    {
+        // Get all linked transactions for this position
+        var linkedTransactions = dbContext.PositionTransactions
+            .Where(pt => pt.PositionId == position.Id)
+            .ToList();
+
+        // Calculate Funding Earned (sum of all funding fees)
+        // Positive SignedFee = received funding (longs receive when funding is positive)
+        // Negative SignedFee = paid funding (shorts pay when funding is positive)
+        var fundingEarnedUsd = linkedTransactions
+            .Where(t => t.TransactionType == TransactionType.FundingFee)
+            .Sum(t => t.SignedFee ?? 0);
+
+        // Calculate Trading Fees (sum of all commissions/trading fees)
+        var tradingFeesUsd = linkedTransactions
+            .Where(t => t.TransactionType == TransactionType.Commission || t.TransactionType == TransactionType.Trade)
+            .Sum(t => t.Fee);
+
+        // Calculate Price P&L
+        // For LONG: (ExitPrice - EntryPrice) * Quantity
+        // For SHORT: (EntryPrice - ExitPrice) * Quantity
+        decimal pricePnLUsd;
+        if (position.Side == PositionSide.Long)
+        {
+            pricePnLUsd = (position.ExitPrice!.Value - position.EntryPrice) * position.Quantity;
+        }
+        else // Short
+        {
+            pricePnLUsd = (position.EntryPrice - position.ExitPrice!.Value) * position.Quantity;
+        }
+
+        // Calculate Realized P&L
+        // Formula: RealizedPnL = FundingEarned + PricePnL - TradingFees
+        var realizedPnLUsd = fundingEarnedUsd + pricePnLUsd - tradingFeesUsd;
+
+        // Calculate Realized P&L Percentage (relative to initial margin)
+        var realizedPnLPct = position.InitialMargin > 0
+            ? (realizedPnLUsd / position.InitialMargin) * 100
+            : 0m;
+
+        // Persist to Position entity
+        position.FundingEarnedUsd = fundingEarnedUsd;
+        position.TradingFeesUsd = tradingFeesUsd;
+        position.PricePnLUsd = pricePnLUsd;
+        position.RealizedPnLUsd = realizedPnLUsd;
+        position.RealizedPnLPct = realizedPnLPct;
+
+        _logger.LogInformation(
+            "Calculated P&L for Position {PositionId}: " +
+            "FundingEarned=${Funding:F4}, TradingFees=${Fees:F4}, PricePnL=${PricePnL:F4}, " +
+            "RealizedPnL=${RealizedPnL:F4} ({RealizedPct:F2}%)",
+            position.Id, fundingEarnedUsd, tradingFeesUsd, pricePnLUsd, realizedPnLUsd, realizedPnLPct);
     }
 
     /// <summary>

@@ -21,6 +21,7 @@ public class OpportunityPersister
     /// <summary>
     /// Save detected opportunities/snapshots to JSON files organized by day
     /// Creates day folders like: data/opportunities/2025-09-02/opportunities.json
+    /// Only saves timestamp and opportunities (excludes prices, funding rates, etc. to reduce file size)
     /// </summary>
     public async Task SaveOpportunitiesAsync(
         List<HistoricalMarketSnapshot> snapshots,
@@ -53,13 +54,20 @@ public class OpportunityPersister
             // Save to opportunities.json in the day folder
             var filePath = Path.Combine(dayFolder, "opportunities.json");
 
+            // Convert to lightweight snapshots (only timestamp + opportunities)
+            var lightweightSnapshots = daySnapshots.Select(s => new LightweightOpportunitySnapshot
+            {
+                Timestamp = s.Timestamp,
+                Opportunities = s.Opportunities
+            }).ToList();
+
             var options = new JsonSerializerOptions
             {
                 WriteIndented = true,
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             };
 
-            var json = JsonSerializer.Serialize(daySnapshots, options);
+            var json = JsonSerializer.Serialize(lightweightSnapshots, options);
             await File.WriteAllTextAsync(filePath, json);
 
             _logger.LogInformation("  Saved {Date}: {SnapshotCount} snapshots, {OpportunityCount} opportunities",
@@ -72,6 +80,7 @@ public class OpportunityPersister
 
     /// <summary>
     /// Load opportunities/snapshots from JSON file
+    /// Handles both lightweight (new) and full (legacy) formats
     /// </summary>
     public async Task<List<HistoricalMarketSnapshot>> LoadOpportunitiesAsync(string filePath)
     {
@@ -86,14 +95,40 @@ public class OpportunityPersister
             PropertyNameCaseInsensitive = true
         };
 
-        var snapshots = JsonSerializer.Deserialize<List<HistoricalMarketSnapshot>>(json, options)
+        // Try to load as lightweight format first (new format)
+        try
+        {
+            var lightweightSnapshots = JsonSerializer.Deserialize<List<LightweightOpportunitySnapshot>>(json, options);
+            if (lightweightSnapshots != null)
+            {
+                // Convert to full HistoricalMarketSnapshot (for simulation compatibility)
+                var snapshots = lightweightSnapshots.Select(ls => new HistoricalMarketSnapshot
+                {
+                    Timestamp = ls.Timestamp,
+                    Opportunities = ls.Opportunities
+                }).ToList();
+
+                var totalOpportunities = snapshots.Sum(s => s.Opportunities.Count);
+                _logger.LogInformation("Loaded {SnapshotCount} snapshots with {OpportunityCount} opportunities from {Path} (lightweight format)",
+                    snapshots.Count, totalOpportunities, filePath);
+
+                return snapshots;
+            }
+        }
+        catch
+        {
+            // Fall through to try legacy format
+        }
+
+        // Fall back to legacy full format
+        var legacySnapshots = JsonSerializer.Deserialize<List<HistoricalMarketSnapshot>>(json, options)
             ?? throw new InvalidOperationException($"Failed to deserialize {filePath}");
 
-        var totalOpportunities = snapshots.Sum(s => s.Opportunities.Count);
-        _logger.LogInformation("Loaded {SnapshotCount} snapshots with {OpportunityCount} opportunities from {Path}",
-            snapshots.Count, totalOpportunities, filePath);
+        var totalOpps = legacySnapshots.Sum(s => s.Opportunities.Count);
+        _logger.LogInformation("Loaded {SnapshotCount} snapshots with {OpportunityCount} opportunities from {Path} (legacy format)",
+            legacySnapshots.Count, totalOpps, filePath);
 
-        return snapshots;
+        return legacySnapshots;
     }
 
     /// <summary>
@@ -133,7 +168,26 @@ public class OpportunityPersister
             try
             {
                 var json = await File.ReadAllTextAsync(filePath);
-                var snapshots = JsonSerializer.Deserialize<List<HistoricalMarketSnapshot>>(json, options);
+                List<HistoricalMarketSnapshot>? snapshots = null;
+
+                // Try lightweight format first
+                try
+                {
+                    var lightweightSnapshots = JsonSerializer.Deserialize<List<LightweightOpportunitySnapshot>>(json, options);
+                    if (lightweightSnapshots != null)
+                    {
+                        snapshots = lightweightSnapshots.Select(ls => new HistoricalMarketSnapshot
+                        {
+                            Timestamp = ls.Timestamp,
+                            Opportunities = ls.Opportunities
+                        }).ToList();
+                    }
+                }
+                catch
+                {
+                    // Fall back to legacy format
+                    snapshots = JsonSerializer.Deserialize<List<HistoricalMarketSnapshot>>(json, options);
+                }
 
                 if (snapshots != null && snapshots.Any())
                 {

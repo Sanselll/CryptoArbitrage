@@ -142,6 +142,18 @@ class Position:
         self.last_long_funding_time = self.long_next_funding_time - timedelta(hours=self.long_funding_interval_hours)
         self.last_short_funding_time = self.short_next_funding_time - timedelta(hours=self.short_funding_interval_hours)
 
+        # CRITICAL FIX: Skip funding times at or before entry time
+        # You can only earn funding for periods you actually held the position
+        # Example: Enter at 20:00, next funding at 20:00 → skip to 04:00 (8h interval)
+        #          The 20:00 funding is for positions held from 12:00-20:00, which we didn't hold
+        while self.long_next_funding_time <= self.entry_time:
+            self.last_long_funding_time = self.long_next_funding_time
+            self.long_next_funding_time += timedelta(hours=self.long_funding_interval_hours)
+
+        while self.short_next_funding_time <= self.entry_time:
+            self.last_short_funding_time = self.short_next_funding_time
+            self.short_next_funding_time += timedelta(hours=self.short_funding_interval_hours)
+
     def update_funding_rates(self, long_funding_rate: float, short_funding_rate: float):
         """
         Update the funding rates for this position.
@@ -381,6 +393,40 @@ class Position:
             'realized_pnl_usd': self.realized_pnl_usd,
             'realized_pnl_pct': self.realized_pnl_pct,
         }
+
+    def calculate_current_apr(self) -> float:
+        """
+        Calculate current annualized percentage rate (APR) based on current funding rates.
+
+        Returns:
+            float: Annualized APR in percentage (e.g., 15.5 for 15.5% APR)
+        """
+        # Net funding rate per payment (short pays, long receives = positive carry)
+        net_funding_rate = self.short_funding_rate - self.long_funding_rate
+
+        # Use weighted average of funding intervals if different
+        # (most common case: both are 1h or 8h, so this is just the common interval)
+        if self.long_funding_interval_hours == self.short_funding_interval_hours:
+            avg_interval_hours = self.long_funding_interval_hours
+        else:
+            # Weighted by rate contribution
+            avg_interval_hours = (
+                (abs(self.long_funding_rate) * self.long_funding_interval_hours +
+                 abs(self.short_funding_rate) * self.short_funding_interval_hours) /
+                (abs(self.long_funding_rate) + abs(self.short_funding_rate) + 1e-9)
+            )
+
+        # Convert to daily rate (24 hours)
+        payments_per_day = 24.0 / avg_interval_hours
+        daily_rate = net_funding_rate * payments_per_day
+
+        # Annualize (365 days)
+        annual_rate = daily_rate * 365.0
+
+        # Convert to percentage
+        apr_pct = annual_rate * 100.0
+
+        return apr_pct
 
 
 class Portfolio:

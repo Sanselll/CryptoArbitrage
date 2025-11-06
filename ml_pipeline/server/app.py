@@ -9,6 +9,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sys
 from pathlib import Path
+import json
+from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -25,20 +27,56 @@ rl_predictor = None
 agent_manager = AgentManager()
 decision_logger = DecisionLogger(max_decisions_per_user=1000)
 
+# Decision log file for raw input/output analysis
+DECISION_LOG_FILE = '/tmp/ml_decisions.log'
+
+
+def log_raw_decision(request_data: dict, response_data: dict, user_id: str = None):
+    """
+    Log raw ML prediction input and output to separate file for analysis.
+
+    Args:
+        request_data: Complete request data (opportunities, portfolio, trading_config)
+        response_data: Complete response data (action, confidence, etc.)
+        user_id: Optional user identifier
+    """
+    try:
+        log_entry = {
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'user_id': user_id,
+            'request': request_data,
+            'response': response_data
+        }
+
+        # Write as JSON lines format (one JSON object per line)
+        with open(DECISION_LOG_FILE, 'a') as f:
+            f.write(json.dumps(log_entry) + '\n')
+
+    except Exception as e:
+        print(f"Warning: Failed to write decision log: {e}")
+
 
 def initialize_predictor():
     """Initialize the RL predictor on startup."""
+    import numpy as np
+    import torch
+
+    # Set random seed for reproducible predictions
+    np.random.seed(42)
+    torch.manual_seed(42)
+    print("🎲 Random seed: 42 (reproducible predictions)")
+
     global rl_predictor
     if rl_predictor is None:
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='checkpoints/best_model.pt',
+                model_path='checkpoints/1h/best_model.pt',
                 device='cpu'
             )
             print("✅ Modular RL predictor initialized successfully")
             print("   Model: ModularPPONetwork (275 dims = 5 config + 10 portfolio + 60 executions + 200 opportunities)")
-            print("   Path: checkpoints/best_model.pt")
+            print("   Path: checkpoints/1h/best_model.pt")
             print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
         except Exception as e:
             print(f"⚠️  Warning: Could not initialize RL predictor: {e}")
@@ -557,6 +595,17 @@ def predict_opportunities():
 
         # Add model info to response
         prediction['model_info'] = model_info
+
+        # Log raw input/output for analysis
+        log_raw_decision(
+            request_data={
+                'opportunities': opportunities,
+                'portfolio': portfolio,
+                'trading_config': trading_config
+            },
+            response_data=prediction,
+            user_id=portfolio.get('user_id')  # Extract user_id from portfolio if available
+        )
 
         return jsonify(prediction)
 

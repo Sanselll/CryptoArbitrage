@@ -285,7 +285,11 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                         Quantity = dbPos.Quantity,
                         Leverage = dbPos.Leverage,
                         InitialMargin = dbPos.InitialMargin,
-                        RealizedPnL = dbPos.RealizedPnL,
+                        FundingEarnedUsd = dbPos.FundingEarnedUsd,
+                        TradingFeesUsd = dbPos.TradingFeesUsd,
+                        PricePnLUsd = dbPos.PricePnLUsd,
+                        RealizedPnLUsd = dbPos.RealizedPnLUsd,
+                        RealizedPnLPct = dbPos.RealizedPnLPct,
                         UnrealizedPnL = unrealizedPnL, // Real-time from exchange or database fallback
                         TradingFeePaid = tradingFeePaid,
                         TotalFundingFeePaid = totalFundingFeePaid,

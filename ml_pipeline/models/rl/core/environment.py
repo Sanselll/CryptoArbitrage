@@ -111,6 +111,10 @@ class FundingArbitrageEnv(gym.Env):
         # Store individual scales for easy access
         self.pnl_reward_scale = reward_config.pnl_reward_scale
         self.entry_penalty_scale = reward_config.entry_penalty_scale
+        self.exit_reward_scale = reward_config.exit_reward_scale
+        self.inactivity_penalty_scale = reward_config.inactivity_penalty_scale
+        self.turnover_reward_scale = reward_config.turnover_reward_scale
+        self.opportunity_cost_scale = reward_config.opportunity_cost_scale
         self.liquidation_penalty_scale = reward_config.liquidation_penalty_scale
         self.stop_loss_penalty = reward_config.stop_loss_penalty
 
@@ -598,6 +602,39 @@ class FundingArbitrageEnv(gym.Env):
             if action == 0:
                 # HOLD
                 info['action_type'] = 'hold'
+
+                num_positions = len(self.portfolio.positions)
+                has_capacity = num_positions < self.current_config.max_positions
+                has_opportunities = len(self.current_opportunities) > 0
+
+                # Penalty 1: Inactivity penalty when capacity is available
+                if has_capacity and has_opportunities:
+                    # Small penalty for ignoring opportunities when capacity is available
+                    inactivity_penalty = -0.01 * self.inactivity_penalty_scale
+                    reward += inactivity_penalty
+
+                # Penalty 2: Opportunity cost penalty when portfolio is FULL
+                # Compare worst position APR vs best available opportunity APR
+                if not has_capacity and has_opportunities and num_positions > 0:
+                    # Get worst position APR (target for replacement)
+                    position_aprs = [pos.calculate_current_apr() for pos in self.portfolio.positions]
+                    worst_position_apr = min(position_aprs)
+
+                    # Get best available opportunity APR
+                    best_opp = self.current_opportunities[0]  # Already sorted by fundApr24hProj
+                    best_available_apr = best_opp.get('fundApr24hProj', 0.0)
+
+                    # Calculate APR gap (how much better the opportunity is)
+                    apr_gap = best_available_apr - worst_position_apr
+
+                    # Apply opportunity cost penalty if better opportunity exists
+                    if apr_gap > 0:
+                        # Penalty proportional to APR gap (normalized)
+                        # APR gap of 10% = -0.1 penalty, 20% = -0.2, etc.
+                        # Let model learn optimal switching threshold
+                        opportunity_cost_penalty = -(apr_gap / 100.0) * self.opportunity_cost_scale
+                        reward += opportunity_cost_penalty
+
                 return reward, info
 
             elif 1 <= action <= 30:
@@ -788,10 +825,50 @@ class FundingArbitrageEnv(gym.Env):
                 symbol_prices['short_price']
             )
 
-            # NO exit-specific reward (as per IMPLEMENTATION_PLAN.md)
-            # P&L is already rewarded hourly through Component 1
-            # Exit action provides no additional reward
-            return 0.0
+            # Exit reward: Reward profitable exits to encourage portfolio turnover
+            # Get the position that was just closed
+            closed_position = self.portfolio.closed_positions[-1]
+            realized_pnl_pct = closed_position.realized_pnl_pct
+
+            total_reward = 0.0
+
+            # Component 1: Profitable exit reward
+            if realized_pnl_pct > 0:
+                # Reward proportional to profit, capped at +1.0
+                exit_reward = min(realized_pnl_pct / 100.0 * self.exit_reward_scale, 1.0)
+                total_reward += exit_reward
+
+                # Turnover reward: Additional bonus when closing profitable position with capacity for new positions
+                # This encourages cycling through positions instead of "park and hold"
+                num_positions = len(self.portfolio.positions)
+                has_capacity = num_positions < self.current_config.max_positions
+
+                if has_capacity:
+                    # Reward proportional to P&L, encouraging portfolio rotation
+                    turnover_reward = realized_pnl_pct / 100.0 * self.turnover_reward_scale
+                    total_reward += turnover_reward
+
+            # Component 2: Strategic exit reward (even if unprofitable)
+            # Reward exits when better opportunities are available
+            if len(self.current_opportunities) > 0:
+                # Get APR of closed position (based on its funding rates)
+                closed_apr = closed_position.calculate_current_apr()
+
+                # Get best available opportunity APR
+                best_opp = self.current_opportunities[0]  # Already sorted by fundApr24hProj
+                best_available_apr = best_opp.get('fundApr24hProj', 0.0)
+
+                # If exiting to make room for significantly better opportunity
+                apr_improvement = best_available_apr - closed_apr
+
+                # Reward strategic switches (APR improvement threshold: model learns optimal)
+                if apr_improvement > 0:
+                    # Scale reward by APR improvement (normalize to reasonable range)
+                    # APR improvement of 10% = 0.1 reward, 20% = 0.2, etc.
+                    strategic_exit_reward = min(apr_improvement / 100.0, 0.5) * self.exit_reward_scale
+                    total_reward += strategic_exit_reward
+
+            return total_reward
         else:
             # No price data available (shouldn't happen)
             return 0.0

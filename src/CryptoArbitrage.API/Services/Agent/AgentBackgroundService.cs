@@ -148,6 +148,9 @@ public class AgentBackgroundService : BackgroundService
         var predictionIntervalSeconds = config.PredictionIntervalSeconds;
         var predictionCount = 0;
 
+        _logger.LogInformation("Using prediction interval: {Interval} seconds ({Minutes} minutes)",
+            predictionIntervalSeconds, predictionIntervalSeconds / 60.0);
+
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -201,19 +204,93 @@ public class AgentBackgroundService : BackgroundService
 
         // 1. Get current opportunities from cache (already detected by OpportunityAggregator)
         var opportunitiesDict = await opportunityRepository.GetByPatternAsync("opportunity:*");
-        var userOpportunities = opportunitiesDict.Values.Take(10).ToList(); // Top 10
+
+        // Smart opportunity selection for ML API (up to 10 total)
+        // Strategy:
+        // - Filter by SubType: Only CrossExchangeFuturesFutures (CFFF)
+        // - Always include opportunities with existing positions (for EXIT decisions)
+        // - From new opportunities (Good or Medium liquidity):
+        //   * Top 7 by highest FundApr
+        //   * Top 3 by lowest spread
+        //   * Remove duplicates
+
+        var allOpportunities = opportunitiesDict.Values.ToList();
+
+        // FILTER: Only send CrossExchangeFuturesFutures (CFFF) opportunities to ML
+        // This is the primary funding arbitrage strategy (long perp on one exchange + short perp on another)
+        var cfffOpportunities = allOpportunities
+            .Where(o => o.SubType == StrategySubType.CrossExchangeFuturesFutures)
+            .ToList();
+
+        _logger.LogInformation("Filtered opportunities by strategy: {Total} total → {CFFF} CrossExchangeFuturesFutures",
+            allOpportunities.Count, cfffOpportunities.Count);
+
+        // Separate existing positions from new opportunities
+        var existingPositionOpps = cfffOpportunities
+            .Where(o => o.IsExistingPosition)
+            .ToList();
+
+        var newOpportunities = cfffOpportunities
+            .Where(o => !o.IsExistingPosition &&
+                       (o.LiquidityStatus == LiquidityStatus.Good || o.LiquidityStatus == LiquidityStatus.Medium))
+            .ToList();
+
+        var liquidityCounts = newOpportunities
+            .Where(o => o.LiquidityStatus.HasValue)
+            .GroupBy(o => o.LiquidityStatus!.Value)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        _logger.LogDebug("Opportunity pool (CFFF only): {Total} total, {Existing} with positions, {New} new (Good: {Good}, Medium: {Medium})",
+            cfffOpportunities.Count,
+            existingPositionOpps.Count,
+            newOpportunities.Count,
+            liquidityCounts.GetValueOrDefault(LiquidityStatus.Good, 0),
+            liquidityCounts.GetValueOrDefault(LiquidityStatus.Medium, 0));
+
+        // Select top 7 by highest APR
+        var topByApr = newOpportunities
+            .OrderByDescending(o => o.FundApr)
+            .Take(7)
+            .ToList();
+
+        // Select top 3 by lowest 30-sample spread average (better stability)
+        var topBySpread = newOpportunities
+            .Where(o => o.Spread30SampleAvg.HasValue)
+            .OrderBy(o => o.Spread30SampleAvg!.Value)
+            .Take(3)
+            .ToList();
+
+        // Combine APR and spread selections, removing duplicates
+        var selectedNew = topByApr
+            .Union(topBySpread, new OpportunityComparer())
+            .ToList();
+
+        _logger.LogDebug("Selected {Apr} by APR, {Spread} by spread, {Unique} unique new opportunities",
+            topByApr.Count, topBySpread.Count, selectedNew.Count);
+
+        // Combine existing positions with selected new opportunities (up to 10 total)
+        var userOpportunities = existingPositionOpps
+            .Concat(selectedNew)
+            .Take(10)
+            .ToList();
+
+        _logger.LogInformation("Sending {Total} CFFF opportunities to ML: {Existing} existing positions + {New} new opportunities",
+            userOpportunities.Count, existingPositionOpps.Count, Math.Min(selectedNew.Count, 10 - existingPositionOpps.Count));
 
         if (userOpportunities.Count == 0)
         {
-            _logger.LogDebug("No opportunities available for user {UserId}", userId);
+            _logger.LogDebug("No CFFF opportunities available for user {UserId}", userId);
             return;
         }
 
         // 2. Get current positions from repository (real-time positions from UserDataCollector)
         var positions = await GetPositionsFromRepositoryAsync(userId, userDataRepository, cancellationToken);
 
+        var numExecutionsForLogging = positions.Select(p => p.ExecutionId).Distinct().Count();
+
         _logger.LogInformation("========== AGENT SENDING TO ML API ==========");
-        _logger.LogInformation("User: {UserId}, Positions from repository: {PositionCount}", userId, positions.Count);
+        _logger.LogInformation("User: {UserId}, Executions: {ExecutionCount} ({PositionCount} individual positions)",
+            userId, numExecutionsForLogging, positions.Count);
         foreach (var pos in positions)
         {
             _logger.LogInformation("  - Position: {Symbol} {Side} on {Exchange}, ExecutionId: {ExecutionId}",
@@ -226,7 +303,7 @@ public class AgentBackgroundService : BackgroundService
         var fundingRateRepository = scope.ServiceProvider.GetRequiredService<IDataRepository<FundingRateDto>>();
 
         // 4. Get portfolio state with enriched position data
-        var portfolio = await BuildPortfolioStateAsync(userId, positions, context, marketDataRepository, fundingRateRepository, cancellationToken);
+        var portfolio = await BuildPortfolioStateAsync(userId, positions, context, marketDataRepository, fundingRateRepository, userDataRepository, cancellationToken);
 
         // 5. Call ML API for prediction
         var prediction = await GetMLPredictionAsync(userId, config, userOpportunities, portfolio);
@@ -242,7 +319,7 @@ public class AgentBackgroundService : BackgroundService
         }
 
         // 6. Execute action based on prediction
-        var executionResult = await ExecuteAgentActionAsync(userId, prediction, userOpportunities, positions, executionService, context);
+        var executionResult = await ExecuteAgentActionAsync(userId, prediction, userOpportunities, positions, executionService, context, userDataRepository, cancellationToken);
 
         // 7. Update stats and broadcast decision
         await UpdateAgentStatsAsync(userId, prediction.Action, context);
@@ -296,20 +373,51 @@ public class AgentBackgroundService : BackgroundService
         ArbitrageDbContext context,
         IDataRepository<MarketDataSnapshot> marketDataRepository,
         IDataRepository<FundingRateDto> fundingRateRepository,
+        IDataRepository<UserDataSnapshot> userDataRepository,
         CancellationToken cancellationToken)
     {
-        // Get user's total capital from performance metrics or default
+        // Query real balance data from all exchanges
+        var userDataDict = await userDataRepository.GetByPatternAsync($"userdata:{userId}:*", cancellationToken);
+
+        // Calculate total capital across all exchanges
+        decimal totalCapital = 0m;
+        decimal totalMarginUsed = 0m;
+
+        foreach (var snapshot in userDataDict.Values)
+        {
+            if (snapshot?.Balance != null)
+            {
+                // Sum up futures balance (total equity) and margin used across all exchanges
+                totalCapital += snapshot.Balance.FuturesBalanceUsd;
+                totalMarginUsed += snapshot.Balance.MarginUsed;
+
+                _logger.LogDebug(
+                    "Exchange balance for user {UserId}: FuturesBalance=${Balance:F2}, MarginUsed=${Margin:F2}",
+                    userId, snapshot.Balance.FuturesBalanceUsd, snapshot.Balance.MarginUsed);
+            }
+        }
+
+        // Validate that we have balance data
+        if (totalCapital == 0m)
+        {
+            throw new InvalidOperationException(
+                $"Unable to retrieve balance data for user {userId}. " +
+                "User data collector may not be running or data is stale.");
+        }
+
+        // Get total P&L from performance metrics if available
         var latestMetric = await context.PerformanceMetrics
             .Where(pm => pm.UserId == userId)
             .OrderByDescending(pm => pm.Date)
             .FirstOrDefaultAsync();
-
-        var totalCapital = latestMetric?.AccountBalance ?? 10000m;
         var totalPnL = latestMetric?.TotalPnL ?? 0m;
 
-        // Calculate utilization from PositionDto
-        var marginUsed = positions.Sum(p => p.InitialMargin);
-        var utilization = totalCapital > 0 ? (double)(marginUsed / totalCapital) : 0.0;
+        // Calculate utilization based on real margin used
+        var utilization = totalCapital > 0 ? (double)(totalMarginUsed / totalCapital) : 0.0;
+
+        _logger.LogInformation(
+            "Portfolio state for user {UserId}: TotalCapital=${Total:F2}, MarginUsed=${Margin:F2}, Utilization={Util:F2}%",
+            userId, totalCapital, totalMarginUsed, utilization * 100);
 
         // Fetch market data and funding rates once for all positions
         var marketSnapshot = await marketDataRepository.GetAsync("market_data_snapshot", cancellationToken);
@@ -318,17 +426,22 @@ public class AgentBackgroundService : BackgroundService
         var enrichedPositions = new List<Dictionary<string, object>>();
         foreach (var position in positions)
         {
-            var enrichedPos = await ConvertPositionDtoToDictAsync(position, positions, marketSnapshot, cancellationToken);
+            var enrichedPos = await ConvertPositionDtoToDictAsync(position, positions, marketSnapshot, totalCapital, cancellationToken);
             enrichedPositions.Add(enrichedPos);
         }
+
+        // IMPORTANT: Count EXECUTIONS, not individual positions
+        // Each execution has 2 positions (long + short hedge), but the ML model expects execution count
+        // The training environment's "position" semantically means "execution"
+        var numExecutions = positions.Select(p => p.ExecutionId).Distinct().Count();
 
         return new Dictionary<string, object>
         {
             ["total_capital"] = (double)totalCapital,
-            ["initial_capital"] = 10000.0, // TODO: Track initial capital
+            ["initial_capital"] = (double)totalCapital, // Use current total capital (user's requirement: don't change ML model input structure)
             ["utilization"] = utilization,
             ["total_pnl_pct"] = (double)(totalPnL / totalCapital * 100),
-            ["num_positions"] = positions.Count,
+            ["num_positions"] = numExecutions,  // Count of executions, not individual positions (matches training semantics)
             ["positions"] = enrichedPositions
         };
     }
@@ -340,6 +453,7 @@ public class AgentBackgroundService : BackgroundService
         PositionDto position,
         List<PositionDto> allPositions,
         MarketDataSnapshot? marketSnapshot,
+        decimal totalCapital,
         CancellationToken cancellationToken)
     {
         var hoursHeld = (DateTime.UtcNow - position.OpenedAt).TotalHours;
@@ -352,26 +466,25 @@ public class AgentBackgroundService : BackgroundService
             ["symbol"] = position.Symbol ?? "",
             ["position_size_usd"] = positionSizeUsd,
             ["unrealized_pnl_pct"] = unrealizedPnlPct,
-            ["position_age_hours"] = hoursHeld,
-            ["leverage"] = (double)position.Leverage
+            ["hours_held"] = hoursHeld / 72.0,  // Normalized by 72 hours as expected by ML model
+            ["leverage"] = (double)position.Leverage,
+            ["position_is_active"] = 1.0  // Always 1.0 for open positions
         };
 
-        // If position is part of an execution, enrich with execution-specific data
-        if (position.ExecutionId.HasValue)
+        // Enrich with execution-specific data (ExecutionId is always present)
+        // Find the paired position (for cross-exchange arbitrage, there's a long and short)
+        var pairedPosition = allPositions.FirstOrDefault(p =>
+            p.ExecutionId == position.ExecutionId &&
+            p.Id != position.Id &&
+            p.Status == PositionStatus.Open);
+
+        if (pairedPosition != null)
         {
-            // Find the paired position (for cross-exchange arbitrage, there's a long and short)
-            var pairedPosition = allPositions.FirstOrDefault(p =>
-                p.ExecutionId == position.ExecutionId &&
-                p.Id != position.Id &&
-                p.Status == PositionStatus.Open);
+            // Determine which is long and which is short
+            var longPos = position.Side == PositionSide.Long ? position : pairedPosition;
+            var shortPos = position.Side == PositionSide.Short ? position : pairedPosition;
 
-            if (pairedPosition != null)
-            {
-                // Determine which is long and which is short
-                var longPos = position.Side == PositionSide.Long ? position : pairedPosition;
-                var shortPos = position.Side == PositionSide.Short ? position : pairedPosition;
-
-                // Calculate execution-specific metrics
+            // Calculate execution-specific metrics
                 var longSizeUsd = (double)longPos.Quantity * (double)longPos.EntryPrice;
                 var shortSizeUsd = (double)shortPos.Quantity * (double)shortPos.EntryPrice;
 
@@ -380,12 +493,14 @@ public class AgentBackgroundService : BackgroundService
                 result["short_pnl_pct"] = shortSizeUsd > 0 ? (double)shortPos.UnrealizedPnL / shortSizeUsd * 100 : 0;
 
                 // Entry prices for both legs
-                result["entry_long_price"] = (double)longPos.EntryPrice;
-                result["entry_short_price"] = (double)shortPos.EntryPrice;
+                var entryLongPrice = (double)longPos.EntryPrice;
+                var entryShortPrice = (double)shortPos.EntryPrice;
+                result["entry_long_price"] = entryLongPrice;
+                result["entry_short_price"] = entryShortPrice;
 
                 // Fetch current prices from market snapshot
-                var currentLongPrice = (double)longPos.EntryPrice; // Default to entry price
-                var currentShortPrice = (double)shortPos.EntryPrice;
+                var currentLongPrice = entryLongPrice; // Default to entry price
+                var currentShortPrice = entryShortPrice;
 
                 if (marketSnapshot?.PerpPrices != null)
                 {
@@ -409,6 +524,7 @@ public class AgentBackgroundService : BackgroundService
                 // Funding fees (net funding is already calculated per position)
                 var longNetFunding = (double)(longPos.TotalFundingFeeReceived - longPos.TotalFundingFeePaid);
                 var shortNetFunding = (double)(shortPos.TotalFundingFeeReceived - shortPos.TotalFundingFeePaid);
+                var netFundingUsd = longNetFunding + shortNetFunding;
 
                 result["long_net_funding_usd"] = longNetFunding;
                 result["short_net_funding_usd"] = shortNetFunding;
@@ -442,10 +558,113 @@ public class AgentBackgroundService : BackgroundService
                 result["long_funding_rate"] = longFundingRate;
                 result["short_funding_rate"] = shortFundingRate;
 
-                // Entry fees (use trading fee paid as approximation)
-                result["entry_fees_paid_usd"] = (double)position.TradingFeePaid;
+                // Entry fees (use trading fee paid as approximation, include both legs)
+                var entryFeesUsd = (double)(longPos.TradingFeePaid + shortPos.TradingFeePaid);
+                result["entry_fees_paid_usd"] = entryFeesUsd;
+
+                // ========== CALCULATE MISSING FIELDS ==========
+
+                // 1. net_funding_ratio - Net funding / total capital used
+                var totalCapitalUsed = longSizeUsd + shortSizeUsd;
+                var netFundingRatio = totalCapitalUsed > 0 ? netFundingUsd / totalCapitalUsed : 0.0;
+                result["net_funding_ratio"] = netFundingRatio;
+
+                // 2. net_funding_rate - Current funding rate differential
+                result["net_funding_rate"] = shortFundingRate - longFundingRate;
+
+                // 3. current_spread_pct - Current price spread percentage
+                var avgCurrentPrice = (currentLongPrice + currentShortPrice) / 2.0;
+                var currentSpreadPct = avgCurrentPrice > 0 ? Math.Abs(currentLongPrice - currentShortPrice) / avgCurrentPrice : 0.0;
+                result["current_spread_pct"] = currentSpreadPct;
+
+                // 4. entry_spread_pct - Entry price spread percentage
+                var avgEntryPrice = (entryLongPrice + entryShortPrice) / 2.0;
+                var entrySpreadPct = avgEntryPrice > 0 ? Math.Abs(entryLongPrice - entryShortPrice) / avgEntryPrice : 0.0;
+                result["entry_spread_pct"] = entrySpreadPct;
+
+                // 5. value_to_capital_ratio - Position value / total capital
+                var valueToCapitalRatio = (double)totalCapital > 0 ? totalCapitalUsed / (double)totalCapital : 0.0;
+                result["value_to_capital_ratio"] = valueToCapitalRatio;
+
+                // 6. funding_efficiency - Net funding / entry fees
+                var fundingEfficiency = entryFeesUsd > 0 ? netFundingUsd / entryFeesUsd : 0.0;
+                result["funding_efficiency"] = fundingEfficiency;
+
+                // 7. liquidation_distance - Distance to liquidation threshold
+                // Calculate based on leverage and current P&L
+                // Liquidation occurs when loss reaches (1 / leverage) * 100%
+                // Distance = (liquidation_threshold - current_loss_pct) / liquidation_threshold
+                var liquidationThreshold = 100.0 / (double)position.Leverage; // e.g., 10% for 10x leverage
+                var currentLossPct = Math.Abs(Math.Min(0, unrealizedPnlPct)); // Only consider losses
+                var liquidationDistance = liquidationThreshold > 0
+                    ? Math.Max(0, (liquidationThreshold - currentLossPct) / liquidationThreshold)
+                    : 1.0;
+                result["liquidation_distance"] = liquidationDistance;
             }
-        }
+            else
+            {
+                // ========== FALLBACK: ExecutionId exists but no paired position found ==========
+                _logger.LogWarning(
+                    "Position {PositionId} has ExecutionId {ExecutionId} but no paired position found. Providing fallback values.",
+                    position.Id, position.ExecutionId);
+
+                // Provide single-leg position data with fallback values
+                result["long_pnl_pct"] = position.Side == PositionSide.Long ? unrealizedPnlPct : 0.0;
+                result["short_pnl_pct"] = position.Side == PositionSide.Short ? unrealizedPnlPct : 0.0;
+
+                result["entry_long_price"] = position.Side == PositionSide.Long ? (double)position.EntryPrice : 0.0;
+                result["entry_short_price"] = position.Side == PositionSide.Short ? (double)position.EntryPrice : 0.0;
+
+                // Try to get current price from market snapshot
+                var currentPrice = (double)position.EntryPrice;
+                if (marketSnapshot?.PerpPrices != null &&
+                    marketSnapshot.PerpPrices.TryGetValue(position.Exchange, out var exchangePrices) &&
+                    exchangePrices.TryGetValue(position.Symbol, out var priceDto))
+                {
+                    currentPrice = (double)priceDto.Price;
+                }
+
+                result["current_long_price"] = position.Side == PositionSide.Long ? currentPrice : 0.0;
+                result["current_short_price"] = position.Side == PositionSide.Short ? currentPrice : 0.0;
+
+                var netFunding = (double)(position.TotalFundingFeeReceived - position.TotalFundingFeePaid);
+                result["long_net_funding_usd"] = position.Side == PositionSide.Long ? netFunding : 0.0;
+                result["short_net_funding_usd"] = position.Side == PositionSide.Short ? netFunding : 0.0;
+
+                // Get funding rate from market snapshot
+                var fundingRate = 0.0;
+                if (marketSnapshot?.FundingRates != null &&
+                    marketSnapshot.FundingRates.TryGetValue(position.Exchange, out var exchangeFundingRates))
+                {
+                    var fr = exchangeFundingRates.FirstOrDefault(f => f.Symbol == position.Symbol);
+                    if (fr != null)
+                    {
+                        fundingRate = (double)fr.Rate;
+                    }
+                }
+
+                result["long_funding_rate"] = position.Side == PositionSide.Long ? fundingRate : 0.0;
+                result["short_funding_rate"] = position.Side == PositionSide.Short ? fundingRate : 0.0;
+
+                var entryFeesUsd = (double)position.TradingFeePaid;
+                result["entry_fees_paid_usd"] = entryFeesUsd;
+
+                // Calculate fallback values for missing fields
+                result["net_funding_ratio"] = positionSizeUsd > 0 ? netFunding / positionSizeUsd : 0.0;
+                result["net_funding_rate"] = 0.0; // No differential for single position
+                result["current_spread_pct"] = 0.0; // No spread for single position
+                result["entry_spread_pct"] = 0.0;
+                result["value_to_capital_ratio"] = (double)totalCapital > 0 ? positionSizeUsd / (double)totalCapital : 0.0;
+                result["funding_efficiency"] = entryFeesUsd > 0 ? netFunding / entryFeesUsd : 0.0;
+
+                var liquidationThreshold = 100.0 / (double)position.Leverage;
+                var currentLossPct = Math.Abs(Math.Min(0, unrealizedPnlPct));
+                var liquidationDistance = liquidationThreshold > 0
+                    ? Math.Max(0, (liquidationThreshold - currentLossPct) / liquidationThreshold)
+                    : 1.0;
+                result["liquidation_distance"] = liquidationDistance;
+            }
+        // Note: The fallback else block above handles positions without paired positions
 
         return Task.FromResult(result);
     }
@@ -532,19 +751,49 @@ public class AgentBackgroundService : BackgroundService
 
     /// <summary>
     /// Convert opportunity to dictionary for ML API
+    /// ALL 20 fields must match what the ML model expects (rl_predictor.py:_build_opportunity_features)
     /// </summary>
     private Dictionary<string, object> ConvertOpportunityToDict(ArbitrageOpportunityDto opp)
     {
         return new Dictionary<string, object>
         {
             ["symbol"] = opp.Symbol ?? "",
-            ["long_funding_rate"] = opp.LongFundingRate,
-            ["short_funding_rate"] = opp.ShortFundingRate,
-            ["long_funding_interval_hours"] = opp.LongFundingIntervalHours,
-            ["short_funding_interval_hours"] = opp.ShortFundingIntervalHours,
-            ["fund_profit_8h"] = opp.FundProfit8h,
-            ["fund_apr"] = opp.FundApr,
-            ["volume_24h"] = (double)opp.Volume24h
+
+            // Funding rates (fields 1-4)
+            ["long_funding_rate"] = (double)opp.LongFundingRate,
+            ["short_funding_rate"] = (double)opp.ShortFundingRate,
+            ["long_funding_interval_hours"] = opp.LongFundingIntervalHours ?? 8,
+            ["short_funding_interval_hours"] = opp.ShortFundingIntervalHours ?? 8,
+
+            // Profit metrics - current (fields 5-6)
+            ["fund_profit_8h"] = (double)opp.FundProfit8h,
+            ["fund_apr"] = (double)opp.FundApr,
+
+            // Projected profits - 24h and 3d (fields 7-10)
+            ["fundProfit8h24hProj"] = (double)(opp.FundProfit8h24hProj ?? 0m),
+            ["fundProfit8h3dProj"] = (double)(opp.FundProfit8h3dProj ?? 0m),
+            ["fundApr24hProj"] = (double)(opp.FundApr24hProj ?? 0m),
+            ["fundApr3dProj"] = (double)(opp.FundApr3dProj ?? 0m),
+
+            // Spread metrics (fields 11-14)
+            ["spread30SampleAvg"] = (double)(opp.Spread30SampleAvg ?? 0m),
+            ["priceSpread24hAvg"] = (double)(opp.PriceSpread24hAvg ?? 0m),
+            ["priceSpread3dAvg"] = (double)(opp.PriceSpread3dAvg ?? 0m),
+            ["spread_volatility_stddev"] = (double)(opp.SpreadVolatilityStdDev ?? 0m),
+
+            // Volume and liquidity (fields 15-17)
+            ["volume_24h"] = (double)opp.Volume24h,
+            ["bidAskSpreadPercent"] = (double)(opp.BidAskSpreadPercent ?? 0m),
+            ["orderbookDepthUsd"] = (double)(opp.OrderbookDepthUsd ?? 10000m),  // Default to 10k if missing
+
+            // Profit and cost estimates (fields 18-19)
+            ["estimatedProfitPercentage"] = (double)opp.EstimatedProfitPercentage,
+            ["positionCostPercent"] = (double)opp.PositionCostPercent,
+
+            // Field 20 is computed: short_funding_rate - long_funding_rate (handled by ML)
+
+            // CRITICAL: Flag for action masking to prevent duplicate entries
+            ["has_existing_position"] = opp.IsExistingPosition
         };
     }
 
@@ -557,7 +806,9 @@ public class AgentBackgroundService : BackgroundService
         List<ArbitrageOpportunityDto> opportunities,
         List<PositionDto> positions,
         ArbitrageExecutionService executionService,
-        ArbitrageDbContext context)
+        ArbitrageDbContext context,
+        IDataRepository<UserDataSnapshot> userDataRepository,
+        CancellationToken cancellationToken)
     {
         // Get or create execution lock for this user to prevent race conditions
         SemaphoreSlim executionLock;
@@ -611,7 +862,8 @@ public class AgentBackgroundService : BackgroundService
                     var sizeMultiplier = (decimal)(prediction.SizeMultiplier ?? 0.20); // Default to MEDIUM (20%) if not provided
 
                     // Get portfolio state to calculate available capital
-                    var availableCapital = await GetAvailableCapitalAsync(userId, context);
+                    // Note: We need to pass userDataRepository from the parent scope
+                    var availableCapital = await GetAvailableCapitalAsync(userId, context, userDataRepository, opportunity, cancellationToken);
                     var positionSizeUsd = availableCapital * sizeMultiplier;
 
                     // Apply minimum and maximum limits
@@ -704,14 +956,14 @@ public class AgentBackgroundService : BackgroundService
 
                 try
                 {
-                    // Get the execution ID from the position
+                    // Get the execution ID from the position (ExecutionId is always present now)
                     var executionId = positionToExit.ExecutionId;
 
-                    if (executionId == null || executionId == 0)
+                    if (executionId == 0)
                     {
                         result.Success = false;
-                        result.ErrorMessage = "Position has no execution ID";
-                        _logger.LogWarning("Position {PositionId} has no execution ID, cannot close", positionToExit.Id);
+                        result.ErrorMessage = "Position has invalid execution ID";
+                        _logger.LogWarning("Position {PositionId} has invalid execution ID (0), cannot close", positionToExit.Id);
                         return result;
                     }
 
@@ -728,11 +980,11 @@ public class AgentBackgroundService : BackgroundService
                     var durationHours = (DateTime.UtcNow - positionToExit.OpenedAt).TotalHours;
 
                     // Close the execution (which closes all positions in that execution)
-                    var response = await executionService.StopExecutionAsync(executionId.Value);
+                    var response = await executionService.StopExecutionAsync(executionId);
 
                     // Update result with EXIT info
                     result.Success = response.Success;
-                    result.ExecutionId = executionId.Value;
+                    result.ExecutionId = executionId;
                     result.DurationHours = durationHours;
 
                     if (response.Success)
@@ -744,14 +996,14 @@ public class AgentBackgroundService : BackgroundService
 
                         _logger.LogInformation(
                             "Agent successfully executed EXIT for Execution {ExecutionId}: {Message}",
-                            executionId.Value, response.Message);
+                            executionId, response.Message);
                     }
                     else
                     {
                         result.ErrorMessage = response.ErrorMessage;
                         _logger.LogWarning(
                             "Agent failed to execute EXIT for Execution {ExecutionId}: {Error}",
-                            executionId.Value, response.ErrorMessage);
+                            executionId, response.ErrorMessage);
                     }
                 }
                 catch (Exception ex)
@@ -774,89 +1026,97 @@ public class AgentBackgroundService : BackgroundService
     }
 
     /// <summary>
-    /// Calculate available capital for user (total equity - used margin)
+    /// Calculate available capital for user based on real exchange balances.
+    /// For cross-exchange opportunities, returns the minimum available balance across both exchanges.
     /// </summary>
-    private async Task<decimal> GetAvailableCapitalAsync(string userId, ArbitrageDbContext context)
+    private async Task<decimal> GetAvailableCapitalAsync(
+        string userId,
+        ArbitrageDbContext context,
+        IDataRepository<UserDataSnapshot> userDataRepository,
+        ArbitrageOpportunityDto opportunity,
+        CancellationToken cancellationToken = default)
     {
-        // Get all open positions for user
-        var openPositions = await context.Positions
-            .Where(p => p.UserId == userId && p.Status == PositionStatus.Open)
-            .ToListAsync();
+        List<string> exchangesToQuery = new();
 
-        // Calculate used margin
-        var usedMargin = openPositions.Sum(p => p.InitialMargin);
+        // Determine which exchanges to query based on strategy
+        if (opportunity.Strategy == ArbitrageStrategy.CrossExchange)
+        {
+            exchangesToQuery.Add(opportunity.LongExchange);
+            exchangesToQuery.Add(opportunity.ShortExchange);
+        }
+        else // SpotPerpetual or other single-exchange strategies
+        {
+            exchangesToQuery.Add(opportunity.Exchange);
+        }
 
-        // For now, assume user has $10000 total capital (this should come from actual balance)
-        // TODO: Get actual account balance from exchange connectors
-        var totalCapital = 10000m;
+        // Query balance data from repository for each exchange
+        var availableBalances = new List<decimal>();
 
-        var availableCapital = totalCapital - usedMargin;
+        foreach (var exchange in exchangesToQuery.Where(e => !string.IsNullOrEmpty(e)))
+        {
+            var key = $"userdata:{userId}:{exchange}";
+            var snapshot = await userDataRepository.GetAsync(key, cancellationToken);
 
-        _logger.LogDebug(
-            "Available capital for user {UserId}: Total=${Total:F2}, Used=${Used:F2}, Available=${Available:F2}",
-            userId, totalCapital, usedMargin, availableCapital);
+            if (snapshot?.Balance == null)
+            {
+                throw new InvalidOperationException(
+                    $"Unable to retrieve balance data for user {userId} on exchange {exchange}. " +
+                    "User data collector may not be running or data is stale.");
+            }
+
+            var futuresAvailable = snapshot.Balance.FuturesAvailableUsd;
+            availableBalances.Add(futuresAvailable);
+
+            _logger.LogDebug(
+                "Balance for user {UserId} on {Exchange}: FuturesAvailable=${Available:F2}, MarginUsed=${MarginUsed:F2}",
+                userId, exchange, futuresAvailable, snapshot.Balance.MarginUsed);
+        }
+
+        if (availableBalances.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"No exchanges specified for opportunity {opportunity.Symbol}. Cannot determine available capital.");
+        }
+
+        // For cross-exchange hedge positions, use the MINIMUM available balance
+        // This ensures we can open equal-sized positions on both exchanges
+        var availableCapital = availableBalances.Min();
+
+        _logger.LogInformation(
+            "Available capital for user {UserId} (Strategy: {Strategy}): ${Available:F2} " +
+            "(Exchanges: {Exchanges}, Balances: {Balances})",
+            userId,
+            opportunity.Strategy,
+            availableCapital,
+            string.Join(", ", exchangesToQuery),
+            string.Join(", ", availableBalances.Select(b => $"${b:F2}")));
 
         return Math.Max(0, availableCapital);
     }
 
     /// <summary>
-    /// Update agent statistics
+    /// Update agent statistics (session-based)
     /// </summary>
     private async Task UpdateAgentStatsAsync(string userId, string action, ArbitrageDbContext context)
     {
-        // Update session prediction count
+        // Update session decision counters
         var session = await context.AgentSessions
             .Where(s => s.UserId == userId && s.Status == AgentStatus.Running)
             .FirstOrDefaultAsync();
 
         if (session != null)
         {
-            session.TotalPredictions++;
+            // Increment appropriate decision counter based on action
+            if (action == "HOLD")
+                session.HoldDecisions++;
+            else if (action == "ENTER")
+                session.EnterDecisions++;
+            else if (action == "EXIT")
+                session.ExitDecisions++;
+
             session.UpdatedAt = DateTime.UtcNow;
+            await context.SaveChangesAsync();
         }
-
-        // Update or create AgentStats
-        var stats = await context.AgentStats
-            .Where(s => s.UserId == userId)
-            .OrderByDescending(s => s.UpdatedAt)
-            .FirstOrDefaultAsync();
-
-        if (stats == null)
-        {
-            stats = new AgentStats
-            {
-                UserId = userId,
-                TotalDecisions = 0,
-                HoldDecisions = 0,
-                EnterDecisions = 0,
-                ExitDecisions = 0,
-                TotalTrades = 0,
-                WinningTrades = 0,
-                LosingTrades = 0,
-                WinRate = 0,
-                TotalPnLUsd = 0,
-                TotalPnLPct = 0,
-                TodayPnLUsd = 0,
-                TodayPnLPct = 0,
-                ActivePositions = 0,
-                StatsPeriodStart = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            context.AgentStats.Add(stats);
-        }
-
-        // Increment decision counters
-        stats.TotalDecisions++;
-        if (action == "HOLD")
-            stats.HoldDecisions++;
-        else if (action == "ENTER")
-            stats.EnterDecisions++;
-        else if (action == "EXIT")
-            stats.ExitDecisions++;
-
-        stats.UpdatedAt = DateTime.UtcNow;
-
-        await context.SaveChangesAsync();
     }
 
     /// <summary>
@@ -921,7 +1181,7 @@ public class AgentBackgroundService : BackgroundService
     {
         try
         {
-            // Get latest session for duration
+            // Get latest session for duration and stats
             var session = await context.AgentSessions
                 .Where(s => s.UserId == userId && s.Status == AgentStatus.Running)
                 .OrderByDescending(s => s.StartedAt)
@@ -935,31 +1195,27 @@ public class AgentBackgroundService : BackgroundService
 
                 // Broadcast status update
                 await signalR.BroadcastAgentStatusAsync(userId, "running", durationSeconds, true, null);
-            }
 
-            // Get and broadcast latest stats
-            var stats = await context.AgentStats
-                .Where(s => s.UserId == userId)
-                .OrderByDescending(s => s.UpdatedAt)
-                .FirstOrDefaultAsync();
+                // Calculate stats from session data
+                var totalDecisions = session.HoldDecisions + session.EnterDecisions + session.ExitDecisions;
+                var totalTrades = session.WinningTrades + session.LosingTrades;
+                var winRate = totalTrades > 0 ? (decimal)session.WinningTrades / totalTrades : 0m;
 
-            if (stats != null)
-            {
                 var statsData = new
                 {
-                    totalDecisions = stats.TotalDecisions,
-                    holdDecisions = stats.HoldDecisions,
-                    enterDecisions = stats.EnterDecisions,
-                    exitDecisions = stats.ExitDecisions,
-                    totalTrades = stats.TotalTrades,
-                    winningTrades = stats.WinningTrades,
-                    losingTrades = stats.LosingTrades,
-                    winRate = stats.WinRate,
-                    totalPnLUsd = stats.TotalPnLUsd,
-                    totalPnLPct = stats.TotalPnLPct,
-                    todayPnLUsd = stats.TodayPnLUsd,
-                    todayPnLPct = stats.TodayPnLPct,
-                    activePositions = stats.ActivePositions
+                    totalDecisions = totalDecisions,
+                    holdDecisions = session.HoldDecisions,
+                    enterDecisions = session.EnterDecisions,
+                    exitDecisions = session.ExitDecisions,
+                    totalTrades = totalTrades,
+                    winningTrades = session.WinningTrades,
+                    losingTrades = session.LosingTrades,
+                    winRate = winRate,
+                    totalPnLUsd = session.SessionPnLUsd,
+                    totalPnLPct = session.SessionPnLPct,
+                    todayPnLUsd = session.SessionPnLUsd,
+                    todayPnLPct = session.SessionPnLPct,
+                    activePositions = session.ActivePositions
                 };
 
                 await signalR.BroadcastAgentStatsAsync(userId, statsData);
@@ -1025,6 +1281,24 @@ public class AgentBackgroundService : BackgroundService
     {
         _httpClient?.Dispose();
         base.Dispose();
+    }
+}
+
+/// <summary>
+/// Equality comparer for ArbitrageOpportunityDto to remove duplicates
+/// </summary>
+public class OpportunityComparer : IEqualityComparer<ArbitrageOpportunityDto>
+{
+    public bool Equals(ArbitrageOpportunityDto? x, ArbitrageOpportunityDto? y)
+    {
+        if (ReferenceEquals(x, y)) return true;
+        if (x is null || y is null) return false;
+        return x.UniqueKey == y.UniqueKey;
+    }
+
+    public int GetHashCode(ArbitrageOpportunityDto obj)
+    {
+        return obj.UniqueKey.GetHashCode();
     }
 }
 

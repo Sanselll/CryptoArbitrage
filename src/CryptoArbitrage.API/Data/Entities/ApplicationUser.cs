@@ -17,5 +17,4 @@ public class ApplicationUser : IdentityUser
     // Agent navigation properties
     public ICollection<AgentConfiguration> AgentConfigurations { get; set; } = new List<AgentConfiguration>();
     public ICollection<AgentSession> AgentSessions { get; set; } = new List<AgentSession>();
-    public ICollection<AgentStats> AgentStats { get; set; } = new List<AgentStats>();
 }

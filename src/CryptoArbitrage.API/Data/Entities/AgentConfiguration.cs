@@ -18,10 +18,10 @@ public class AgentConfiguration
     // Trading configuration parameters
     public decimal MaxLeverage { get; set; } = 1.0m;  // 1-5x
     public decimal TargetUtilization { get; set; } = 0.9m;  // 50-100% (0.5-1.0)
-    public int MaxPositions { get; set; } = 3;  // 1-3 concurrent positions
+    public int MaxPositions { get; set; } = 3;  // 1-3 concurrent executions (each execution = 2 positions: long + short hedge)
 
     // Prediction settings
-    public int PredictionIntervalSeconds { get; set; } = 60;  // Seconds between predictions
+    public int PredictionIntervalSeconds { get; set; } = 3600;  // 1 hour to match training environment (3600 seconds)
 
     // Timestamps
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
