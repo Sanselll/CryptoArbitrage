@@ -239,7 +239,7 @@ public class PositionController : BaseController
             Capital = currentCapital,
             InitialCapital = initialCapital,
             NumPositions = openPositions.Count,
-            Utilization = (float)(openPositions.Sum(p => p.InitialMargin) / currentCapital),
+            MarginUtilization = (float)(openPositions.Sum(p => p.InitialMargin) / currentCapital),
             TotalPnlPct = (float)(openPositions.Sum(p => p.UnrealizedPnL) / initialCapital * 100),
             Drawdown = 0.0f,  // TODO: Calculate drawdown
             Positions = openPositions.Take(3).Select(p =>

@@ -32,6 +32,8 @@ def parse_args():
     parser.add_argument('--initial-capital', type=float, default=10000.0)
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
+    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler.pkl',
+                        help='Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler.pkl)')
 
     # Curriculum
     parser.add_argument('--phase1-end', type=int, default=500,
@@ -41,11 +43,10 @@ def parse_args():
     parser.add_argument('--num-episodes', type=int, default=3000,
                         help='Total training episodes')
 
-    # Reward config
+    # Reward config (Simplified RL-v2 approach)
     parser.add_argument('--pnl-reward-scale', type=float, default=3.0)
-    parser.add_argument('--entry-penalty-scale', type=float, default=3.0)
-    parser.add_argument('--liquidation-penalty-scale', type=float, default=20.0)
-    parser.add_argument('--stop-loss-penalty', type=float, default=-2.0)
+    parser.add_argument('--entry-penalty-scale', type=float, default=1.0)
+    parser.add_argument('--stop-loss-penalty', type=float, default=-1.0)
 
     # PPO hyperparameters
     parser.add_argument('--learning-rate', type=float, default=3e-4)
@@ -87,11 +88,10 @@ def main():
     print(curriculum)
     print()
 
-    # Create reward config
+    # Create reward config (Simplified RL-v2 approach)
     reward_config = RewardConfig(
         pnl_reward_scale=args.pnl_reward_scale,
         entry_penalty_scale=args.entry_penalty_scale,
-        liquidation_penalty_scale=args.liquidation_penalty_scale,
         stop_loss_penalty=args.stop_loss_penalty,
     )
 
@@ -142,7 +142,7 @@ def main():
             reward_config=reward_config,
             episode_length_days=episode_length_days,
             price_history_path=args.price_history_path,
-            simple_mode=False,
+            feature_scaler_path=args.feature_scaler_path,
             verbose=False,
         )
 

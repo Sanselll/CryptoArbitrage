@@ -16,12 +16,12 @@ public class AgentConfiguration
     public ApplicationUser User { get; set; } = null!;
 
     // Trading configuration parameters
-    public decimal MaxLeverage { get; set; } = 1.0m;  // 1-5x
-    public decimal TargetUtilization { get; set; } = 0.9m;  // 50-100% (0.5-1.0)
-    public int MaxPositions { get; set; } = 3;  // 1-3 concurrent executions (each execution = 2 positions: long + short hedge)
+    public decimal MaxLeverage { get; set; } = 2.0m;  // 1-5x (trained with 2.0x)
+    public decimal TargetUtilization { get; set; } = 0.8m;  // 50-100% (0.5-1.0) (trained with 0.8)
+    public int MaxPositions { get; set; } = 2;  // 1-3 concurrent executions (trained with 2)
 
     // Prediction settings
-    public int PredictionIntervalSeconds { get; set; } = 3600;  // 1 hour to match training environment (3600 seconds)
+    public int PredictionIntervalSeconds { get; set; } = 300;  // 5 minutes to match training environment (300 seconds)
 
     // Timestamps
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

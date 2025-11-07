@@ -42,6 +42,8 @@ def parse_args():
                         help='Output CSV file for trade records (default: trades_inference.csv)')
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
+    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler.pkl',
+                        help='Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler.pkl)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducible results (default: 42)')
 
@@ -81,7 +83,7 @@ def test_model_inference(args):
         episode_length_days=args.episode_length_days,
         step_hours=step_hours,
         price_history_path=args.price_history_path,
-        simple_mode=False,
+        feature_scaler_path=args.feature_scaler_path,
         verbose=False,
     )
 

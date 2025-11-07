@@ -5,7 +5,6 @@ using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.DataCollection.Events;
-using CryptoArbitrage.API.Services.ML;
 using Microsoft.EntityFrameworkCore;
 
 namespace CryptoArbitrage.API.Services.Arbitrage.Detection;
@@ -22,7 +21,6 @@ public class OpportunityAggregator : IHostedService
     private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
     private readonly IDataRepository<MarketDataSnapshot> _marketPriceRepository;
     private readonly IOpportunityDetectionService _opportunityDetectionService;
-    private readonly RLPredictionService _rlPredictionService;
     private readonly IServiceScopeFactory _serviceScopeFactory;
 
     // Track freshness of data sources
@@ -39,7 +37,6 @@ public class OpportunityAggregator : IHostedService
         IDataRepository<FundingRateDto> fundingRateRepository,
         IDataRepository<MarketDataSnapshot> marketPriceRepository,
         IOpportunityDetectionService opportunityDetectionService,
-        RLPredictionService rlPredictionService,
         IServiceScopeFactory serviceScopeFactory)
     {
         _logger = logger;
@@ -47,7 +44,6 @@ public class OpportunityAggregator : IHostedService
         _fundingRateRepository = fundingRateRepository;
         _marketPriceRepository = marketPriceRepository;
         _opportunityDetectionService = opportunityDetectionService;
-        _rlPredictionService = rlPredictionService;
         _serviceScopeFactory = serviceScopeFactory;
     }
 
@@ -190,9 +186,6 @@ public class OpportunityAggregator : IHostedService
 
             // Mark opportunities that have existing positions
             MarkExistingPositions(detectedOpportunities, openPositionKeys);
-
-            // Add RL predictions to opportunities
-            await EnrichWithRLPredictionsAsync(detectedOpportunities);
 
             var duration = DateTime.UtcNow - startTime;
 
@@ -359,108 +352,5 @@ public class OpportunityAggregator : IHostedService
             "Marked {Marked} out of {Total} opportunities as existing positions",
             markedCount,
             opportunities.Count);
-    }
-
-    /// <summary>
-    /// Enriches opportunities with RL model predictions
-    /// Adds ENTER probability, confidence, and state value estimates
-    /// </summary>
-    private async Task EnrichWithRLPredictionsAsync(List<ArbitrageOpportunityDto> opportunities)
-    {
-        if (opportunities.Count == 0)
-            return;
-
-        try
-        {
-            // Build portfolio state
-            var portfolioState = await BuildPortfolioStateAsync();
-
-            // Get RL predictions for all opportunities (ML API handles batching internally)
-            var predictions = await _rlPredictionService.EvaluateOpportunitiesAsync(
-                opportunities,
-                portfolioState);
-
-            // RL prediction enrichment removed - fields no longer exist in ArbitrageOpportunityDto
-
-            _logger.LogInformation(
-                "Enriched {Count} opportunities with RL predictions",
-                predictions.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to enrich opportunities with RL predictions");
-            // Don't fail the entire pipeline if RL predictions fail
-        }
-    }
-
-    /// <summary>
-    /// Builds current portfolio state for RL model evaluation
-    /// </summary>
-    private async Task<RLPortfolioState> BuildPortfolioStateAsync()
-    {
-        try
-        {
-            using var scope = _serviceScopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
-
-            // Get all open positions for all users (include transactions for funding fee calculation)
-            var openPositions = await dbContext.Positions
-                .Include(p => p.Transactions)
-                .Where(p => p.Status == PositionStatus.Open)
-                .ToListAsync();
-
-            // Calculate portfolio metrics
-            decimal totalCapital = 10000m; // Default initial capital
-            decimal totalPnL = openPositions.Sum(p => p.RealizedPnLUsd + p.UnrealizedPnL);
-            decimal totalMargin = openPositions.Sum(p => p.InitialMargin);
-
-            var portfolioState = new RLPortfolioState
-            {
-                Capital = totalCapital + totalPnL,
-                InitialCapital = totalCapital,
-                NumPositions = openPositions.Count,
-                Utilization = totalCapital > 0 ? (float)(totalMargin / totalCapital) : 0f,
-                TotalPnlPct = totalCapital > 0 ? (float)(totalPnL / totalCapital * 100) : 0f,
-                Drawdown = 0f, // Calculate if needed
-                Positions = openPositions.Take(3).Select(p =>
-                {
-                    // Calculate net funding fee from transactions
-                    var fundingReceived = p.Transactions
-                        .Where(t => t.TransactionType == TransactionType.FundingFee && t.Amount > 0)
-                        .Sum(t => t.Amount);
-                    var fundingPaid = p.Transactions
-                        .Where(t => t.TransactionType == TransactionType.FundingFee && t.Amount < 0)
-                        .Sum(t => Math.Abs(t.Amount));
-                    var netFunding = fundingReceived - fundingPaid;
-
-                    return new RLPositionState
-                    {
-                        PnlPct = p.InitialMargin > 0 ? (float)(p.UnrealizedPnL / p.InitialMargin * 100) : 0f,
-                        HoursHeld = (float)(DateTime.UtcNow - p.OpenedAt).TotalHours,
-                        FundingRate = p.InitialMargin > 0
-                            ? (float)(netFunding / p.InitialMargin / (decimal)Math.Max(1, (DateTime.UtcNow - p.OpenedAt).TotalHours) * 8 * 100)
-                            : 0f
-                    };
-                }).ToList()
-            };
-
-            return portfolioState;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to build portfolio state for RL predictions");
-
-            // Return default state if error
-            return new RLPortfolioState
-            {
-                Capital = 10000m,
-                InitialCapital = 10000m,
-                NumPositions = 0,
-                Utilization = 0f,
-                TotalPnlPct = 0f,
-                Drawdown = 0f,
-                Positions = new List<RLPositionState>()
-            };
-        }
     }
 }

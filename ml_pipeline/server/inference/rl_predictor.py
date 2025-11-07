@@ -25,6 +25,7 @@ Usage:
 
 import numpy as np
 import torch
+import pickle
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
@@ -62,17 +63,32 @@ class ModularRLPredictor:
     with probabilities, confidence scores, and recommended position sizes.
     """
 
-    def __init__(self, model_path: str = 'checkpoints/best_model.pt', device: str = 'cpu'):
+    def __init__(self, model_path: str = 'checkpoints/best_model.pt',
+                 feature_scaler_path: str = 'trained_models/rl/feature_scaler.pkl',
+                 device: str = 'cpu'):
         """
         Initialize the modular RL predictor.
 
         Args:
             model_path: Path to trained PPOTrainer checkpoint (.pt file)
+            feature_scaler_path: Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler.pkl)
             device: Device to use ('cpu' or 'cuda')
         """
         print(f"Loading Modular RL model from: {model_path}")
 
         self.device = device
+
+        # Load feature scaler (critical for proper predictions!)
+        self.feature_scaler = None
+        scaler_path = Path(feature_scaler_path)
+        if scaler_path.exists():
+            with open(scaler_path, 'rb') as f:
+                self.feature_scaler = pickle.load(f)
+            print(f"✅ Feature scaler loaded from: {feature_scaler_path}")
+            print(f"   Features will be standardized (mean=0, std=1)")
+        else:
+            print(f"⚠️  WARNING: Feature scaler not found at: {feature_scaler_path}")
+            print(f"   Using raw features (may cause poor predictions!)")
 
         # Create network
         self.network = ModularPPONetwork()
@@ -248,7 +264,28 @@ class ModularRLPredictor:
                 short_pnl_pct = pos.get('short_pnl_pct', 0.0) / 100.0
 
                 # 11. Liquidation distance
-                liquidation_distance = pos.get('liquidation_distance', 1.0)
+                # Calculate from leverage and prices if not provided
+                liquidation_distance = pos.get('liquidation_distance', None)
+                if liquidation_distance is None:
+                    leverage = pos.get('leverage', 1.0)
+                    entry_long = pos.get('entry_long_price', 0.0)
+                    entry_short = pos.get('entry_short_price', 0.0)
+                    current_long = pos.get('current_long_price', entry_long)
+                    current_short = pos.get('current_short_price', entry_short)
+
+                    if leverage > 0 and entry_long > 0 and entry_short > 0:
+                        # Calculate liquidation prices (matches training environment formula)
+                        long_liq = entry_long * (1 - 0.9 / leverage)
+                        short_liq = entry_short * (1 + 0.9 / leverage)
+
+                        # Calculate distances (% from current to liquidation)
+                        long_dist = abs(current_long - long_liq) / current_long if current_long > 0 else 1.0
+                        short_dist = abs(short_liq - current_short) / current_short if current_short > 0 else 1.0
+
+                        # Return minimum (closest to liquidation = highest risk)
+                        liquidation_distance = min(long_dist, short_dist)
+                    else:
+                        liquidation_distance = 1.0  # Safe default (no liquidation risk)
 
                 # 12. Position is active
                 position_is_active = 1.0
@@ -271,6 +308,7 @@ class ModularRLPredictor:
         Build opportunity features for up to 10 slots (200 dimensions total).
 
         Each opportunity has 20 features (no momentum features, matches full mode).
+        Features are standardized using the feature scaler if available.
 
         Args:
             opportunities: List of up to 10 opportunity dicts
@@ -309,6 +347,14 @@ class ModularRLPredictor:
 
                 # Convert to float32 and ensure no NaN/inf
                 features = [float(np.nan_to_num(x, nan=0.0, posinf=100.0, neginf=-100.0)) for x in features]
+
+                # Apply feature scaler if available
+                if self.feature_scaler is not None:
+                    # Scaler now expects 20 features (matches full mode)
+                    features_array = np.array(features)
+                    # Scale
+                    features_scaled = self.feature_scaler.transform(features_array.reshape(1, 20))
+                    features = features_scaled.flatten().tolist()
             else:
                 # Empty slot - all zeros
                 features = [0.0] * 20
@@ -495,8 +541,56 @@ class ModularRLPredictor:
         # Build observation
         obs = self._build_observation(trading_config, portfolio, opportunities)
 
-        # Build action mask (includes checking for existing positions)
-        num_positions = len(portfolio.get('positions', []))
+        # DEBUG: Log input data structure for analysis
+        print(f"\n{'='*80}")
+        print(f"ML PREDICTOR INPUT DATA")
+        print(f"{'='*80}")
+        print(f"\n📊 PORTFOLIO STATE:")
+        print(f"  Positions count: {len(portfolio.get('positions', []))}")
+        print(f"  Total capital: ${portfolio.get('total_capital', 0):.2f}")
+        print(f"  Utilization: {portfolio.get('utilization', 0):.2f}%")
+        print(f"  Total PnL %: {portfolio.get('total_pnl_pct', 0):.2f}%")
+
+        # Log each position in detail
+        for i, pos in enumerate(portfolio.get('positions', [])):
+            print(f"\n  Position {i+1}:")
+            print(f"    Symbol: {pos.get('symbol', 'N/A')}")
+            print(f"    Hours held (raw): {pos.get('hours_held', 0):.2f}h")
+            print(f"    Unrealized PnL %: {pos.get('unrealized_pnl_pct', 0):.2f}%")
+            print(f"    Long net funding USD: ${pos.get('long_net_funding_usd', 0):.2f}")
+            print(f"    Short net funding USD: ${pos.get('short_net_funding_usd', 0):.2f}")
+            print(f"    Position size USD: ${pos.get('position_size_usd', 0):.2f}")
+            print(f"    Current long price: ${pos.get('current_long_price', 0):.2f}")
+            print(f"    Current short price: ${pos.get('current_short_price', 0):.2f}")
+            print(f"    Entry long price: ${pos.get('entry_long_price', 0):.2f}")
+            print(f"    Entry short price: ${pos.get('entry_short_price', 0):.2f}")
+            print(f"    Current spread %: {pos.get('current_spread_pct', 0):.4f}")
+            print(f"    Entry spread %: {pos.get('entry_spread_pct', 0):.4f}")
+            print(f"    Long PnL %: {pos.get('long_pnl_pct', 0):.2f}%")
+            print(f"    Short PnL %: {pos.get('short_pnl_pct', 0):.2f}%")
+            print(f"    Liquidation distance: {pos.get('liquidation_distance', 1.0):.4f}")
+            print(f"    Position is active: {pos.get('position_is_active', 0)}")
+
+        print(f"\n⚙️  TRADING CONFIG:")
+        print(f"  Max leverage: {trading_config.get('max_leverage', 1.0)}")
+        print(f"  Target utilization: {trading_config.get('target_utilization', 0.5)}")
+        print(f"  Max positions: {trading_config.get('max_positions', 3)}")
+
+        print(f"\n🎯 OPPORTUNITIES: {len(opportunities)}")
+        for i, opp in enumerate(opportunities[:3]):  # Show first 3
+            print(f"  Opp {i+1}: {opp.get('symbol', 'N/A')} - Fund APR: {opp.get('fund_apr', 0):.2f}%")
+
+        print(f"\n📈 OBSERVATION VECTOR:")
+        print(f"  Shape: {obs.shape}")
+        print(f"  Config features (5): {obs[:5]}")
+        print(f"  Portfolio features (10): {obs[5:15]}")
+        print(f"  Execution features (60): First 12: {obs[15:27]}")
+        print(f"  Opportunity features (200): First 20: {obs[75:95]}")
+        print(f"{'='*80}\n")
+
+        # Build action mask (count only ACTIVE positions, not empty slots)
+        positions = portfolio.get('positions', [])
+        num_positions = sum(1 for p in positions if p.get('is_active', False) or p.get('position_is_active', 0.0) > 0.5)
         max_positions = trading_config.get('max_positions', 3)
         action_mask = self._get_action_mask(opportunities, num_positions, max_positions)
 

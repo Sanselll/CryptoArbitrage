@@ -1,13 +1,20 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CryptoArbitrage.API.Constants;
+using CryptoArbitrage.API.Data;
 using CryptoArbitrage.API.Data.Entities;
 using CryptoArbitrage.API.Models;
+using CryptoArbitrage.API.Models.DataCollection;
+using CryptoArbitrage.API.Services.DataCollection.Abstractions;
+using CryptoArbitrage.API.Services.Agent;
+using Microsoft.EntityFrameworkCore;
 
 namespace CryptoArbitrage.API.Services.ML;
 
 /// <summary>
 /// Service for getting RL (Reinforcement Learning) predictions from the Python ML API
+/// Centralizes ALL feature preparation (275 features total) matching the training environment
 /// Evaluates ENTER probabilities for opportunities and EXIT probabilities for positions
 /// </summary>
 public class RLPredictionService : IDisposable
@@ -18,9 +25,28 @@ public class RLPredictionService : IDisposable
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly JsonSerializerOptions _deserializeOptions;
 
-    public RLPredictionService(ILogger<RLPredictionService> logger, IConfiguration configuration)
+    // Data access dependencies for feature preparation
+    private readonly ArbitrageDbContext _context;
+    private readonly IDataRepository<UserDataSnapshot> _userDataRepository;
+    private readonly IDataRepository<MarketDataSnapshot> _marketDataRepository;
+    private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
+    private readonly IAgentConfigurationService _agentConfigService;
+
+    public RLPredictionService(
+        ILogger<RLPredictionService> logger,
+        IConfiguration configuration,
+        ArbitrageDbContext context,
+        IDataRepository<UserDataSnapshot> userDataRepository,
+        IDataRepository<MarketDataSnapshot> marketDataRepository,
+        IDataRepository<FundingRateDto> fundingRateRepository,
+        IAgentConfigurationService agentConfigService)
     {
         _logger = logger;
+        _context = context;
+        _userDataRepository = userDataRepository;
+        _marketDataRepository = marketDataRepository;
+        _fundingRateRepository = fundingRateRepository;
+        _agentConfigService = agentConfigService;
 
         // Get configuration (same ML API server, different port if needed)
         var host = configuration["MLApi:Host"] ?? "localhost";
@@ -126,6 +152,214 @@ public class RLPredictionService : IDisposable
     }
 
     /// <summary>
+    /// Evaluate opportunities with COMPLETE feature preparation (275 features total)
+    /// This is the NEW centralized method that prepares ALL features internally
+    /// Features breakdown:
+    /// - Config: 5 features (from AgentConfiguration)
+    /// - Portfolio: 10 features (calculated from DB + repositories)
+    /// - Positions: 60 features (5 slots × 12 features, from Position entities)
+    /// - Opportunities: 200 features (10 slots × 20 features, from input)
+    /// </summary>
+    /// <param name="userId">User ID to prepare context for</param>
+    /// <param name="opportunities">List of opportunities to evaluate</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Dictionary mapping opportunity unique key to RL prediction</returns>
+    public async Task<Dictionary<string, RLPredictionDto>> EvaluateOpportunitiesWithFullContextAsync(
+        string userId,
+        IEnumerable<ArbitrageOpportunityDto> opportunities,
+        CancellationToken cancellationToken = default)
+    {
+        var oppList = opportunities.ToList();
+        var result = new Dictionary<string, RLPredictionDto>();
+
+        if (oppList.Count == 0)
+            return result;
+
+        try
+        {
+            _logger.LogInformation("=== RLPredictionService: Preparing COMPLETE 275-feature payload ===");
+
+            // 1. Get or create AgentConfiguration (5 config features)
+            var agentConfig = await _agentConfigService.GetOrCreateConfigurationAsync(userId);
+            var tradingConfig = BuildTradingConfig(agentConfig);
+            _logger.LogDebug("Config features: MaxLeverage={MaxLeverage}, TargetUtil={TargetUtil}, MaxPos={MaxPos}",
+                tradingConfig.MaxLeverage, tradingConfig.TargetUtilization, tradingConfig.MaxPositions);
+
+            // 2. Get active positions from database (DEPRECATED - should use UserDataSnapshot repository)
+            var positions = await _context.Positions
+                .Where(p => p.UserId == userId && p.Status == PositionStatus.Open)
+                .Include(p => p.Execution)
+                .ToListAsync(cancellationToken);
+            var numExecutions = positions.Select(p => p.ExecutionId).Distinct().Count();
+            _logger.LogDebug("Found {Count} active positions across {Executions} executions", positions.Count, numExecutions);
+
+            // 3. Build complete portfolio state (10 portfolio features + 60 position features)
+            var portfolio = await BuildCompletePortfolioStateAsync(userId, positions, agentConfig, cancellationToken);
+            _logger.LogInformation("Portfolio features: Capital=${Capital:F2}, Util={Util:F2}%, NumPos={NumPos}, AvgPnl={AvgPnl:F2}%",
+                portfolio.Capital, portfolio.MarginUtilization, portfolio.NumPositions, portfolio.AvgPositionPnlPct);
+            _logger.LogInformation("Position features: {Count} slots prepared ({Active} active, {Empty} empty)",
+                portfolio.Positions.Count,
+                portfolio.Positions.Count(p => p.IsActive),
+                portfolio.Positions.Count(p => !p.IsActive));
+
+            // 4. Build request payload
+            var payload = new
+            {
+                opportunities = oppList.Select(ConvertOpportunityToFeatures).ToList(),
+                portfolio = portfolio,
+                trading_config = tradingConfig
+            };
+
+            // 5. Serialize and send request
+            var json = JsonSerializer.Serialize(payload, _jsonOptions);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            _logger.LogInformation("Calling ML API /rl/predict/opportunities with {Count} opportunities", oppList.Count);
+            _logger.LogDebug("Payload size: {Size} bytes", json.Length);
+
+            var response = await _httpClient.PostAsync("/rl/predict/opportunities", content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                _logger.LogError("ML API prediction failed: {Status} - {Error}", response.StatusCode, error);
+                return result;
+            }
+
+            // 6. Deserialize response
+            var responseJson = await response.Content.ReadAsStringAsync();
+            var apiResponse = JsonSerializer.Deserialize<RLOpportunitiesResponse>(responseJson, _deserializeOptions);
+
+            if (apiResponse?.Predictions == null)
+            {
+                _logger.LogWarning("ML API returned null predictions");
+                return result;
+            }
+
+            // 7. Map predictions back to opportunities
+            foreach (var prediction in apiResponse.Predictions)
+            {
+                if (prediction.OpportunityIndex >= 0 && prediction.OpportunityIndex < oppList.Count)
+                {
+                    var opp = oppList[prediction.OpportunityIndex];
+                    result[opp.UniqueKey] = new RLPredictionDto
+                    {
+                        ActionProbability = prediction.EnterProbability,
+                        HoldProbability = prediction.HoldProbability,
+                        Confidence = prediction.Confidence,
+                        StateValue = prediction.StateValue,
+                        ModelVersion = apiResponse.ModelVersion
+                    };
+                }
+            }
+
+            _logger.LogInformation("✅ Complete 275-feature predictions received for {Count} opportunities", result.Count);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get RL predictions with full context for user {UserId}", userId);
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Get modular action decision with COMPLETE feature preparation (for AgentBackgroundService)
+    /// Returns a SINGLE action decision (ENTER/EXIT/HOLD) based on all 275 features
+    /// This is the method AgentBackgroundService should use
+    /// </summary>
+    public async Task<AgentPrediction?> GetModularActionAsync(
+        string userId,
+        IEnumerable<ArbitrageOpportunityDto> opportunities,
+        List<PositionDto> repositoryPositions,
+        CancellationToken cancellationToken = default)
+    {
+        var oppList = opportunities.ToList();
+
+        if (oppList.Count == 0)
+            return new AgentPrediction { Action = "HOLD", Confidence = "LOW" };
+
+        try
+        {
+            _logger.LogInformation("=== RLPredictionService: Preparing modular action with COMPLETE 275-feature payload ===");
+
+            // 1. Get or create AgentConfiguration (5 config features)
+            var agentConfig = await _agentConfigService.GetOrCreateConfigurationAsync(userId);
+            if (agentConfig == null)
+            {
+                _logger.LogError("AgentConfiguration is null for user {UserId}, cannot proceed", userId);
+                return null;
+            }
+            var tradingConfig = BuildTradingConfig(agentConfig);
+
+            _logger.LogInformation("Trading config: MaxLeverage={MaxLeverage}, TargetUtilization={TargetUtil}, MaxPositions={MaxPos}",
+                tradingConfig.MaxLeverage, tradingConfig.TargetUtilization, tradingConfig.MaxPositions);
+
+            // 2. Convert PositionDto from repository to Position entities (for position features)
+            // Using same data source as frontend (UserDataSnapshot) instead of direct database query
+            var positions = ConvertPositionDtosToEntities(repositoryPositions, userId);
+            _logger.LogInformation("Using {Count} positions from UserDataSnapshot repository (same source as frontend)", positions.Count);
+
+            // 3. Build complete portfolio state (10 portfolio features + 60 position features)
+            var portfolio = await BuildCompletePortfolioStateAsync(userId, positions, agentConfig, cancellationToken);
+
+            // 4. Build request payload for modular mode
+            var payload = new
+            {
+                opportunities = oppList.Select(ConvertOpportunityToFeatures).ToList(),
+                portfolio = portfolio,
+                trading_config = tradingConfig
+            };
+
+            // 5. Serialize and send request
+            var json = JsonSerializer.Serialize(payload, _jsonOptions);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            _logger.LogInformation("Calling ML API /rl/predict/opportunities (modular mode) with {Count} opportunities", oppList.Count);
+
+            var response = await _httpClient.PostAsync("/rl/predict/opportunities", content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                _logger.LogError("ML API prediction failed: {Status} - {Error}", response.StatusCode, error);
+                return null;
+            }
+
+            // 6. Deserialize modular response
+            var responseJson = await response.Content.ReadAsStringAsync();
+            var mlResponse = JsonSerializer.Deserialize<MLModularResponse>(responseJson, _deserializeOptions);
+
+            if (mlResponse == null)
+            {
+                return new AgentPrediction { Action = "HOLD", Confidence = "LOW" };
+            }
+
+            _logger.LogInformation("ML API returned action: {Action} (Confidence: {Confidence:P0}, OpportunityIndex: {Index}, Symbol: {Symbol})",
+                mlResponse.Action, mlResponse.Confidence, mlResponse.OpportunityIndex, mlResponse.OpportunitySymbol);
+
+            // 7. Map modular response to AgentPrediction
+            return new AgentPrediction
+            {
+                Action = mlResponse.Action ?? "HOLD",
+                OpportunityIndex = mlResponse.OpportunityIndex,
+                OpportunitySymbol = mlResponse.OpportunitySymbol,
+                PositionSize = mlResponse.PositionSize,
+                SizeMultiplier = mlResponse.SizeMultiplier,
+                PositionIndex = mlResponse.PositionIndex,
+                Confidence = mlResponse.Confidence >= 0.7 ? "HIGH" : mlResponse.Confidence >= 0.4 ? "MEDIUM" : "LOW",
+                EnterProbability = mlResponse.Confidence,
+                StateValue = mlResponse.StateValue
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get modular action for user {UserId}", userId);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Evaluate EXIT probabilities for open positions (execution-based)
     /// Groups positions by ExecutionId and evaluates each execution SEPARATELY
     /// Makes one API call per execution to respect Simple Mode constraint (1 execution per call)
@@ -194,7 +428,8 @@ public class RLPredictionService : IDisposable
                             total_capital = portfolio.Capital,
                             capital = portfolio.Capital,
                             initial_capital = portfolio.InitialCapital,
-                            utilization = portfolio.Utilization,
+                            margin_utilization = portfolio.MarginUtilization,
+                            capital_utilization = portfolio.CapitalUtilization,
                             total_pnl_pct = portfolio.TotalPnlPct,
                             max_drawdown = portfolio.Drawdown,
                             drawdown = portfolio.Drawdown,
@@ -303,7 +538,8 @@ public class RLPredictionService : IDisposable
             bidAskSpreadPercent = (float)(opp.BidAskSpreadPercent ?? 0),
             orderbookDepthUsd = (float)(opp.OrderbookDepthUsd ?? 0),
             estimatedProfitPercentage = (float)opp.EstimatedProfitPercentage,
-            positionCostPercent = (float)opp.PositionCostPercent
+            positionCostPercent = (float)opp.PositionCostPercent,
+            has_existing_position = opp.IsExistingPosition  // CRITICAL: For action masking
         };
     }
 
@@ -449,9 +685,473 @@ public class RLPredictionService : IDisposable
             position_size_usd = positionSizeUsd,
             entry_fees_paid_usd = entryFeesUsd,
             long_pnl_pct = longPnlPct,
-            short_pnl_pct = shortPnlPct
+            short_pnl_pct = shortPnlPct,
+            leverage = (float)longPos.Leverage  // For ML to calculate liquidation_distance
         };
     }
+
+    #region Feature Preparation Helper Methods
+
+    /// <summary>
+    /// Build trading config from AgentConfiguration (5 features)
+    /// </summary>
+    private RLTradingConfig BuildTradingConfig(AgentConfiguration config)
+    {
+        return new RLTradingConfig
+        {
+            MaxLeverage = config.MaxLeverage,
+            TargetUtilization = config.TargetUtilization,
+            MaxPositions = config.MaxPositions,
+            StopLossThreshold = -0.02m,  // Default: -2% stop loss
+            LiquidationBuffer = 0.15m    // Default: 15% buffer from liquidation
+        };
+    }
+
+    /// <summary>
+    /// Convert PositionDto from UserDataSnapshot repository to Position entities
+    /// This ensures ML predictor uses the same data source as the frontend
+    /// </summary>
+    private List<Position> ConvertPositionDtosToEntities(List<PositionDto> dtos, string userId)
+    {
+        return dtos.Select(dto => new Position
+        {
+            Id = dto.Id,
+            ExecutionId = dto.ExecutionId,
+            UserId = userId,
+            Exchange = dto.Exchange,
+            Symbol = dto.Symbol,
+            Type = dto.Type,
+            Side = dto.Side,
+            Status = dto.Status,
+            EntryPrice = dto.EntryPrice,
+            ExitPrice = dto.ExitPrice,
+            Quantity = dto.Quantity,
+            Leverage = dto.Leverage,
+            InitialMargin = dto.InitialMargin,
+            FundingEarnedUsd = dto.FundingEarnedUsd,
+            TradingFeesUsd = dto.TradingFeesUsd,
+            PricePnLUsd = dto.PricePnLUsd,
+            RealizedPnLUsd = dto.RealizedPnLUsd,
+            RealizedPnLPct = dto.RealizedPnLPct,
+            UnrealizedPnL = dto.UnrealizedPnL,
+            ReconciliationStatus = dto.ReconciliationStatus,
+            ReconciliationCompletedAt = dto.ReconciliationCompletedAt,
+            OpenedAt = dto.OpenedAt,
+            ClosedAt = dto.ClosedAt
+            // Note: Position entity doesn't have TotalFundingFeePaid, TotalFundingFeeReceived, TradingFeePaid, ActiveOpportunityId
+            // These are DTO-specific properties that aren't needed for ML feature calculation
+        }).ToList();
+    }
+
+    // REMOVED: GetActivePositionsAsync - No longer needed as we use UserDataSnapshot repository
+    // The ML predictor now uses the same data source as the frontend (UserDataSnapshot)
+    // instead of querying the database directly
+
+    /// <summary>
+    /// Build complete portfolio state (10 portfolio features + 60 position features = 5 slots × 12 features)
+    /// Matches environment.py:_get_observation() portfolio section
+    /// </summary>
+    private async Task<RLPortfolioState> BuildCompletePortfolioStateAsync(
+        string userId,
+        List<Position> positions,
+        AgentConfiguration config,
+        CancellationToken cancellationToken)
+    {
+        // 1. Get total capital from UserDataSnapshot
+        var totalCapital = await GetTotalCapitalAsync(userId, cancellationToken);
+        var marginUsed = await GetMarginUsedAsync(userId, cancellationToken);
+
+        // 2. Calculate utilization (margin used / total capital)
+        var utilization = totalCapital > 0 ? (float)(marginUsed / totalCapital) : 0.0f;
+
+        // 3. Calculate average position P&L
+        var avgPnlPct = CalculateAvgPositionPnl(positions, totalCapital);
+
+        // 4. Get total P&L % from performance metrics
+        var totalPnlPct = await GetTotalPnlPctAsync(userId, cancellationToken);
+
+        // 5. Get max drawdown
+        var drawdown = await GetMaxDrawdownAsync(userId, cancellationToken);
+
+        // 6. Calculate episode progress (0.5 default, can be enhanced with session start time)
+        var episodeProgress = 0.5f;  // TODO: Track session start time to calculate actual progress
+
+        // 7. Calculate minimum liquidation distance across all positions
+        var minLiqDistance = CalculateMinLiquidationDistance(positions);
+
+        // 8. Calculate capital utilization (total value of positions / capital)
+        var capitalUtil = CalculateCapitalUtilization(positions, totalCapital);
+
+        // 9. Build position features (5 slots × 12 features each)
+        var positionStates = await BuildPositionStatesAsync(positions, totalCapital, cancellationToken);
+
+        return new RLPortfolioState
+        {
+            // Core metrics
+            Capital = totalCapital,
+            InitialCapital = totalCapital,  // Use current capital as initial
+            NumPositions = positions.Select(p => p.ExecutionId).Distinct().Count(),
+            MarginUtilization = utilization * 100,  // Feature #3: margin locked / capital (as percentage 0-100)
+
+            // P&L metrics
+            AvgPositionPnlPct = avgPnlPct,
+            TotalPnlPct = totalPnlPct,
+            Drawdown = drawdown,
+
+            // Progress and risk
+            EpisodeProgress = episodeProgress,
+            MinLiquidationDistance = minLiqDistance,
+            CapitalUtilization = capitalUtil,  // Feature #10: total notional / capital (as percentage 0-100)
+
+            // Position details
+            Positions = positionStates
+        };
+    }
+
+    /// <summary>
+    /// Build position states (12 features per execution, up to 5 slots)
+    /// Matches portfolio.py:get_execution_state()
+    /// </summary>
+    private async Task<List<RLPositionState>> BuildPositionStatesAsync(
+        List<Position> positions,
+        decimal totalCapital,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<RLPositionState>();
+
+        // Get market data for current prices
+        var marketSnapshot = await _marketDataRepository.GetAsync("market_data_snapshot", cancellationToken);
+
+        // Group by ExecutionId (each execution = 1 position state with long + short)
+        var executionGroups = positions
+            .GroupBy(p => p.ExecutionId)
+            .Take(5);  // Max 5 slots
+
+        foreach (var execution in executionGroups)
+        {
+            var longPos = execution.FirstOrDefault(p => p.Side == PositionSide.Long);
+            var shortPos = execution.FirstOrDefault(p => p.Side == PositionSide.Short);
+
+            if (longPos == null || shortPos == null)
+            {
+                _logger.LogWarning("Execution {ExecutionId} missing long or short leg, skipping", execution.Key);
+                continue;
+            }
+
+            // Get current prices
+            var longPrice = GetCurrentPrice(longPos.Exchange, longPos.Symbol, marketSnapshot);
+            var shortPrice = GetCurrentPrice(shortPos.Exchange, shortPos.Symbol, marketSnapshot);
+
+            // Get current funding rates
+            var longFR = await GetCurrentFundingRateAsync(longPos.Exchange, longPos.Symbol, cancellationToken);
+            var shortFR = await GetCurrentFundingRateAsync(shortPos.Exchange, shortPos.Symbol, cancellationToken);
+
+            // Calculate net funding from historical transactions
+            var longFunding = longPos.FundingEarnedUsd;  // Using the calculated field
+            var shortFunding = shortPos.FundingEarnedUsd;
+            var totalFunding = longFunding + shortFunding;
+
+            // Calculate position size
+            var positionSize = longPos.Quantity * longPos.EntryPrice;
+
+            // Build position state with raw data fields for ML predictor
+            var state = new RLPositionState
+            {
+                // ===== FIELDS USED DIRECTLY BY ML PREDICTOR =====
+
+                // P&L metrics (ML reads these directly)
+                UnrealizedPnlPct = CalculateNetPnlPct(longPos, shortPos, longPrice, shortPrice),
+                LongPnlPct = CalculateSidePnlPct(longPos, longPrice),
+                ShortPnlPct = CalculateSidePnlPct(shortPos, shortPrice),
+
+                // Risk metric (ML reads directly)
+                LiquidationDistance = CalculateLiquidationDistance(longPos, shortPos, longPrice, shortPrice),
+
+                // ===== RAW DATA FIELDS (ML Calculates Features From These) =====
+
+                // Time (ML will normalize by 72h)
+                PositionAgeHours = (float)(DateTime.UtcNow - longPos.OpenedAt).TotalHours,
+
+                // Funding amounts (USD)
+                LongNetFundingUsd = (float)longFunding,
+                ShortNetFundingUsd = (float)shortFunding,
+
+                // Individual funding rates
+                ShortFundingRate = (float)shortFR,
+                LongFundingRate = (float)longFR,
+
+                // Raw prices
+                CurrentLongPrice = (float)longPrice,
+                CurrentShortPrice = (float)shortPrice,
+                EntryLongPrice = (float)longPos.EntryPrice,
+                EntryShortPrice = (float)shortPos.EntryPrice,
+
+                // Position sizing
+                PositionSizeUsd = (float)positionSize,
+                EntryFeesPaidUsd = (float)(longPos.TradingFeesUsd + shortPos.TradingFeesUsd),
+
+                // ===== DEPRECATED FIELDS (kept for backward compatibility) =====
+                IsActive = true,
+                PnlPct = CalculateNetPnlPct(longPos, shortPos, longPrice, shortPrice),
+                HoursHeld = (float)(DateTime.UtcNow - longPos.OpenedAt).TotalHours / 72.0f,
+                NetFundingRatio = positionSize > 0 ? (float)(totalFunding / positionSize) : 0.0f,
+                FundingRate = (float)(shortFR - longFR),
+                CurrentSpreadPct = CalculateSpreadPct(longPrice, shortPrice),
+                EntrySpreadPct = CalculateSpreadPct(longPos.EntryPrice, shortPos.EntryPrice),
+                ValueToCapitalRatio = totalCapital > 0 ? (float)(positionSize / totalCapital) : 0.0f,
+                FundingEfficiency = CalculateFundingEfficiency(totalFunding, longPos.TradingFeesUsd, shortPos.TradingFeesUsd),
+                LiquidationDistancePct = CalculateLiquidationDistance(longPos, shortPos, longPrice, shortPrice),
+                TotalNetFundingUsd = (float)totalFunding,
+                PositionIsActive = 1.0f
+            };
+
+            result.Add(state);
+        }
+
+        // Fill remaining slots with inactive/empty states (all zeros)
+        while (result.Count < 5)
+        {
+            result.Add(new RLPositionState
+            {
+                // ML predictor reads these directly (all zeros for empty slot)
+                UnrealizedPnlPct = 0,
+                LongPnlPct = 0,
+                ShortPnlPct = 0,
+                LiquidationDistance = 1.0f,  // 1.0 = safe (far from liquidation)
+
+                // Raw data fields for ML (all zeros)
+                PositionAgeHours = 0,
+                LongNetFundingUsd = 0,
+                ShortNetFundingUsd = 0,
+                ShortFundingRate = 0,
+                LongFundingRate = 0,
+                CurrentLongPrice = 0,
+                CurrentShortPrice = 0,
+                EntryLongPrice = 0,
+                EntryShortPrice = 0,
+                PositionSizeUsd = 0,
+                EntryFeesPaidUsd = 0,
+
+                // Deprecated fields (kept for compatibility)
+                IsActive = false,
+                PnlPct = 0,
+                HoursHeld = 0,
+                NetFundingRatio = 0,
+                FundingRate = 0,
+                CurrentSpreadPct = 0,
+                EntrySpreadPct = 0,
+                ValueToCapitalRatio = 0,
+                FundingEfficiency = 0,
+                LiquidationDistancePct = 1.0f,
+                TotalNetFundingUsd = 0,
+                PositionIsActive = 0.0f
+            });
+        }
+
+        return result;
+    }
+
+    #endregion
+
+    #region Data Query Methods
+
+    private async Task<decimal> GetTotalCapitalAsync(string userId, CancellationToken cancellationToken)
+    {
+        var userDataDict = await _userDataRepository.GetByPatternAsync($"userdata:{userId}:*", cancellationToken);
+        decimal total = 0m;
+
+        foreach (var snapshot in userDataDict.Values)
+        {
+            if (snapshot?.Balance != null)
+            {
+                total += snapshot.Balance.FuturesBalanceUsd;
+            }
+        }
+
+        return total > 0 ? total : 10000m;  // Default to 10k if no data
+    }
+
+    private async Task<decimal> GetMarginUsedAsync(string userId, CancellationToken cancellationToken)
+    {
+        var userDataDict = await _userDataRepository.GetByPatternAsync($"userdata:{userId}:*", cancellationToken);
+        decimal total = 0m;
+
+        foreach (var snapshot in userDataDict.Values)
+        {
+            if (snapshot?.Balance != null)
+            {
+                total += snapshot.Balance.MarginUsed;
+            }
+        }
+
+        return total;
+    }
+
+    private async Task<float> GetTotalPnlPctAsync(string userId, CancellationToken cancellationToken)
+    {
+        var latestMetric = await _context.PerformanceMetrics
+            .Where(pm => pm.UserId == userId)
+            .OrderByDescending(pm => pm.Date)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (latestMetric == null)
+            return 0.0f;
+
+        var capital = await GetTotalCapitalAsync(userId, cancellationToken);
+        return capital > 0 ? (float)(latestMetric.TotalPnL / capital * 100) : 0.0f;
+    }
+
+    private async Task<float> GetMaxDrawdownAsync(string userId, CancellationToken cancellationToken)
+    {
+        // TODO: Implement actual drawdown tracking
+        // For now, return 0 (no drawdown)
+        return 0.0f;
+    }
+
+    private async Task<decimal> GetCurrentFundingRateAsync(string exchange, string symbol, CancellationToken cancellationToken)
+    {
+        var key = DataCollectionConstants.CacheKeys.BuildFundingRateKey(exchange, symbol);
+        try
+        {
+            var fundingRate = await _fundingRateRepository.GetAsync(key, cancellationToken);
+            return fundingRate?.Rate ?? 0m;
+        }
+        catch
+        {
+            return 0m;
+        }
+    }
+
+    private decimal GetCurrentPrice(string exchange, string symbol, MarketDataSnapshot? marketSnapshot)
+    {
+        if (marketSnapshot?.PerpPrices == null)
+            return 0m;
+
+        // PerpPrices is Dictionary<exchange, Dictionary<symbol, PriceDto>>
+        if (marketSnapshot.PerpPrices.TryGetValue(exchange, out var exchangePrices) &&
+            exchangePrices.TryGetValue(symbol, out var priceDto))
+        {
+            return priceDto.Price;
+        }
+        return 0m;
+    }
+
+    #endregion
+
+    #region Calculation Methods
+
+    private float CalculateAvgPositionPnl(List<Position> positions, decimal totalCapital)
+    {
+        if (!positions.Any() || totalCapital == 0)
+            return 0.0f;
+
+        var executionGroups = positions.GroupBy(p => p.ExecutionId);
+        var pnls = new List<float>();
+
+        foreach (var execution in executionGroups)
+        {
+            var totalPnl = execution.Sum(p => p.UnrealizedPnL);
+            var totalMargin = execution.Sum(p => p.InitialMargin);
+            if (totalMargin > 0)
+            {
+                pnls.Add((float)(totalPnl / totalMargin * 100));
+            }
+        }
+
+        return pnls.Any() ? pnls.Average() : 0.0f;
+    }
+
+    private float CalculateMinLiquidationDistance(List<Position> positions)
+    {
+        if (!positions.Any())
+            return 1.0f;  // 1.0 = safe (no positions)
+
+        // TODO: Implement actual liquidation price calculation
+        // For now, return safe distance
+        return 0.8f;  // 80% away from liquidation
+    }
+
+    private float CalculateCapitalUtilization(List<Position> positions, decimal totalCapital)
+    {
+        if (!positions.Any() || totalCapital == 0)
+            return 0.0f;
+
+        // Group positions by ExecutionId to calculate total notional value per execution
+        // Training environment formula: sum(position_size_usd * 2) for each execution
+        // Backend equivalent: sum((long_qty * long_price) + (short_qty * short_price)) for each execution
+        var totalNotionalValue = positions
+            .GroupBy(p => p.ExecutionId)
+            .Sum(executionGroup =>
+            {
+                // Calculate total notional for this execution (sum of both legs)
+                return executionGroup.Sum(pos => pos.Quantity * pos.EntryPrice);
+            });
+
+        return (float)(totalNotionalValue / totalCapital * 100);
+    }
+
+    private float CalculateNetPnlPct(Position longPos, Position shortPos, decimal longPrice, decimal shortPrice)
+    {
+        // Calculate unrealized P&L based on current prices
+        var longValue = longPos.Quantity * longPos.EntryPrice;
+        var shortValue = shortPos.Quantity * shortPos.EntryPrice;
+        var totalMargin = longPos.InitialMargin + shortPos.InitialMargin;
+
+        if (totalMargin == 0)
+            return 0.0f;
+
+        // Long P&L: (currentPrice - entryPrice) * quantity
+        // Short P&L: (entryPrice - currentPrice) * quantity
+        var longPnl = (longPrice - longPos.EntryPrice) * longPos.Quantity;
+        var shortPnl = (shortPos.EntryPrice - shortPrice) * shortPos.Quantity;
+        var totalPnl = longPnl + shortPnl;
+
+        return (float)(totalPnl / totalMargin * 100);
+    }
+
+    private float CalculateSpreadPct(decimal price1, decimal price2)
+    {
+        if (price1 == 0 || price2 == 0)
+            return 0.0f;
+
+        return (float)(Math.Abs(price1 - price2) / ((price1 + price2) / 2) * 100);
+    }
+
+    private float CalculateFundingEfficiency(decimal netFunding, decimal longFees, decimal shortFees)
+    {
+        var totalFees = longFees + shortFees;
+        if (totalFees == 0)
+            return 0.0f;
+
+        return (float)(netFunding / totalFees);
+    }
+
+    private float CalculateSidePnlPct(Position pos, decimal currentPrice)
+    {
+        if (pos.InitialMargin == 0)
+            return 0.0f;
+
+        decimal pnl;
+        if (pos.Side == PositionSide.Long)
+        {
+            pnl = (currentPrice - pos.EntryPrice) * pos.Quantity;
+        }
+        else // Short
+        {
+            pnl = (pos.EntryPrice - currentPrice) * pos.Quantity;
+        }
+
+        return (float)(pnl / pos.InitialMargin * 100);
+    }
+
+    private float CalculateLiquidationDistance(Position longPos, Position shortPos, decimal longPrice, decimal shortPrice)
+    {
+        // TODO: Implement actual liquidation price calculation
+        // For now, return safe distance
+        return 0.8f;  // 80% away from liquidation
+    }
+
+    #endregion
 
     public void Dispose()
     {
@@ -563,6 +1263,55 @@ public class RLPredictionService : IDisposable
 
         [JsonPropertyName("state_value")]
         public float StateValue { get; set; }
+    }
+
+    /// <summary>
+    /// Agent prediction result (used by AgentBackgroundService)
+    /// </summary>
+    public class AgentPrediction
+    {
+        public string Action { get; set; } = "HOLD";
+        public int? OpportunityIndex { get; set; }
+        public string? OpportunitySymbol { get; set; }
+        public string? PositionSize { get; set; }  // "SMALL", "MEDIUM", "LARGE"
+        public double? SizeMultiplier { get; set; }  // 0.10, 0.20, 0.30
+        public int? PositionIndex { get; set; }  // For EXIT actions
+        public string Confidence { get; set; } = "LOW";
+        public double? EnterProbability { get; set; }
+        public double? StateValue { get; set; }
+    }
+
+    /// <summary>
+    /// ML API modular response (single action)
+    /// </summary>
+    public class MLModularResponse
+    {
+        [JsonPropertyName("action")]
+        public string? Action { get; set; }
+
+        [JsonPropertyName("action_id")]
+        public int ActionId { get; set; }
+
+        [JsonPropertyName("confidence")]
+        public double Confidence { get; set; }
+
+        [JsonPropertyName("state_value")]
+        public double StateValue { get; set; }
+
+        [JsonPropertyName("opportunity_index")]
+        public int? OpportunityIndex { get; set; }
+
+        [JsonPropertyName("opportunity_symbol")]
+        public string? OpportunitySymbol { get; set; }
+
+        [JsonPropertyName("position_size")]
+        public string? PositionSize { get; set; }
+
+        [JsonPropertyName("size_multiplier")]
+        public double? SizeMultiplier { get; set; }
+
+        [JsonPropertyName("position_index")]
+        public int? PositionIndex { get; set; }
     }
 
     #endregion

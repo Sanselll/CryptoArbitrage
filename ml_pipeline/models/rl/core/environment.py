@@ -47,7 +47,6 @@ class FundingArbitrageEnv(gym.Env):
                  reward_config: Optional[RewardConfig] = None,
                  pnl_reward_scale: float = None,  # Deprecated: use reward_config
                  use_full_range_episodes: bool = False,
-                 simple_mode: bool = False,
                  fixed_position_size_usd: float = None,
                  verbose: bool = True):
         """
@@ -62,21 +61,13 @@ class FundingArbitrageEnv(gym.Env):
             sample_random_config: If True, sample random config each episode (for training diversity)
             max_position_size_pct: Max % of capital per position side
             episode_length_days: Episode length in days (ignored if use_full_range_episodes=True)
-            max_opportunities_per_hour: Max opportunities to show per timestep (default 10, overridden to 1 if simple_mode=True)
+            max_opportunities_per_hour: Max opportunities to show per timestep (default 10)
             step_hours: Hours per timestep (default 1 = hourly)
             pnl_reward_scale: Scaling factor for P&L rewards (default 3.0)
             use_full_range_episodes: If True, episodes span entire data range (data_start to data_end)
-            simple_mode: If True, use simplified architecture (1 opportunity, 1 position, 3 actions)
             fixed_position_size_usd: If set, use this fixed size per side instead of capital-based sizing
         """
         super().__init__()
-
-        # Store simple mode flag
-        self.simple_mode = simple_mode
-
-        # Apply simple mode overrides
-        if simple_mode:
-            max_opportunities_per_hour = 1
 
         # Trading configuration
         if trading_config is None:
@@ -111,11 +102,6 @@ class FundingArbitrageEnv(gym.Env):
         # Store individual scales for easy access
         self.pnl_reward_scale = reward_config.pnl_reward_scale
         self.entry_penalty_scale = reward_config.entry_penalty_scale
-        self.exit_reward_scale = reward_config.exit_reward_scale
-        self.inactivity_penalty_scale = reward_config.inactivity_penalty_scale
-        self.turnover_reward_scale = reward_config.turnover_reward_scale
-        self.opportunity_cost_scale = reward_config.opportunity_cost_scale
-        self.liquidation_penalty_scale = reward_config.liquidation_penalty_scale
         self.stop_loss_penalty = reward_config.stop_loss_penalty
 
         # Load historical data
@@ -151,38 +137,24 @@ class FundingArbitrageEnv(gym.Env):
         # Current opportunities available to agent
         self.current_opportunities: List[Dict] = []
 
-        # Action space: Discrete actions
-        if simple_mode:
-            # Simple mode: 3 actions (HOLD, ENTER, EXIT)
-            self.action_space = spaces.Discrete(3)
-        else:
-            # Full mode: 36 actions
-            # 0 = HOLD
-            # 1-10 = ENTER_OPP_0-9_SMALL (10% of max allowed size)
-            # 11-20 = ENTER_OPP_0-9_MEDIUM (20% of max allowed size)
-            # 21-30 = ENTER_OPP_0-9_LARGE (30% of max allowed size)
-            # 31-35 = EXIT_POS_0-4
-            self.action_space = spaces.Discrete(36)
+        # Action space: 36 discrete actions
+        # 0 = HOLD
+        # 1-10 = ENTER_OPP_0-9_SMALL (10% of max allowed size)
+        # 11-20 = ENTER_OPP_0-9_MEDIUM (20% of max allowed size)
+        # 21-30 = ENTER_OPP_0-9_LARGE (30% of max allowed size)
+        # 31-35 = EXIT_POS_0-4
+        self.action_space = spaces.Discrete(36)
 
-        # Observation space: Config + Portfolio + Executions + Opportunities
-        if simple_mode:
-            # Simple mode: 4 portfolio base + 10 execution features + 22 opportunity features = 36 dims
-            config_dim = 0  # No config in simple mode
-            portfolio_dim = 14
-            opportunity_features = 22
-            opportunities_dim = 1 * opportunity_features
-            total_dim = portfolio_dim + opportunities_dim
-        else:
-            # Full mode: 275 dimensions
-            # Config: 5 dims
-            # Portfolio: 10 dims
-            # Executions: 60 dims (5 slots × 12 features each)
-            # Opportunities: 200 dims (10 slots × 20 features each)
-            config_dim = 5
-            portfolio_dim = 10
-            executions_dim = 5 * 12  # 60
-            opportunities_dim = 10 * 20  # 200
-            total_dim = config_dim + portfolio_dim + executions_dim + opportunities_dim  # 275
+        # Observation space: 275 dimensions
+        # Config: 5 dims
+        # Portfolio: 10 dims
+        # Executions: 60 dims (5 slots × 12 features each)
+        # Opportunities: 200 dims (10 slots × 20 features each)
+        config_dim = 5
+        portfolio_dim = 10
+        executions_dim = 5 * 12  # 60
+        opportunities_dim = 10 * 20  # 200
+        total_dim = config_dim + portfolio_dim + executions_dim + opportunities_dim  # 275
 
         self.observation_space = spaces.Box(
             low=-np.inf,
@@ -193,8 +165,6 @@ class FundingArbitrageEnv(gym.Env):
 
         if self.verbose:
             print(f"✅ Environment initialized")
-            if self.simple_mode:
-                print(f"   🔹 SIMPLE MODE: 1 opportunity, 1 position, 3 actions")
             print(f"   Data: {len(self.data):,} opportunities from {self.data_start} to {self.data_end}")
             if self.use_full_range_episodes:
                 actual_hours = int((self.data_end - self.data_start).total_seconds() / 3600)
@@ -402,11 +372,10 @@ class FundingArbitrageEnv(gym.Env):
 
         self.current_time = self.episode_start
 
-        # Reset portfolio (use config's max_positions in full mode, otherwise use 1 for simple mode)
-        max_positions = 1 if self.simple_mode else self.current_config.max_positions
+        # Reset portfolio
         self.portfolio = Portfolio(
             initial_capital=self.initial_capital,
-            max_positions=max_positions,
+            max_positions=self.current_config.max_positions,
             max_position_size_pct=self.max_position_size_pct
         )
 
@@ -472,7 +441,6 @@ class FundingArbitrageEnv(gym.Env):
         reward_breakdown = {
             'hourly_pnl': 0.0,
             'entry_penalty': 0.0,
-            'liquidation_penalty': 0.0,
             'stop_loss_penalty': 0.0,
         }
 
@@ -489,19 +457,7 @@ class FundingArbitrageEnv(gym.Env):
                 reward += hourly_pnl_reward
                 reward_breakdown['hourly_pnl'] = hourly_pnl_reward
 
-        # Component 3: Liquidation risk penalty (full mode only)
-        if not self.simple_mode and len(self.portfolio.positions) > 0:
-            min_liq_distance = self.portfolio.get_min_liquidation_distance(price_data)
-            liquidation_buffer = self.current_config.liquidation_buffer
-
-            if min_liq_distance < liquidation_buffer:
-                # Steep penalty when getting close to liquidation
-                # Penalty scales with how close we are
-                liq_penalty = -(liquidation_buffer - min_liq_distance) * self.liquidation_penalty_scale
-                reward += liq_penalty
-                reward_breakdown['liquidation_penalty'] = liq_penalty
-
-        # Component 4: Stop-loss penalty (track from _check_stop_loss)
+        # Component 2: Stop-loss penalty (track from _check_stop_loss)
         if stop_loss_reward < 0:
             reward_breakdown['stop_loss_penalty'] = stop_loss_reward
 
@@ -557,8 +513,12 @@ class FundingArbitrageEnv(gym.Env):
         """
         Execute the agent's action.
 
-        Simple mode: 3 actions (HOLD, ENTER, EXIT)
-        Full mode: 36 actions (HOLD, 30 ENTER variants, 5 EXIT)
+        36 actions:
+        - 0: HOLD
+        - 1-10: ENTER_OPP_0-9_SMALL
+        - 11-20: ENTER_OPP_0-9_MEDIUM
+        - 21-30: ENTER_OPP_0-9_LARGE
+        - 31-35: EXIT_POS_0-4
 
         Returns:
             (reward, info)
@@ -566,119 +526,54 @@ class FundingArbitrageEnv(gym.Env):
         reward = 0.0
         info = {'action_type': 'hold'}
 
-        if self.simple_mode:
-            # SIMPLE MODE: 3 actions (backward compatible)
-            if action == 0:
-                # Hold
-                info['action_type'] = 'hold'
-                return reward, info
-            elif action == 1:
-                # Enter (first opportunity)
-                if len(self.current_opportunities) > 0:
-                    reward = self._enter_position(0)
-                    info['action_type'] = 'enter'
-                    info['opportunity_idx'] = 0
-                else:
-                    info['action_type'] = 'invalid_enter'
-                    reward = -0.5
-            elif action == 2:
-                # Exit (first position)
-                if len(self.portfolio.positions) > 0:
-                    reward = self._exit_position(0)
-                    info['action_type'] = 'exit'
-                    info['position_idx'] = 0
-                else:
-                    info['action_type'] = 'invalid_exit'
-                    reward = -0.5
+        if action == 0:
+            # HOLD - No penalties in RL-v2 approach
+            # Agent learns when to act purely from P&L outcomes
+            info['action_type'] = 'hold'
+            return reward, info
+
+        elif 1 <= action <= 30:
+            # ENTER actions
+            # Decode opportunity index and size
+            if 1 <= action <= 10:
+                opp_idx = action - 1
+                size_type = 'small'
+            elif 11 <= action <= 20:
+                opp_idx = action - 11
+                size_type = 'medium'
+            else:  # 21-30
+                opp_idx = action - 21
+                size_type = 'large'
+
+            # Validate opportunity exists
+            if opp_idx < len(self.current_opportunities):
+                reward = self._enter_position(opp_idx, action=action)
+                info['action_type'] = f'enter_{size_type}'
+                info['opportunity_idx'] = opp_idx
+                info['size_type'] = size_type
+            else:
+                # Invalid: opportunity doesn't exist
+                info['action_type'] = 'invalid_enter'
+                reward = -0.5
+
+        elif 31 <= action <= 35:
+            # EXIT actions
+            pos_idx = action - 31
+
+            # Validate position exists
+            if pos_idx < len(self.portfolio.positions):
+                reward = self._exit_position(pos_idx)
+                info['action_type'] = 'exit'
+                info['position_idx'] = pos_idx
+            else:
+                # Invalid: position doesn't exist
+                info['action_type'] = 'invalid_exit'
+                reward = -0.5
 
         else:
-            # FULL MODE: 36 actions
-            # 0: HOLD
-            # 1-10: ENTER_OPP_0-9_SMALL
-            # 11-20: ENTER_OPP_0-9_MEDIUM
-            # 21-30: ENTER_OPP_0-9_LARGE
-            # 31-35: EXIT_POS_0-4
-
-            if action == 0:
-                # HOLD
-                info['action_type'] = 'hold'
-
-                num_positions = len(self.portfolio.positions)
-                has_capacity = num_positions < self.current_config.max_positions
-                has_opportunities = len(self.current_opportunities) > 0
-
-                # Penalty 1: Inactivity penalty when capacity is available
-                if has_capacity and has_opportunities:
-                    # Small penalty for ignoring opportunities when capacity is available
-                    inactivity_penalty = -0.01 * self.inactivity_penalty_scale
-                    reward += inactivity_penalty
-
-                # Penalty 2: Opportunity cost penalty when portfolio is FULL
-                # Compare worst position APR vs best available opportunity APR
-                if not has_capacity and has_opportunities and num_positions > 0:
-                    # Get worst position APR (target for replacement)
-                    position_aprs = [pos.calculate_current_apr() for pos in self.portfolio.positions]
-                    worst_position_apr = min(position_aprs)
-
-                    # Get best available opportunity APR
-                    best_opp = self.current_opportunities[0]  # Already sorted by fundApr24hProj
-                    best_available_apr = best_opp.get('fundApr24hProj', 0.0)
-
-                    # Calculate APR gap (how much better the opportunity is)
-                    apr_gap = best_available_apr - worst_position_apr
-
-                    # Apply opportunity cost penalty if better opportunity exists
-                    if apr_gap > 0:
-                        # Penalty proportional to APR gap (normalized)
-                        # APR gap of 10% = -0.1 penalty, 20% = -0.2, etc.
-                        # Let model learn optimal switching threshold
-                        opportunity_cost_penalty = -(apr_gap / 100.0) * self.opportunity_cost_scale
-                        reward += opportunity_cost_penalty
-
-                return reward, info
-
-            elif 1 <= action <= 30:
-                # ENTER actions
-                # Decode opportunity index and size
-                if 1 <= action <= 10:
-                    opp_idx = action - 1
-                    size_type = 'small'
-                elif 11 <= action <= 20:
-                    opp_idx = action - 11
-                    size_type = 'medium'
-                else:  # 21-30
-                    opp_idx = action - 21
-                    size_type = 'large'
-
-                # Validate opportunity exists
-                if opp_idx < len(self.current_opportunities):
-                    reward = self._enter_position(opp_idx, action=action)
-                    info['action_type'] = f'enter_{size_type}'
-                    info['opportunity_idx'] = opp_idx
-                    info['size_type'] = size_type
-                else:
-                    # Invalid: opportunity doesn't exist
-                    info['action_type'] = 'invalid_enter'
-                    reward = -0.5
-
-            elif 31 <= action <= 35:
-                # EXIT actions
-                pos_idx = action - 31
-
-                # Validate position exists
-                if pos_idx < len(self.portfolio.positions):
-                    reward = self._exit_position(pos_idx)
-                    info['action_type'] = 'exit'
-                    info['position_idx'] = pos_idx
-                else:
-                    # Invalid: position doesn't exist
-                    info['action_type'] = 'invalid_exit'
-                    reward = -0.5
-
-            else:
-                # Should never happen (action out of range)
-                info['action_type'] = 'invalid'
-                reward = -1.0
+            # Should never happen (action out of range)
+            info['action_type'] = 'invalid'
+            reward = -1.0
 
         return reward, info
 
@@ -696,17 +591,17 @@ class FundingArbitrageEnv(gym.Env):
         opp = self.current_opportunities[opportunity_idx]
 
         # Determine leverage from config
-        leverage = 1.0 if self.simple_mode else self.current_config.max_leverage
+        leverage = self.current_config.max_leverage
 
         # Calculate position size
         if self.fixed_position_size_usd is not None:
             # Fixed size mode (capital-independent training)
             position_size = self.fixed_position_size_usd
-        elif not self.simple_mode and action is not None:
-            # Full mode: dynamic sizing based on action
+        elif action is not None:
+            # Dynamic sizing based on action
             position_size = self._calculate_position_size(action)
         else:
-            # Simple mode or legacy: capital-based sizing
+            # Legacy: capital-based sizing
             max_size_per_side = self.portfolio.total_capital * (self.max_position_size_pct / 100)
             # With leverage, we can control more with less capital
             available_for_position = self.portfolio.available_margin * leverage / 2
@@ -803,13 +698,16 @@ class FundingArbitrageEnv(gym.Env):
         """
         Exit an existing position.
 
+        RL-v2 Philosophy: NO EXIT REWARD
+        Agent learns optimal exit timing purely from cumulative P&L rewards.
+        - Holding winners longer accumulates more P&L → agent naturally learns to hold
+        - Exiting early misses P&L accumulation → agent naturally learns not to exit early
+        - Holding losers reduces P&L → agent naturally learns to exit losers
+
         Returns:
-            Major reward based on realized P&L (V5: outcome-based reward)
+            0.0 (no exit bonus, let agent learn from P&L outcomes)
         """
         position = self.portfolio.positions[position_idx]
-
-        # Store P&L % before closing
-        pnl_pct = position.unrealized_pnl_pct
 
         # Get current prices for exit
         prices = self._get_current_prices()
@@ -825,50 +723,8 @@ class FundingArbitrageEnv(gym.Env):
                 symbol_prices['short_price']
             )
 
-            # Exit reward: Reward profitable exits to encourage portfolio turnover
-            # Get the position that was just closed
-            closed_position = self.portfolio.closed_positions[-1]
-            realized_pnl_pct = closed_position.realized_pnl_pct
-
-            total_reward = 0.0
-
-            # Component 1: Profitable exit reward
-            if realized_pnl_pct > 0:
-                # Reward proportional to profit, capped at +1.0
-                exit_reward = min(realized_pnl_pct / 100.0 * self.exit_reward_scale, 1.0)
-                total_reward += exit_reward
-
-                # Turnover reward: Additional bonus when closing profitable position with capacity for new positions
-                # This encourages cycling through positions instead of "park and hold"
-                num_positions = len(self.portfolio.positions)
-                has_capacity = num_positions < self.current_config.max_positions
-
-                if has_capacity:
-                    # Reward proportional to P&L, encouraging portfolio rotation
-                    turnover_reward = realized_pnl_pct / 100.0 * self.turnover_reward_scale
-                    total_reward += turnover_reward
-
-            # Component 2: Strategic exit reward (even if unprofitable)
-            # Reward exits when better opportunities are available
-            if len(self.current_opportunities) > 0:
-                # Get APR of closed position (based on its funding rates)
-                closed_apr = closed_position.calculate_current_apr()
-
-                # Get best available opportunity APR
-                best_opp = self.current_opportunities[0]  # Already sorted by fundApr24hProj
-                best_available_apr = best_opp.get('fundApr24hProj', 0.0)
-
-                # If exiting to make room for significantly better opportunity
-                apr_improvement = best_available_apr - closed_apr
-
-                # Reward strategic switches (APR improvement threshold: model learns optimal)
-                if apr_improvement > 0:
-                    # Scale reward by APR improvement (normalize to reasonable range)
-                    # APR improvement of 10% = 0.1 reward, 20% = 0.2, etc.
-                    strategic_exit_reward = min(apr_improvement / 100.0, 0.5) * self.exit_reward_scale
-                    total_reward += strategic_exit_reward
-
-            return total_reward
+            # NO exit reward - agent learns from P&L outcomes only
+            return 0.0
         else:
             # No price data available (shouldn't happen)
             return 0.0
@@ -889,7 +745,7 @@ class FundingArbitrageEnv(gym.Env):
         positions_to_close = []
 
         # Get stop-loss threshold from config
-        stop_loss_threshold = self.current_config.stop_loss_threshold if not self.simple_mode else -0.015
+        stop_loss_threshold = self.current_config.stop_loss_threshold
 
         # Identify positions exceeding stop-loss threshold
         for idx, position in enumerate(self.portfolio.positions):
@@ -1081,162 +937,73 @@ class FundingArbitrageEnv(gym.Env):
         """
         Get current observation (state).
 
-        Simple mode: 36 dimensions (portfolio + 1 opportunity)
-        Full mode: 275 dimensions (config + portfolio + 5 executions + 10 opportunities)
+        275 dimensions: config (5) + portfolio (10) + executions (60) + opportunities (200)
 
         Returns:
             Flattened numpy array of state features
         """
-        if self.simple_mode:
-            # SIMPLE MODE: 36 dimensions (backward compatible)
-            # Portfolio features (14 dims)
-            features = [
-                self.portfolio.total_capital / self.portfolio.initial_capital,  # Capital ratio
-                self.portfolio.capital_utilization / 100,  # Utilization ratio
-                self.portfolio.get_execution_avg_pnl_pct() / 100,  # Execution avg P&L
-                self.portfolio.max_drawdown_pct / 100,  # Drawdown ratio
-            ]
+        all_features = []
 
-            # Execution features (10 dims)
-            if len(self.portfolio.positions) > 0:
-                pos = self.portfolio.positions[0]
-                features.append(pos.unrealized_pnl_pct / 100)
-                features.append(pos.hours_held / 72.0)
+        # 1. Config features (5 dims)
+        config_features = self.current_config.to_array()
+        all_features.extend(config_features)
 
-                total_capital = pos.position_size_usd * 2
-                net_funding_ratio = (pos.long_net_funding_usd + pos.short_net_funding_usd) / total_capital if total_capital > 0 else 0.0
-                features.append(net_funding_ratio)
+        # 2. Portfolio features (10 dims)
+        price_data = self._get_current_prices()
+        min_liq_distance = self.portfolio.get_min_liquidation_distance(price_data)
 
-                net_funding_rate = pos.short_funding_rate - pos.long_funding_rate
-                features.append(net_funding_rate)
+        portfolio_features = [
+            self.portfolio.total_capital / self.portfolio.initial_capital,  # capital_ratio
+            self.portfolio.available_margin / self.portfolio.total_capital if self.portfolio.total_capital > 0 else 1.0,  # available_ratio
+            self.portfolio.margin_utilization / 100,  # used_margin_ratio
+            len(self.portfolio.positions) / self.current_config.max_positions,  # num_positions_ratio
+            self.portfolio.get_execution_avg_pnl_pct() / 100 if len(self.portfolio.closed_positions) > 0 else 0.0,  # avg_position_pnl_pct
+            self.portfolio.total_pnl_pct / 100,  # portfolio_total_pnl_pct
+            self.portfolio.max_drawdown_pct / 100,  # max_drawdown_pct
+            self.step_count / self.episode_length_hours if self.episode_length_hours > 0 else 0.0,  # episode_progress
+            min_liq_distance,  # min_liquidation_distance
+            self.portfolio.capital_utilization / 100,  # capital_utilization
+        ]
+        all_features.extend(portfolio_features)
 
-                prices = self._get_current_prices()
-                if pos.symbol in prices:
-                    current_long_price = prices[pos.symbol]['long_price']
-                    current_short_price = prices[pos.symbol]['short_price']
-                    avg_price = (current_long_price + current_short_price) / 2
-                    current_spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
-                else:
-                    current_spread_pct = 0.0
-                features.append(current_spread_pct)
+        # 3. Execution features (60 dims: 5 slots × 12 features)
+        exec_features = self.portfolio.get_all_execution_states(price_data, max_positions=5)
+        all_features.extend(exec_features)
 
-                avg_entry_price = (pos.entry_long_price + pos.entry_short_price) / 2
-                entry_spread_pct = abs(pos.entry_long_price - pos.entry_short_price) / avg_entry_price if avg_entry_price > 0 else 0.0
-                features.append(entry_spread_pct)
+        # At this point: 5 + 10 + 60 = 75 dims
 
-                value_to_capital_ratio = total_capital / self.portfolio.total_capital if self.portfolio.total_capital > 0 else 0.0
-                features.append(value_to_capital_ratio)
-
-                total_fees = pos.entry_fees_paid_usd + (pos.position_size_usd * 2 * pos.taker_fee)
-                net_funding_usd = pos.long_net_funding_usd + pos.short_net_funding_usd
-                funding_efficiency = net_funding_usd / total_fees if total_fees > 0 else 0.0
-                features.append(funding_efficiency)
-
-                features.append(pos.long_pnl_pct / 100)
-                features.append(pos.short_pnl_pct / 100)
-            else:
-                features.extend([0.0] * 10)
-
-            portfolio_features = np.array(features, dtype=np.float32)
-
-        else:
-            # FULL MODE: 275 dimensions
-            all_features = []
-
-            # 1. Config features (5 dims)
-            config_features = self.current_config.to_array()
-            all_features.extend(config_features)
-
-            # 2. Portfolio features (10 dims)
-            price_data = self._get_current_prices()
-            min_liq_distance = self.portfolio.get_min_liquidation_distance(price_data)
-
-            portfolio_features = [
-                self.portfolio.total_capital / self.portfolio.initial_capital,  # capital_ratio
-                self.portfolio.available_margin / self.portfolio.total_capital if self.portfolio.total_capital > 0 else 1.0,  # available_ratio
-                self.portfolio.margin_utilization / 100,  # used_margin_ratio
-                len(self.portfolio.positions) / self.current_config.max_positions,  # num_positions_ratio
-                self.portfolio.get_execution_avg_pnl_pct() / 100 if len(self.portfolio.closed_positions) > 0 else 0.0,  # avg_position_pnl_pct
-                self.portfolio.total_pnl_pct / 100,  # portfolio_total_pnl_pct
-                self.portfolio.max_drawdown_pct / 100,  # max_drawdown_pct
-                self.step_count / self.episode_length_hours if self.episode_length_hours > 0 else 0.0,  # episode_progress
-                min_liq_distance,  # min_liquidation_distance
-                self.portfolio.capital_utilization / 100,  # capital_utilization
-            ]
-            all_features.extend(portfolio_features)
-
-            # 3. Execution features (60 dims: 5 slots × 12 features)
-            exec_features = self.portfolio.get_all_execution_states(price_data, max_positions=5)
-            all_features.extend(exec_features)
-
-            # At this point: 5 + 10 + 60 = 75 dims
-
-        # 4. Opportunity features
+        # 4. Opportunity features (200 dims: 10 opportunities × 20 features each)
         opportunity_features = []
-
-        if self.simple_mode:
-            # Simple mode: 1 opportunity × 22 features
-            n_opps = 1
-            n_features_per_opp = 22
-        else:
-            # Full mode: 10 opportunities × 20 features
-            n_opps = 10
-            n_features_per_opp = 20
+        n_opps = 10
+        n_features_per_opp = 20
 
         for i in range(n_opps):
             if i < len(self.current_opportunities):
                 opp = self.current_opportunities[i]
 
-                if self.simple_mode:
-                    # 22 features (backward compatible with simple mode training)
-                    opp_feats = [
-                        opp.get('long_funding_rate', 0),
-                        opp.get('short_funding_rate', 0),
-                        opp.get('long_funding_interval_hours', 8) / 8,
-                        opp.get('short_funding_interval_hours', 8) / 8,
-                        opp.get('fund_profit_8h', 0),
-                        opp.get('fundProfit8h24hProj', 0),
-                        opp.get('fundProfit8h3dProj', 0),
-                        opp.get('fund_apr', 0),
-                        opp.get('fundApr24hProj', 0),
-                        opp.get('fundApr3dProj', 0),
-                        opp.get('spread30SampleAvg', 0),
-                        opp.get('priceSpread24hAvg', 0),
-                        opp.get('priceSpread3dAvg', 0),
-                        opp.get('spread_volatility_stddev', 0),
-                        np.log10(max(float(opp.get('volume_24h', 1e6) or 1e6), 1e5)),
-                        float(opp.get('bidAskSpreadPercent', 0) or 0),
-                        np.log10(max(float(opp.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
-                        float(opp.get('estimatedProfitPercentage', 0) or 0),
-                        float(opp.get('positionCostPercent', 0.2) or 0.2),
-                        opp.get('spread30SampleAvg', 0) - opp.get('priceSpread24hAvg', 0),
-                        opp.get('fund_apr', 0) - opp.get('fundApr24hProj', 0),
-                        opp.get('priceSpread24hAvg', 0) - opp.get('priceSpread3dAvg', 0),
-                    ]
-                else:
-                    # 20 features for full mode (no momentum, standardized only)
-                    opp_feats = [
-                        opp.get('long_funding_rate', 0),
-                        opp.get('short_funding_rate', 0),
-                        opp.get('long_funding_interval_hours', 8) / 8,
-                        opp.get('short_funding_interval_hours', 8) / 8,
-                        opp.get('fund_profit_8h', 0),
-                        opp.get('fundProfit8h24hProj', 0),
-                        opp.get('fundProfit8h3dProj', 0),
-                        opp.get('fund_apr', 0),
-                        opp.get('fundApr24hProj', 0),
-                        opp.get('fundApr3dProj', 0),
-                        opp.get('spread30SampleAvg', 0),
-                        opp.get('priceSpread24hAvg', 0),
-                        opp.get('priceSpread3dAvg', 0),
-                        opp.get('spread_volatility_stddev', 0),
-                        np.log10(max(float(opp.get('volume_24h', 1e6) or 1e6), 1e5)),
-                        float(opp.get('bidAskSpreadPercent', 0) or 0),
-                        np.log10(max(float(opp.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
-                        float(opp.get('estimatedProfitPercentage', 0) or 0),
-                        float(opp.get('positionCostPercent', 0.2) or 0.2),
-                        opp.get('short_funding_rate', 0) - opp.get('long_funding_rate', 0),  # Net funding rate
-                    ]
+                # 20 features (standardized)
+                opp_feats = [
+                    opp.get('long_funding_rate', 0),
+                    opp.get('short_funding_rate', 0),
+                    opp.get('long_funding_interval_hours', 8) / 8,
+                    opp.get('short_funding_interval_hours', 8) / 8,
+                    opp.get('fund_profit_8h', 0),
+                    opp.get('fundProfit8h24hProj', 0),
+                    opp.get('fundProfit8h3dProj', 0),
+                    opp.get('fund_apr', 0),
+                    opp.get('fundApr24hProj', 0),
+                    opp.get('fundApr3dProj', 0),
+                    opp.get('spread30SampleAvg', 0),
+                    opp.get('priceSpread24hAvg', 0),
+                    opp.get('priceSpread3dAvg', 0),
+                    opp.get('spread_volatility_stddev', 0),
+                    np.log10(max(float(opp.get('volume_24h', 1e6) or 1e6), 1e5)),
+                    float(opp.get('bidAskSpreadPercent', 0) or 0),
+                    np.log10(max(float(opp.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
+                    float(opp.get('estimatedProfitPercentage', 0) or 0),
+                    float(opp.get('positionCostPercent', 0.2) or 0.2),
+                    opp.get('short_funding_rate', 0) - opp.get('long_funding_rate', 0),  # Net funding rate
+                ]
 
                 # Convert to float32 and ensure no NaN/inf
                 opp_feats = [float(np.nan_to_num(x, nan=0.0, posinf=100.0, neginf=-100.0)) for x in opp_feats]
@@ -1245,32 +1012,28 @@ class FundingArbitrageEnv(gym.Env):
                 # No opportunity at this index - pad with zeros
                 opportunity_features.extend([0.0] * n_features_per_opp)
 
-        # Apply StandardScaler to opportunity features if available (simple mode only)
+        # Apply StandardScaler to opportunity features if available
         opportunity_features_array = np.array(opportunity_features, dtype=np.float32)
 
-        if self.simple_mode and self.feature_scaler is not None:
-            # Only apply scaler in simple mode (backward compatibility)
-            # Reshape to (1, 22) for scaling
-            opp_reshaped = opportunity_features_array.reshape(1, 22)
-            # Scale
-            opp_scaled = self.feature_scaler.transform(opp_reshaped)
-            # Flatten back to 1D
-            opportunity_features_array = opp_scaled.flatten()
+        if self.feature_scaler is not None:
+            # Apply scaler to normalize features (critical for training stability)
+            # 10 opportunities × 20 features each = 200 features
+            # Scaler expects 20 features per opportunity
+            scaled_features = []
+            for i in range(10):
+                opp_20_feats = opportunity_features_array[i*20:(i+1)*20]
+                # Scale using the scaler (expects 20 features)
+                opp_scaled = self.feature_scaler.transform(opp_20_feats.reshape(1, 20))
+                scaled_features.extend(opp_scaled.flatten())
+            opportunity_features_array = np.array(scaled_features, dtype=np.float32)
 
         # Concatenate all features
-        if self.simple_mode:
-            # Simple mode: portfolio_features (14) + opportunity_features (22) = 36
-            observation = np.concatenate([
-                portfolio_features,
-                opportunity_features_array
-            ]).astype(np.float32)
-        else:
-            # Full mode: all_features already contains config+portfolio+executions (75)
-            # Add opportunity features (200) for total of 275
-            observation = np.concatenate([
-                all_features,  # Contains config+portfolio+executions = 75
-                opportunity_features_array  # 200
-            ]).astype(np.float32)
+        # all_features already contains config+portfolio+executions (75)
+        # Add opportunity features (200) for total of 275
+        observation = np.concatenate([
+            all_features,  # Contains config+portfolio+executions = 75
+            opportunity_features_array  # 200
+        ]).astype(np.float32)
 
         return observation
 

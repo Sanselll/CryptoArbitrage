@@ -36,13 +36,13 @@ def parse_args():
                         help='Path to test opportunities CSV file (for evaluation)')
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
-    parser.add_argument('--feature-scaler-path', type=str, default=None,
-                        help='Path to fitted StandardScaler pickle')
+    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler.pkl',
+                        help='Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler.pkl)')
 
     # Environment
     parser.add_argument('--initial-capital', type=float, default=10000.0,
                         help='Initial capital in USD')
-    parser.add_argument('--episode-length-days', type=int, default=7,
+    parser.add_argument('--episode-length-days', type=int, default=5,
                         help='Episode length in days')
     parser.add_argument('--step-minutes', type=int, default=5,
                         help='Minutes per prediction step (default: 5 = 5-minute intervals)')
@@ -50,30 +50,20 @@ def parse_args():
                         help='Sample random TradingConfig each episode for diversity')
 
     # Trading config (if not sampling random)
-    parser.add_argument('--max-leverage', type=float, default=1.0,
+    parser.add_argument('--max-leverage', type=float, default=2.0,
                         help='Maximum leverage (1-10x)')
-    parser.add_argument('--target-utilization', type=float, default=0.9,
+    parser.add_argument('--target-utilization', type=float, default=0.8,
                         help='Target capital utilization (0-1)')
-    parser.add_argument('--max-positions', type=int, default=5,
+    parser.add_argument('--max-positions', type=int, default=2,
                         help='Maximum concurrent positions (1-5)')
 
-    # Reward config (as per IMPLEMENTATION_PLAN.md)
-    parser.add_argument('--pnl-reward-scale', type=float, default=2.0,
-                        help='Scale for hourly P&L reward (reduced to make switching competitive)')
-    parser.add_argument('--entry-penalty-scale', type=float, default=0.8,
-                        help='Scale for entry fee penalty (reduced to encourage entries)')
-    parser.add_argument('--exit-reward-scale', type=float, default=1.5,
-                        help='Scale for exit reward (increased to encourage exits)')
-    parser.add_argument('--inactivity-penalty-scale', type=float, default=1.0,
-                        help='Scale for inactivity penalty (increased for stronger penalty)')
-    parser.add_argument('--turnover-reward-scale', type=float, default=0.8,
-                        help='Scale for turnover reward (increased to encourage rotation)')
-    parser.add_argument('--opportunity-cost-scale', type=float, default=2.0,
-                        help='Scale for opportunity cost penalty when holding inferior positions')
-    parser.add_argument('--liquidation-penalty-scale', type=float, default=20.0,
-                        help='Scale for liquidation risk penalty (Component 3)')
-    parser.add_argument('--stop-loss-penalty', type=float, default=-2.0,
-                        help='Penalty when position hits stop-loss (Component 4)')
+    # Reward config (Simplified RL-v2 approach)
+    parser.add_argument('--pnl-reward-scale', type=float, default=3.0,
+                        help='Scale for hourly P&L reward (main learning signal)')
+    parser.add_argument('--entry-penalty-scale', type=float, default=1.0,
+                        help='Scale for entry fee penalty (discourages overtrading)')
+    parser.add_argument('--stop-loss-penalty', type=float, default=-1.0,
+                        help='Penalty when position hits stop-loss (basic risk management)')
 
     # PPO hyperparameters
     parser.add_argument('--learning-rate', type=float, default=3e-4,
@@ -86,7 +76,7 @@ def parse_args():
                         help='PPO clip range')
     parser.add_argument('--value-coef', type=float, default=0.5,
                         help='Value loss coefficient')
-    parser.add_argument('--entropy-coef', type=float, default=0.01,
+    parser.add_argument('--entropy-coef', type=float, default=0.03,
                         help='Entropy coefficient')
     parser.add_argument('--n-epochs', type=int, default=4,
                         help='Number of epochs per update')
@@ -133,15 +123,10 @@ def create_environment(args, data_path: str, verbose: bool = True):
             max_positions=args.max_positions,
         )
 
-    # Create RewardConfig (as per IMPLEMENTATION_PLAN.md)
+    # Create RewardConfig (Simplified RL-v2 approach)
     reward_config = RewardConfig(
         pnl_reward_scale=args.pnl_reward_scale,
         entry_penalty_scale=args.entry_penalty_scale,
-        exit_reward_scale=args.exit_reward_scale,
-        inactivity_penalty_scale=args.inactivity_penalty_scale,
-        turnover_reward_scale=args.turnover_reward_scale,
-        opportunity_cost_scale=args.opportunity_cost_scale,
-        liquidation_penalty_scale=args.liquidation_penalty_scale,
         stop_loss_penalty=args.stop_loss_penalty,
     )
 
@@ -159,7 +144,6 @@ def create_environment(args, data_path: str, verbose: bool = True):
         sample_random_config=args.sample_random_config,
         episode_length_days=args.episode_length_days,
         step_hours=step_hours,
-        simple_mode=False,  # Always use full mode for training
         verbose=verbose,
     )
 

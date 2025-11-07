@@ -176,14 +176,10 @@ class PBTHyperparameters:
     entropy_coef: float = 0.01
     vf_coef: float = 0.5
 
-    # Reward hyperparameters (NEW!)
+    # Reward hyperparameters (Simplified RL-v2 approach)
     pnl_reward_scale: float = 3.0
-    entry_penalty_scale: float = 1.2  # Balanced for selective active trading
-    exit_reward_scale: float = 1.0  # NEW: reward profitable exits
-    inactivity_penalty_scale: float = 0.5  # Penalize passive behavior
-    turnover_reward_scale: float = 0.3  # Moderate portfolio rotation encouragement
-    liquidation_penalty_scale: float = 20.0
-    stop_loss_penalty: float = -2.0
+    entry_penalty_scale: float = 1.0
+    stop_loss_penalty: float = -1.0
 
     def perturb(self, factor: float = 0.2) -> 'PBTHyperparameters':
         """
@@ -204,14 +200,10 @@ class PBTHyperparameters:
             clip_range=np.clip(self.clip_range * multiplier, 0.15, 0.30),
             entropy_coef=np.clip(self.entropy_coef * multiplier, 0.001, 0.02),
             vf_coef=np.clip(self.vf_coef * multiplier, 0.5, 1.0),
-            # Reward hyperparameters
+            # Reward hyperparameters (Simplified)
             pnl_reward_scale=np.clip(self.pnl_reward_scale * multiplier, 1.0, 5.0),
-            entry_penalty_scale=np.clip(self.entry_penalty_scale * multiplier, 0.8, 2.0),  # Range for selective trading
-            exit_reward_scale=np.clip(self.exit_reward_scale * multiplier, 0.5, 2.0),
-            inactivity_penalty_scale=np.clip(self.inactivity_penalty_scale * multiplier, 0.2, 1.0),
-            turnover_reward_scale=np.clip(self.turnover_reward_scale * multiplier, 0.1, 0.6),
-            liquidation_penalty_scale=np.clip(self.liquidation_penalty_scale * multiplier, 10.0, 30.0),
-            stop_loss_penalty=np.clip(self.stop_loss_penalty * multiplier, -5.0, -0.5),
+            entry_penalty_scale=np.clip(self.entry_penalty_scale * multiplier, 0.5, 2.0),
+            stop_loss_penalty=np.clip(self.stop_loss_penalty * multiplier, -3.0, -0.5),
         )
 
     def to_dict(self) -> dict:
@@ -308,14 +300,10 @@ def train_agent_parallel(agent_id: int,
             episode_length_days = 7
             step_hours = 5.0 / 60.0  # 5 minutes
 
-        # Create reward config from agent's hyperparameters
+        # Create reward config from agent's hyperparameters (Simplified)
         reward_config = RewardConfig(
             pnl_reward_scale=hyperparams.pnl_reward_scale,
             entry_penalty_scale=hyperparams.entry_penalty_scale,
-            exit_reward_scale=hyperparams.exit_reward_scale,
-            inactivity_penalty_scale=hyperparams.inactivity_penalty_scale,
-            turnover_reward_scale=hyperparams.turnover_reward_scale,
-            liquidation_penalty_scale=hyperparams.liquidation_penalty_scale,
             stop_loss_penalty=hyperparams.stop_loss_penalty,
         )
 
@@ -328,7 +316,7 @@ def train_agent_parallel(agent_id: int,
             episode_length_days=episode_length_days,
             step_hours=step_hours,
             price_history_path=price_history_path,
-            simple_mode=False,
+            feature_scaler_path=self.feature_scaler_path,
             verbose=False,
         )
 
@@ -366,6 +354,7 @@ class PBTManager:
                  checkpoint_dir: str = 'checkpoints/pbt',
                  use_curriculum: bool = True,
                  price_history_path: str = None,
+                 feature_scaler_path: str = 'trained_models/rl/feature_scaler.pkl',
                  num_processes: int = None):
         """
         Initialize PBT manager.
@@ -380,6 +369,7 @@ class PBTManager:
             checkpoint_dir: Directory for checkpoints
             use_curriculum: Whether to use curriculum learning
             price_history_path: Path to price history directory
+            feature_scaler_path: Path to fitted StandardScaler pickle
             num_processes: Number of parallel processes (default: min(population_size, cpu_count))
         """
         self.population_size = population_size
@@ -391,6 +381,7 @@ class PBTManager:
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.price_history_path = price_history_path
+        self.feature_scaler_path = feature_scaler_path
 
         # Parallel training
         if num_processes is None:
@@ -416,14 +407,10 @@ class PBTManager:
 
     def _create_environment(self, data_path: str, verbose: bool = False):
         """Create an environment (train or test)."""
-        # Use default reward config for all agents
+        # Use default reward config (Simplified RL-v2 approach)
         reward_config = RewardConfig(
             pnl_reward_scale=3.0,
-            entry_penalty_scale=1.2,  # Balanced for selective active trading
-            exit_reward_scale=1.0,
-            inactivity_penalty_scale=0.5,
-            turnover_reward_scale=0.3,  # Moderate portfolio rotation
-            liquidation_penalty_scale=5.0,
+            entry_penalty_scale=1.0,
             stop_loss_penalty=-1.0,
         )
 
@@ -437,12 +424,12 @@ class PBTManager:
         env = FundingArbitrageEnv(
             data_path=data_path,
             price_history_path=self.price_history_path,
+            feature_scaler_path=self.feature_scaler_path,
             initial_capital=self.initial_capital,
             trading_config=trading_config,
             reward_config=reward_config,
             episode_length_days=7,
             step_hours=5.0 / 60.0,  # 5 minutes
-            simple_mode=False,
             verbose=verbose,
         )
 
@@ -494,8 +481,7 @@ class PBTManager:
             print(f"Agent {i}: LR={hyperparams.learning_rate:.2e}, "
                   f"PNL={hyperparams.pnl_reward_scale:.1f}, "
                   f"Entry={hyperparams.entry_penalty_scale:.1f}, "
-                  f"Exit={hyperparams.exit_reward_scale:.1f}, "
-                  f"Inact={hyperparams.inactivity_penalty_scale:.1f}")
+                  f"StopLoss={hyperparams.stop_loss_penalty:.1f}")
 
         print()
 
@@ -512,14 +498,10 @@ class PBTManager:
                 trading_config = TradingConfig.sample_random()
                 episode_length_days = 7
 
-            # Create reward config from agent's hyperparameters
+            # Create reward config from agent's hyperparameters (Simplified)
             reward_config = RewardConfig(
                 pnl_reward_scale=agent.hyperparams.pnl_reward_scale,
                 entry_penalty_scale=agent.hyperparams.entry_penalty_scale,
-                exit_reward_scale=agent.hyperparams.exit_reward_scale,
-                inactivity_penalty_scale=agent.hyperparams.inactivity_penalty_scale,
-                turnover_reward_scale=agent.hyperparams.turnover_reward_scale,
-                liquidation_penalty_scale=agent.hyperparams.liquidation_penalty_scale,
                 stop_loss_penalty=agent.hyperparams.stop_loss_penalty,
             )
 
@@ -767,6 +749,8 @@ def parse_args():
     parser.add_argument('--initial-capital', type=float, default=10000.0)
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
+    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler.pkl',
+                        help='Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler.pkl)')
 
     # Training
     parser.add_argument('--device', type=str, default='cpu')
@@ -800,6 +784,7 @@ def main():
         checkpoint_dir=args.checkpoint_dir,
         use_curriculum=args.use_curriculum,
         price_history_path=args.price_history_path,
+        feature_scaler_path=args.feature_scaler_path,
         num_processes=args.num_processes,
     )
 

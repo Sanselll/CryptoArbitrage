@@ -82,23 +82,32 @@ public class NotificationService : INotificationService
 
                         decimal longRate = 0;
                         decimal shortRate = 0;
+                        int longInterval = 8;  // Default to 8h
+                        int shortInterval = 8; // Default to 8h
 
                         if (_cache.TryGetValue<FundingRateCacheEntry>(longCacheKey, out var longEntry))
                         {
                             longRate = longEntry.CurrentRate.Rate;
+                            longInterval = longEntry.CurrentRate.FundingIntervalHours;
                         }
 
                         if (_cache.TryGetValue<FundingRateCacheEntry>(shortCacheKey, out var shortEntry))
                         {
                             shortRate = shortEntry.CurrentRate.Rate;
+                            shortInterval = shortEntry.CurrentRate.FundingIntervalHours;
                         }
 
                         var longValue = longPerp.Quantity * longPerp.EntryPrice;
                         var shortValue = shortPerp.Quantity * shortPerp.EntryPrice;
 
+                        // Calculate number of funding payments in 8 hours for each position
+                        decimal longPaymentsIn8h = 8m / longInterval;
+                        decimal shortPaymentsIn8h = 8m / shortInterval;
+
                         // Long: negative rate = receive (positive), positive rate = pay (negative)
                         // Short: negative rate = pay (negative), positive rate = receive (positive)
-                        estimatedFunding = -longRate * longValue + shortRate * shortValue;
+                        // Multiply by number of payments in 8h to get true 8h estimate
+                        estimatedFunding = (-longRate * longValue * longPaymentsIn8h) + (shortRate * shortValue * shortPaymentsIn8h);
                     }
                 }
                 else if (perpPositions.Count == 1)
@@ -109,18 +118,24 @@ public class NotificationService : INotificationService
                     // Get funding rate from cache
                     var cacheKey = $"{CACHE_KEY_PREFIX_FUNDING}{execution.Exchange}:{execution.Symbol}";
                     decimal rate = 0;
+                    int interval = 8; // Default to 8h
 
                     if (_cache.TryGetValue<FundingRateCacheEntry>(cacheKey, out var entry))
                     {
                         rate = entry.CurrentRate.Rate;
+                        interval = entry.CurrentRate.FundingIntervalHours;
                     }
 
                     var perpValue = perpPosition.Quantity * perpPosition.EntryPrice;
                     var perpSide = perpPosition.Side;
 
+                    // Calculate number of funding payments in 8 hours
+                    decimal paymentsIn8h = 8m / interval;
+
                     // Long: negative rate = receive (positive), positive rate = pay (negative)
                     // Short: negative rate = pay (negative), positive rate = receive (positive)
-                    estimatedFunding = rate * perpValue * (perpSide == PositionSide.Long ? -1 : 1);
+                    // Multiply by number of payments in 8h to get true 8h estimate
+                    estimatedFunding = rate * perpValue * (perpSide == PositionSide.Long ? -1 : 1) * paymentsIn8h;
                 }
 
                 // Total funding P&L = historical + estimated

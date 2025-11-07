@@ -10,7 +10,9 @@ using CryptoArbitrage.API.Services.Arbitrage.Execution;
 using CryptoArbitrage.API.Services.Authentication;
 using CryptoArbitrage.API.Services.Streaming;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
+using CryptoArbitrage.API.Services.ML;
 using Microsoft.EntityFrameworkCore;
+using AgentPrediction = CryptoArbitrage.API.Services.ML.RLPredictionService.AgentPrediction;
 
 namespace CryptoArbitrage.API.Services.Agent;
 
@@ -22,6 +24,7 @@ public class AgentBackgroundService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AgentBackgroundService> _logger;
+    private readonly RLPredictionService _rlPredictionService;
     private readonly HttpClient _httpClient;
     private readonly string _mlApiBaseUrl;
     private readonly JsonSerializerOptions _jsonOptions;
@@ -37,10 +40,12 @@ public class AgentBackgroundService : BackgroundService
     public AgentBackgroundService(
         IServiceProvider serviceProvider,
         ILogger<AgentBackgroundService> logger,
+        RLPredictionService rlPredictionService,
         IConfiguration configuration)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _rlPredictionService = rlPredictionService;
 
         // Configure ML API client
         var host = configuration["MLApi:Host"] ?? "localhost";
@@ -298,15 +303,11 @@ public class AgentBackgroundService : BackgroundService
         }
         _logger.LogInformation("=============================================");
 
-        // 3. Get market data and funding rate repositories for enriching portfolio state
-        var marketDataRepository = scope.ServiceProvider.GetRequiredService<IDataRepository<MarketDataSnapshot>>();
-        var fundingRateRepository = scope.ServiceProvider.GetRequiredService<IDataRepository<FundingRateDto>>();
 
-        // 4. Get portfolio state with enriched position data
-        var portfolio = await BuildPortfolioStateAsync(userId, positions, context, marketDataRepository, fundingRateRepository, userDataRepository, cancellationToken);
-
-        // 5. Call ML API for prediction
-        var prediction = await GetMLPredictionAsync(userId, config, userOpportunities, portfolio);
+        // 3. Call RLPredictionService with centralized feature preparation (275 features)
+        // Pass positions from repository - same data source as frontend (UserDataSnapshot)
+        // This includes: 5 config features, 10 portfolio features, 60 position features, 200 opportunity features
+        var prediction = await _rlPredictionService.GetModularActionAsync(userId, userOpportunities, positions, cancellationToken);
 
         _logger.LogInformation("========== ML API RETURNED ==========");
         _logger.LogInformation("Action: {Action}, Symbol: {Symbol}", prediction?.Action, prediction?.OpportunitySymbol);
@@ -362,439 +363,6 @@ public class AgentBackgroundService : BackgroundService
         }
 
         return allPositions;
-    }
-
-    /// <summary>
-    /// Build portfolio state for ML API
-    /// </summary>
-    private async Task<Dictionary<string, object>> BuildPortfolioStateAsync(
-        string userId,
-        List<PositionDto> positions,
-        ArbitrageDbContext context,
-        IDataRepository<MarketDataSnapshot> marketDataRepository,
-        IDataRepository<FundingRateDto> fundingRateRepository,
-        IDataRepository<UserDataSnapshot> userDataRepository,
-        CancellationToken cancellationToken)
-    {
-        // Query real balance data from all exchanges
-        var userDataDict = await userDataRepository.GetByPatternAsync($"userdata:{userId}:*", cancellationToken);
-
-        // Calculate total capital across all exchanges
-        decimal totalCapital = 0m;
-        decimal totalMarginUsed = 0m;
-
-        foreach (var snapshot in userDataDict.Values)
-        {
-            if (snapshot?.Balance != null)
-            {
-                // Sum up futures balance (total equity) and margin used across all exchanges
-                totalCapital += snapshot.Balance.FuturesBalanceUsd;
-                totalMarginUsed += snapshot.Balance.MarginUsed;
-
-                _logger.LogDebug(
-                    "Exchange balance for user {UserId}: FuturesBalance=${Balance:F2}, MarginUsed=${Margin:F2}",
-                    userId, snapshot.Balance.FuturesBalanceUsd, snapshot.Balance.MarginUsed);
-            }
-        }
-
-        // Validate that we have balance data
-        if (totalCapital == 0m)
-        {
-            throw new InvalidOperationException(
-                $"Unable to retrieve balance data for user {userId}. " +
-                "User data collector may not be running or data is stale.");
-        }
-
-        // Get total P&L from performance metrics if available
-        var latestMetric = await context.PerformanceMetrics
-            .Where(pm => pm.UserId == userId)
-            .OrderByDescending(pm => pm.Date)
-            .FirstOrDefaultAsync();
-        var totalPnL = latestMetric?.TotalPnL ?? 0m;
-
-        // Calculate utilization based on real margin used
-        var utilization = totalCapital > 0 ? (double)(totalMarginUsed / totalCapital) : 0.0;
-
-        _logger.LogInformation(
-            "Portfolio state for user {UserId}: TotalCapital=${Total:F2}, MarginUsed=${Margin:F2}, Utilization={Util:F2}%",
-            userId, totalCapital, totalMarginUsed, utilization * 100);
-
-        // Fetch market data and funding rates once for all positions
-        var marketSnapshot = await marketDataRepository.GetAsync("market_data_snapshot", cancellationToken);
-
-        // Convert positions to enriched dictionaries with execution data
-        var enrichedPositions = new List<Dictionary<string, object>>();
-        foreach (var position in positions)
-        {
-            var enrichedPos = await ConvertPositionDtoToDictAsync(position, positions, marketSnapshot, totalCapital, cancellationToken);
-            enrichedPositions.Add(enrichedPos);
-        }
-
-        // IMPORTANT: Count EXECUTIONS, not individual positions
-        // Each execution has 2 positions (long + short hedge), but the ML model expects execution count
-        // The training environment's "position" semantically means "execution"
-        var numExecutions = positions.Select(p => p.ExecutionId).Distinct().Count();
-
-        return new Dictionary<string, object>
-        {
-            ["total_capital"] = (double)totalCapital,
-            ["initial_capital"] = (double)totalCapital, // Use current total capital (user's requirement: don't change ML model input structure)
-            ["utilization"] = utilization,
-            ["total_pnl_pct"] = (double)(totalPnL / totalCapital * 100),
-            ["num_positions"] = numExecutions,  // Count of executions, not individual positions (matches training semantics)
-            ["positions"] = enrichedPositions
-        };
-    }
-
-    /// <summary>
-    /// Convert PositionDto to enriched dictionary for ML API with execution-specific data
-    /// </summary>
-    private Task<Dictionary<string, object>> ConvertPositionDtoToDictAsync(
-        PositionDto position,
-        List<PositionDto> allPositions,
-        MarketDataSnapshot? marketSnapshot,
-        decimal totalCapital,
-        CancellationToken cancellationToken)
-    {
-        var hoursHeld = (DateTime.UtcNow - position.OpenedAt).TotalHours;
-        var positionSizeUsd = (double)position.Quantity * (double)position.EntryPrice;
-        var unrealizedPnlPct = positionSizeUsd > 0 ? (double)position.UnrealizedPnL / positionSizeUsd * 100 : 0;
-
-        // Basic position data
-        var result = new Dictionary<string, object>
-        {
-            ["symbol"] = position.Symbol ?? "",
-            ["position_size_usd"] = positionSizeUsd,
-            ["unrealized_pnl_pct"] = unrealizedPnlPct,
-            ["hours_held"] = hoursHeld / 72.0,  // Normalized by 72 hours as expected by ML model
-            ["leverage"] = (double)position.Leverage,
-            ["position_is_active"] = 1.0  // Always 1.0 for open positions
-        };
-
-        // Enrich with execution-specific data (ExecutionId is always present)
-        // Find the paired position (for cross-exchange arbitrage, there's a long and short)
-        var pairedPosition = allPositions.FirstOrDefault(p =>
-            p.ExecutionId == position.ExecutionId &&
-            p.Id != position.Id &&
-            p.Status == PositionStatus.Open);
-
-        if (pairedPosition != null)
-        {
-            // Determine which is long and which is short
-            var longPos = position.Side == PositionSide.Long ? position : pairedPosition;
-            var shortPos = position.Side == PositionSide.Short ? position : pairedPosition;
-
-            // Calculate execution-specific metrics
-                var longSizeUsd = (double)longPos.Quantity * (double)longPos.EntryPrice;
-                var shortSizeUsd = (double)shortPos.Quantity * (double)shortPos.EntryPrice;
-
-                // Individual leg P&Ls
-                result["long_pnl_pct"] = longSizeUsd > 0 ? (double)longPos.UnrealizedPnL / longSizeUsd * 100 : 0;
-                result["short_pnl_pct"] = shortSizeUsd > 0 ? (double)shortPos.UnrealizedPnL / shortSizeUsd * 100 : 0;
-
-                // Entry prices for both legs
-                var entryLongPrice = (double)longPos.EntryPrice;
-                var entryShortPrice = (double)shortPos.EntryPrice;
-                result["entry_long_price"] = entryLongPrice;
-                result["entry_short_price"] = entryShortPrice;
-
-                // Fetch current prices from market snapshot
-                var currentLongPrice = entryLongPrice; // Default to entry price
-                var currentShortPrice = entryShortPrice;
-
-                if (marketSnapshot?.PerpPrices != null)
-                {
-                    // Try to get current price from snapshot
-                    if (marketSnapshot.PerpPrices.TryGetValue(longPos.Exchange, out var longExchangePrices) &&
-                        longExchangePrices.TryGetValue(longPos.Symbol, out var longPriceDto))
-                    {
-                        currentLongPrice = (double)longPriceDto.Price;
-                    }
-
-                    if (marketSnapshot.PerpPrices.TryGetValue(shortPos.Exchange, out var shortExchangePrices) &&
-                        shortExchangePrices.TryGetValue(shortPos.Symbol, out var shortPriceDto))
-                    {
-                        currentShortPrice = (double)shortPriceDto.Price;
-                    }
-                }
-
-                result["current_long_price"] = currentLongPrice;
-                result["current_short_price"] = currentShortPrice;
-
-                // Funding fees (net funding is already calculated per position)
-                var longNetFunding = (double)(longPos.TotalFundingFeeReceived - longPos.TotalFundingFeePaid);
-                var shortNetFunding = (double)(shortPos.TotalFundingFeeReceived - shortPos.TotalFundingFeePaid);
-                var netFundingUsd = longNetFunding + shortNetFunding;
-
-                result["long_net_funding_usd"] = longNetFunding;
-                result["short_net_funding_usd"] = shortNetFunding;
-
-                // Fetch funding rates from market snapshot
-                var longFundingRate = 0.0;
-                var shortFundingRate = 0.0;
-
-                if (marketSnapshot?.FundingRates != null)
-                {
-                    // Try to get funding rate from snapshot (keyed by exchange, then filter by symbol)
-                    if (marketSnapshot.FundingRates.TryGetValue(longPos.Exchange, out var longExchangeFundingRates))
-                    {
-                        var longFr = longExchangeFundingRates.FirstOrDefault(fr => fr.Symbol == longPos.Symbol);
-                        if (longFr != null)
-                        {
-                            longFundingRate = (double)longFr.Rate;
-                        }
-                    }
-
-                    if (marketSnapshot.FundingRates.TryGetValue(shortPos.Exchange, out var shortExchangeFundingRates))
-                    {
-                        var shortFr = shortExchangeFundingRates.FirstOrDefault(fr => fr.Symbol == shortPos.Symbol);
-                        if (shortFr != null)
-                        {
-                            shortFundingRate = (double)shortFr.Rate;
-                        }
-                    }
-                }
-
-                result["long_funding_rate"] = longFundingRate;
-                result["short_funding_rate"] = shortFundingRate;
-
-                // Entry fees (use trading fee paid as approximation, include both legs)
-                var entryFeesUsd = (double)(longPos.TradingFeePaid + shortPos.TradingFeePaid);
-                result["entry_fees_paid_usd"] = entryFeesUsd;
-
-                // ========== CALCULATE MISSING FIELDS ==========
-
-                // 1. net_funding_ratio - Net funding / total capital used
-                var totalCapitalUsed = longSizeUsd + shortSizeUsd;
-                var netFundingRatio = totalCapitalUsed > 0 ? netFundingUsd / totalCapitalUsed : 0.0;
-                result["net_funding_ratio"] = netFundingRatio;
-
-                // 2. net_funding_rate - Current funding rate differential
-                result["net_funding_rate"] = shortFundingRate - longFundingRate;
-
-                // 3. current_spread_pct - Current price spread percentage
-                var avgCurrentPrice = (currentLongPrice + currentShortPrice) / 2.0;
-                var currentSpreadPct = avgCurrentPrice > 0 ? Math.Abs(currentLongPrice - currentShortPrice) / avgCurrentPrice : 0.0;
-                result["current_spread_pct"] = currentSpreadPct;
-
-                // 4. entry_spread_pct - Entry price spread percentage
-                var avgEntryPrice = (entryLongPrice + entryShortPrice) / 2.0;
-                var entrySpreadPct = avgEntryPrice > 0 ? Math.Abs(entryLongPrice - entryShortPrice) / avgEntryPrice : 0.0;
-                result["entry_spread_pct"] = entrySpreadPct;
-
-                // 5. value_to_capital_ratio - Position value / total capital
-                var valueToCapitalRatio = (double)totalCapital > 0 ? totalCapitalUsed / (double)totalCapital : 0.0;
-                result["value_to_capital_ratio"] = valueToCapitalRatio;
-
-                // 6. funding_efficiency - Net funding / entry fees
-                var fundingEfficiency = entryFeesUsd > 0 ? netFundingUsd / entryFeesUsd : 0.0;
-                result["funding_efficiency"] = fundingEfficiency;
-
-                // 7. liquidation_distance - Distance to liquidation threshold
-                // Calculate based on leverage and current P&L
-                // Liquidation occurs when loss reaches (1 / leverage) * 100%
-                // Distance = (liquidation_threshold - current_loss_pct) / liquidation_threshold
-                var liquidationThreshold = 100.0 / (double)position.Leverage; // e.g., 10% for 10x leverage
-                var currentLossPct = Math.Abs(Math.Min(0, unrealizedPnlPct)); // Only consider losses
-                var liquidationDistance = liquidationThreshold > 0
-                    ? Math.Max(0, (liquidationThreshold - currentLossPct) / liquidationThreshold)
-                    : 1.0;
-                result["liquidation_distance"] = liquidationDistance;
-            }
-            else
-            {
-                // ========== FALLBACK: ExecutionId exists but no paired position found ==========
-                _logger.LogWarning(
-                    "Position {PositionId} has ExecutionId {ExecutionId} but no paired position found. Providing fallback values.",
-                    position.Id, position.ExecutionId);
-
-                // Provide single-leg position data with fallback values
-                result["long_pnl_pct"] = position.Side == PositionSide.Long ? unrealizedPnlPct : 0.0;
-                result["short_pnl_pct"] = position.Side == PositionSide.Short ? unrealizedPnlPct : 0.0;
-
-                result["entry_long_price"] = position.Side == PositionSide.Long ? (double)position.EntryPrice : 0.0;
-                result["entry_short_price"] = position.Side == PositionSide.Short ? (double)position.EntryPrice : 0.0;
-
-                // Try to get current price from market snapshot
-                var currentPrice = (double)position.EntryPrice;
-                if (marketSnapshot?.PerpPrices != null &&
-                    marketSnapshot.PerpPrices.TryGetValue(position.Exchange, out var exchangePrices) &&
-                    exchangePrices.TryGetValue(position.Symbol, out var priceDto))
-                {
-                    currentPrice = (double)priceDto.Price;
-                }
-
-                result["current_long_price"] = position.Side == PositionSide.Long ? currentPrice : 0.0;
-                result["current_short_price"] = position.Side == PositionSide.Short ? currentPrice : 0.0;
-
-                var netFunding = (double)(position.TotalFundingFeeReceived - position.TotalFundingFeePaid);
-                result["long_net_funding_usd"] = position.Side == PositionSide.Long ? netFunding : 0.0;
-                result["short_net_funding_usd"] = position.Side == PositionSide.Short ? netFunding : 0.0;
-
-                // Get funding rate from market snapshot
-                var fundingRate = 0.0;
-                if (marketSnapshot?.FundingRates != null &&
-                    marketSnapshot.FundingRates.TryGetValue(position.Exchange, out var exchangeFundingRates))
-                {
-                    var fr = exchangeFundingRates.FirstOrDefault(f => f.Symbol == position.Symbol);
-                    if (fr != null)
-                    {
-                        fundingRate = (double)fr.Rate;
-                    }
-                }
-
-                result["long_funding_rate"] = position.Side == PositionSide.Long ? fundingRate : 0.0;
-                result["short_funding_rate"] = position.Side == PositionSide.Short ? fundingRate : 0.0;
-
-                var entryFeesUsd = (double)position.TradingFeePaid;
-                result["entry_fees_paid_usd"] = entryFeesUsd;
-
-                // Calculate fallback values for missing fields
-                result["net_funding_ratio"] = positionSizeUsd > 0 ? netFunding / positionSizeUsd : 0.0;
-                result["net_funding_rate"] = 0.0; // No differential for single position
-                result["current_spread_pct"] = 0.0; // No spread for single position
-                result["entry_spread_pct"] = 0.0;
-                result["value_to_capital_ratio"] = (double)totalCapital > 0 ? positionSizeUsd / (double)totalCapital : 0.0;
-                result["funding_efficiency"] = entryFeesUsd > 0 ? netFunding / entryFeesUsd : 0.0;
-
-                var liquidationThreshold = 100.0 / (double)position.Leverage;
-                var currentLossPct = Math.Abs(Math.Min(0, unrealizedPnlPct));
-                var liquidationDistance = liquidationThreshold > 0
-                    ? Math.Max(0, (liquidationThreshold - currentLossPct) / liquidationThreshold)
-                    : 1.0;
-                result["liquidation_distance"] = liquidationDistance;
-            }
-        // Note: The fallback else block above handles positions without paired positions
-
-        return Task.FromResult(result);
-    }
-
-    /// <summary>
-    /// Call ML API for prediction (Modular Mode)
-    /// </summary>
-    private async Task<AgentPrediction?> GetMLPredictionAsync(
-        string userId,
-        AgentConfiguration config,
-        List<ArbitrageOpportunityDto> opportunities,
-        Dictionary<string, object> portfolio)
-    {
-        try
-        {
-            // Build trading config for ML API
-            var tradingConfig = new Dictionary<string, object>
-            {
-                ["max_leverage"] = config.MaxLeverage,
-                ["target_utilization"] = config.TargetUtilization,
-                ["max_positions"] = config.MaxPositions,
-                ["stop_loss_threshold"] = -0.02,  // Default -2%
-                ["liquidation_buffer"] = 0.15     // Default 15%
-            };
-
-            // Call /rl/predict/opportunities with up to 10 opportunities
-            var payload = new
-            {
-                opportunities = opportunities.Take(10).Select(ConvertOpportunityToDict).ToList(),
-                portfolio = portfolio,
-                trading_config = tradingConfig
-            };
-
-            var json = JsonSerializer.Serialize(payload, _jsonOptions);
-
-            // DEBUG: Log the actual JSON payload being sent
-            _logger.LogInformation("===== JSON PAYLOAD TO ML API =====");
-            _logger.LogInformation("Portfolio positions in payload: {Json}",
-                JsonSerializer.Serialize(portfolio.ContainsKey("positions") ? portfolio["positions"] : "NO POSITIONS", _jsonOptions));
-            _logger.LogInformation("==================================");
-
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            var response = await _httpClient.PostAsync("/rl/predict/opportunities", content);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogError("ML API call failed for user {UserId}: {Status}", userId, response.StatusCode);
-                return null;
-            }
-
-            var responseJson = await response.Content.ReadAsStringAsync();
-            var mlResponse = JsonSerializer.Deserialize<MLModularResponse>(responseJson, _jsonOptions);
-
-            if (mlResponse == null)
-            {
-                return new AgentPrediction { Action = "HOLD", Confidence = "LOW" };
-            }
-
-            _logger.LogDebug(
-                "Agent prediction for user {UserId}: {Action} (Confidence: {Confidence:F1}%, ActionID: {ActionId})",
-                userId, mlResponse.Action, mlResponse.Confidence * 100, mlResponse.ActionId);
-
-            // Map modular response to AgentPrediction
-            return new AgentPrediction
-            {
-                Action = mlResponse.Action ?? "HOLD",
-                OpportunityIndex = mlResponse.OpportunityIndex,
-                OpportunitySymbol = mlResponse.OpportunitySymbol,
-                PositionSize = mlResponse.PositionSize,
-                SizeMultiplier = mlResponse.SizeMultiplier,
-                PositionIndex = mlResponse.PositionIndex,
-                Confidence = mlResponse.Confidence >= 0.7 ? "HIGH" : mlResponse.Confidence >= 0.4 ? "MEDIUM" : "LOW",
-                EnterProbability = mlResponse.Confidence, // Confidence is the action probability
-                StateValue = mlResponse.StateValue
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error calling ML API for user {UserId}", userId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Convert opportunity to dictionary for ML API
-    /// ALL 20 fields must match what the ML model expects (rl_predictor.py:_build_opportunity_features)
-    /// </summary>
-    private Dictionary<string, object> ConvertOpportunityToDict(ArbitrageOpportunityDto opp)
-    {
-        return new Dictionary<string, object>
-        {
-            ["symbol"] = opp.Symbol ?? "",
-
-            // Funding rates (fields 1-4)
-            ["long_funding_rate"] = (double)opp.LongFundingRate,
-            ["short_funding_rate"] = (double)opp.ShortFundingRate,
-            ["long_funding_interval_hours"] = opp.LongFundingIntervalHours ?? 8,
-            ["short_funding_interval_hours"] = opp.ShortFundingIntervalHours ?? 8,
-
-            // Profit metrics - current (fields 5-6)
-            ["fund_profit_8h"] = (double)opp.FundProfit8h,
-            ["fund_apr"] = (double)opp.FundApr,
-
-            // Projected profits - 24h and 3d (fields 7-10)
-            ["fundProfit8h24hProj"] = (double)(opp.FundProfit8h24hProj ?? 0m),
-            ["fundProfit8h3dProj"] = (double)(opp.FundProfit8h3dProj ?? 0m),
-            ["fundApr24hProj"] = (double)(opp.FundApr24hProj ?? 0m),
-            ["fundApr3dProj"] = (double)(opp.FundApr3dProj ?? 0m),
-
-            // Spread metrics (fields 11-14)
-            ["spread30SampleAvg"] = (double)(opp.Spread30SampleAvg ?? 0m),
-            ["priceSpread24hAvg"] = (double)(opp.PriceSpread24hAvg ?? 0m),
-            ["priceSpread3dAvg"] = (double)(opp.PriceSpread3dAvg ?? 0m),
-            ["spread_volatility_stddev"] = (double)(opp.SpreadVolatilityStdDev ?? 0m),
-
-            // Volume and liquidity (fields 15-17)
-            ["volume_24h"] = (double)opp.Volume24h,
-            ["bidAskSpreadPercent"] = (double)(opp.BidAskSpreadPercent ?? 0m),
-            ["orderbookDepthUsd"] = (double)(opp.OrderbookDepthUsd ?? 10000m),  // Default to 10k if missing
-
-            // Profit and cost estimates (fields 18-19)
-            ["estimatedProfitPercentage"] = (double)opp.EstimatedProfitPercentage,
-            ["positionCostPercent"] = (double)opp.PositionCostPercent,
-
-            // Field 20 is computed: short_funding_rate - long_funding_rate (handled by ML)
-
-            // CRITICAL: Flag for action masking to prevent duplicate entries
-            ["has_existing_position"] = opp.IsExistingPosition
-        };
     }
 
     /// <summary>
@@ -1300,55 +868,6 @@ public class OpportunityComparer : IEqualityComparer<ArbitrageOpportunityDto>
     {
         return obj.UniqueKey.GetHashCode();
     }
-}
-
-/// <summary>
-/// Agent prediction result from ML API
-/// </summary>
-public class AgentPrediction
-{
-    public string Action { get; set; } = "HOLD";
-    public int? OpportunityIndex { get; set; }
-    public string? OpportunitySymbol { get; set; }
-    public string? PositionSize { get; set; }  // "SMALL", "MEDIUM", "LARGE"
-    public double? SizeMultiplier { get; set; }  // 0.10, 0.20, 0.30
-    public int? PositionIndex { get; set; }  // For EXIT actions
-    public string Confidence { get; set; } = "LOW";
-    public double? EnterProbability { get; set; }
-    public double? StateValue { get; set; }
-}
-
-/// <summary>
-/// ML API modular response (single action)
-/// </summary>
-public class MLModularResponse
-{
-    [JsonPropertyName("action")]
-    public string? Action { get; set; }
-
-    [JsonPropertyName("action_id")]
-    public int ActionId { get; set; }
-
-    [JsonPropertyName("confidence")]
-    public double Confidence { get; set; }
-
-    [JsonPropertyName("state_value")]
-    public double StateValue { get; set; }
-
-    [JsonPropertyName("opportunity_index")]
-    public int? OpportunityIndex { get; set; }
-
-    [JsonPropertyName("opportunity_symbol")]
-    public string? OpportunitySymbol { get; set; }
-
-    [JsonPropertyName("position_size")]
-    public string? PositionSize { get; set; }
-
-    [JsonPropertyName("size_multiplier")]
-    public double? SizeMultiplier { get; set; }
-
-    [JsonPropertyName("position_index")]
-    public int? PositionIndex { get; set; }
 }
 
 /// <summary>

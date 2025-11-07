@@ -37,14 +37,14 @@ public class AgentConfigurationService : IAgentConfigurationService
             return config;
         }
 
-        // Create default configuration
+        // Create default configuration (matches trained model parameters)
         config = new AgentConfiguration
         {
             UserId = userId,
-            MaxLeverage = 1.0m,
-            TargetUtilization = 0.9m,
-            MaxPositions = 3,
-            PredictionIntervalSeconds = 60,
+            MaxLeverage = 2.0m,              // Trained with 2.0x leverage
+            TargetUtilization = 0.8m,        // Trained with 80% utilization
+            MaxPositions = 2,                // Trained with 2 max positions
+            PredictionIntervalSeconds = 300, // Trained with 5-minute intervals (300s)
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };

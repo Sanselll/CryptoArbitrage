@@ -1,7 +1,7 @@
 """
 Fit and save a StandardScaler for opportunity features.
 
-This script loads the training data, extracts the 22 opportunity features,
+This script loads the training data, extracts the 20 opportunity features (full mode),
 fits a StandardScaler, and saves it to disk for use during training and inference.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 def extract_opportunity_features(row):
-    """Extract the 22 features from a single opportunity."""
+    """Extract the 20 features from a single opportunity (matches full mode)."""
     features = [
         # Funding rates (raw)
         row.get('long_funding_rate', 0),
@@ -42,10 +42,8 @@ def extract_opportunity_features(row):
         float(row.get('estimatedProfitPercentage', 0) or 0),
         float(row.get('positionCostPercent', 0.2) or 0.2),
 
-        # Momentum/Trend features (3 features)
-        row.get('spread30SampleAvg', 0) - row.get('priceSpread24hAvg', 0),
-        row.get('fund_apr', 0) - row.get('fundApr24hProj', 0),
-        row.get('priceSpread24hAvg', 0) - row.get('priceSpread3dAvg', 0),
+        # Net funding rate (short - long)
+        row.get('short_funding_rate', 0) - row.get('long_funding_rate', 0),
     ]
 
     # Convert to float and handle NaN/inf
@@ -60,7 +58,7 @@ def main():
 
     # Paths
     train_data_path = "data/rl_train.csv"
-    scaler_output_path = "models/rl/feature_scaler.pkl"
+    scaler_output_path = "trained_models/rl/feature_scaler.pkl"
 
     # Create output directory
     Path(scaler_output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -71,7 +69,7 @@ def main():
     print(f"   Loaded {len(df):,} opportunities")
 
     # Extract all features
-    print("\nExtracting 22 features from each opportunity...")
+    print("\nExtracting 20 features from each opportunity (full mode)...")
     all_features = []
     for idx, row in df.iterrows():
         features = extract_opportunity_features(row)
@@ -97,7 +95,7 @@ def main():
         'spread_volatility_stddev',
         'volume_24h_log', 'bidAskSpreadPercent', 'orderbookDepthUsd_log',
         'estimatedProfitPercentage', 'positionCostPercent',
-        'spread_momentum', 'funding_momentum', 'trend_strength'
+        'net_funding_rate'
     ]
 
     for i, name in enumerate(feature_names):
@@ -139,7 +137,7 @@ def main():
     print("✅ Scaler saved successfully")
     print("="*80)
     print("\nUsage in environment:")
-    print("   1. Load scaler: scaler = pickle.load(open('models/rl/feature_scaler.pkl', 'rb'))")
+    print("   1. Load scaler: scaler = pickle.load(open('trained_models/rl/feature_scaler.pkl', 'rb'))")
     print("   2. Transform features: X_scaled = scaler.transform(X)")
     print("="*80)
 

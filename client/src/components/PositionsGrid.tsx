@@ -273,7 +273,7 @@ export const PositionsGrid = () => {
                 <TableHead className="text-right">Value</TableHead>
                 <TableHead className="text-right">Lev</TableHead>
                 <TableHead className="text-right">Price P&L</TableHead>
-                <TableHead className="text-right">Est. Fund</TableHead>
+                <TableHead className="text-right">Est 8h</TableHead>
                 <TableHead className="text-right">Funding</TableHead>
                 <TableHead className="text-right">Fees</TableHead>
                 <TableHead className="text-right">Total P&L</TableHead>
@@ -294,7 +294,7 @@ export const PositionsGrid = () => {
                 // For Cross-Fut, use longPerp and shortPerp; otherwise use perp and spot
                 const isCrossFut = longPerpPosition && shortPerpPosition;
 
-                // Calculate estimated funding for next settlement FIRST (needed for total P&L)
+                // Calculate estimated funding for next 8 hours FIRST (needed for total P&L)
                 // For Cross-Fut, we need to calculate funding for both positions
                 let estimatedFunding = 0;
                 if (isCrossFut) {
@@ -307,22 +307,36 @@ export const PositionsGrid = () => {
                   );
                   const longRate = longFundingRate ? longFundingRate.rate : 0;
                   const shortRate = shortFundingRate ? shortFundingRate.rate : 0;
+                  const longInterval = longFundingRate?.fundingIntervalHours ?? 8;
+                  const shortInterval = shortFundingRate?.fundingIntervalHours ?? 8;
                   const longValue = longPerpPosition.quantity * longPerpPosition.entryPrice;
                   const shortValue = shortPerpPosition.quantity * shortPerpPosition.entryPrice;
+
+                  // Calculate number of funding payments in 8 hours for each position
+                  const longPaymentsIn8h = 8 / longInterval;
+                  const shortPaymentsIn8h = 8 / shortInterval;
+
                   // Long position: negative rate = receive (positive), positive rate = pay (negative)
                   // Short position: negative rate = pay (negative), positive rate = receive (positive)
-                  estimatedFunding = -longRate * longValue + shortRate * shortValue;
+                  // Multiply by number of payments in 8h to get true 8h estimate
+                  estimatedFunding = (-longRate * longValue * longPaymentsIn8h) + (shortRate * shortValue * shortPaymentsIn8h);
                 } else {
                   // For Spot-Perp or Cross-Spot
                   const currentFundingRate = fundingRates.find(fr =>
                     fr.symbol === pair.symbol && fr.exchange === pair.exchange
                   );
                   const fundingRate = currentFundingRate ? currentFundingRate.rate : 0;
+                  const interval = currentFundingRate?.fundingIntervalHours ?? 8;
                   const perpPositionValue = perpPosition ? perpPosition.quantity * perpPosition.entryPrice : 0;
                   const perpSide = perpPosition ? perpPosition.side : PositionSide.Long;
+
+                  // Calculate number of funding payments in 8 hours
+                  const paymentsIn8h = 8 / interval;
+
                   // Long: negative rate = receive (positive), positive rate = pay (negative)
                   // Short: negative rate = pay (negative), positive rate = receive (positive)
-                  estimatedFunding = fundingRate * perpPositionValue * (perpSide === PositionSide.Long ? -1 : 1);
+                  // Multiply by number of payments in 8h to get true 8h estimate
+                  estimatedFunding = fundingRate * perpPositionValue * (perpSide === PositionSide.Long ? -1 : 1) * paymentsIn8h;
                 }
 
                 // Calculate combined P&L for the pair
@@ -340,8 +354,9 @@ export const PositionsGrid = () => {
                   combinedFees = (perpPosition?.tradingFeePaid || 0) + (spotPosition?.tradingFeePaid || 0);
                 }
 
-                // Total P&L = Price P&L + Est. Fund + Funding - Fees
-                const totalPairPnL = combinedUnrealizedPnL + combinedFunding + estimatedFunding - combinedFees;
+                // Total P&L = Price P&L + Funding Earned - Fees
+                // (Estimated funding is NOT included - it's just a projection for next 8h)
+                const totalPairPnL = combinedUnrealizedPnL + combinedFunding - combinedFees;
 
                 // For Cross-Fut: render both long and short perp rows
                 if (isCrossFut && longPerpPosition && shortPerpPosition) {
@@ -355,9 +370,12 @@ export const PositionsGrid = () => {
                     fr.symbol === pair.symbol && fr.exchange === longPerpPosition.exchange
                   );
                   const longRate = longFundingRate ? longFundingRate.rate : 0;
+                  const longInterval = longFundingRate?.fundingIntervalHours ?? 8;
                   const longValue = longPerpPosition.quantity * longPerpPosition.entryPrice;
+                  const longPaymentsIn8h = 8 / longInterval;
                   // Long: negative rate = receive (positive), positive rate = pay (negative)
-                  const longEstimatedFunding = -longRate * longValue;
+                  // Multiply by number of payments in 8h to get true 8h estimate
+                  const longEstimatedFunding = -longRate * longValue * longPaymentsIn8h;
 
                   const uniqueKey = `cross-fut-${pair.executionId}-${pairIndex}`;
                   const isHovered = hoveredRow === uniqueKey;
@@ -504,9 +522,12 @@ export const PositionsGrid = () => {
                     fr.symbol === pair.symbol && fr.exchange === shortPerpPosition.exchange
                   );
                   const shortRate = shortFundingRate ? shortFundingRate.rate : 0;
+                  const shortInterval = shortFundingRate?.fundingIntervalHours ?? 8;
                   const shortValue = shortPerpPosition.quantity * shortPerpPosition.entryPrice;
+                  const shortPaymentsIn8h = 8 / shortInterval;
                   // Short: negative rate = pay (negative), positive rate = receive (positive)
-                  const shortEstimatedFunding = shortRate * shortValue;
+                  // Multiply by number of payments in 8h to get true 8h estimate
+                  const shortEstimatedFunding = shortRate * shortValue * shortPaymentsIn8h;
 
                   rows.push(
                     <TableRow
