@@ -577,6 +577,20 @@ public class ArbitrageExecutionService
                 ExecutionState.Running);
 
             // Create Position records for tracking (one for perpetual, one for spot)
+            // Calculate entry fees: position_size * taker_fee_rate (0.06%)
+            const decimal takerFeeRate = 0.0006m;
+            var perpNotionalValue = perpQuantity * perpPrice;
+            var spotNotionalValue = actualFilledQuantity * spotPrice;
+            var perpEntryFee = perpNotionalValue * takerFeeRate;
+            var spotEntryFee = spotNotionalValue * takerFeeRate;
+
+            // Calculate funding intervals with defaults
+            var perpFundingInterval = request.FundingIntervalHours ?? 8m;
+            var spotFundingInterval = 8m; // Spot doesn't have funding, but we use 8h as default for consistency
+
+            // Use pre-calculated FundApr from opportunity (ensures consistency with opportunity APR calculation)
+            var entryApr = request.FundApr ?? 0m;
+
             var perpPosition = new Position
             {
                 UserId = _currentUser.UserId,
@@ -591,11 +605,14 @@ public class ArbitrageExecutionService
                 Leverage = request.Leverage > 0 ? request.Leverage : 1m,
                 InitialMargin = perpMargin,  // Use calculated perp margin (perpNotional / leverage)
                 FundingEarnedUsd = 0,
-                TradingFeesUsd = 0,
+                TradingFeesUsd = perpEntryFee,
                 PricePnLUsd = 0,
                 RealizedPnLUsd = 0,
                 RealizedPnLPct = 0,
                 UnrealizedPnL = 0,
+                EntryApr = entryApr,  // APR calculated with actual funding interval
+                LongFundingIntervalHours = spotFundingInterval,  // Spot side (paired with this perp)
+                ShortFundingIntervalHours = perpFundingInterval,  // Perpetual side
                 OrderId = perpOrderId,
                 ExchangePositionId = request.Symbol, // For perpetual positions, the symbol IS the position identifier on the exchange
                 OpenedAt = DateTime.UtcNow
@@ -615,11 +632,14 @@ public class ArbitrageExecutionService
                 Leverage = 1m, // Spot positions don't use leverage
                 InitialMargin = spotCapital,  // Spot capital (PositionSizeUsd represents spot margin)
                 FundingEarnedUsd = 0,
-                TradingFeesUsd = 0,
+                TradingFeesUsd = spotEntryFee,
                 PricePnLUsd = 0,
                 RealizedPnLUsd = 0,
                 RealizedPnLPct = 0,
                 UnrealizedPnL = 0,
+                EntryApr = entryApr,  // APR calculated with actual funding interval
+                LongFundingIntervalHours = spotFundingInterval,  // Spot side
+                ShortFundingIntervalHours = perpFundingInterval,  // Perpetual side (paired with this spot)
                 OrderId = spotOrderId,
                 OpenedAt = DateTime.UtcNow
             };
@@ -665,7 +685,11 @@ public class ArbitrageExecutionService
                     RealizedPnLPct = p.RealizedPnLPct,
                     UnrealizedPnL = p.UnrealizedPnL,
                     OpenedAt = p.OpenedAt,
-                    ClosedAt = p.ClosedAt
+                    ClosedAt = p.ClosedAt,
+                    // ML features (Phase 1 exit timing)
+                    EntryApr = p.EntryApr,
+                    PeakPnlPct = p.PeakPnlPct,
+                    PnlHistoryJson = p.PnlHistoryJson
                 }).ToList();
 
                 await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positionDtos);
@@ -1001,6 +1025,21 @@ public class ArbitrageExecutionService
                 ExecutionState.Running);
 
             // Create Position records for both exchanges
+            // Calculate entry fees: position_size * taker_fee_rate (0.06%)
+            const decimal takerFeeRate = 0.0006m;
+            var longNotionalValue = (isSpotFutures ? actualLongQuantity : quantity) * longPrice;
+            var shortNotionalValue = quantity * shortPrice;
+            var longEntryFee = longNotionalValue * takerFeeRate;
+            var shortEntryFee = shortNotionalValue * takerFeeRate;
+
+            // Calculate funding intervals with defaults
+            var longInterval = request.LongFundingIntervalHours ?? 8m;
+            var shortInterval = request.ShortFundingIntervalHours ?? 8m;
+
+            // Use pre-calculated FundApr from opportunity (ensures consistency with opportunity APR calculation)
+            // This fixes the bug where we subtracted funding rates before converting to daily (wrong for different intervals)
+            var crossExchangeEntryApr = request.FundApr ?? 0m;
+
             var longPosition = new Position
             {
                 UserId = _currentUser.UserId,
@@ -1015,11 +1054,16 @@ public class ArbitrageExecutionService
                 Leverage = isSpotFutures ? 1m : request.Leverage, // Spot has no leverage
                 InitialMargin = isSpotFutures ? request.PositionSizeUsd : marginPerLeg,  // For Futures/Futures: marginPerLeg = PositionSizeUsd / 2
                 FundingEarnedUsd = 0,
-                TradingFeesUsd = 0,
+                TradingFeesUsd = longEntryFee,
                 PricePnLUsd = 0,
                 RealizedPnLUsd = 0,
                 RealizedPnLPct = 0,
                 UnrealizedPnL = 0,
+                EntryApr = crossExchangeEntryApr,  // APR calculated with actual funding intervals
+                PeakPnlPct = 0m,  // Initialize to 0 for new position
+                PnlHistoryJson = null,  // Initialize to null for new position
+                LongFundingIntervalHours = longInterval,
+                ShortFundingIntervalHours = shortInterval,
                 OrderId = longOrderId,
                 ExchangePositionId = isSpotFutures ? null : request.Symbol, // Only perpetual positions have exchange position IDs
                 OpenedAt = DateTime.UtcNow
@@ -1039,11 +1083,16 @@ public class ArbitrageExecutionService
                 Leverage = request.Leverage > 0 ? request.Leverage : 1m,
                 InitialMargin = isSpotFutures ? (quantity * shortPrice / request.Leverage) : marginPerLeg,  // For Futures/Futures: marginPerLeg, for Spot/Futures: calculate from actual notional
                 FundingEarnedUsd = 0,
-                TradingFeesUsd = 0,
+                TradingFeesUsd = shortEntryFee,
                 PricePnLUsd = 0,
                 RealizedPnLUsd = 0,
                 RealizedPnLPct = 0,
                 UnrealizedPnL = 0,
+                EntryApr = crossExchangeEntryApr,  // APR calculated with actual funding intervals
+                PeakPnlPct = 0m,  // Initialize to 0 for new position
+                PnlHistoryJson = null,  // Initialize to null for new position
+                LongFundingIntervalHours = longInterval,
+                ShortFundingIntervalHours = shortInterval,
                 OrderId = shortOrderId,
                 ExchangePositionId = request.Symbol, // For perpetual positions, the symbol IS the position identifier
                 OpenedAt = DateTime.UtcNow
@@ -1092,7 +1141,11 @@ public class ArbitrageExecutionService
                     RealizedPnLPct = p.RealizedPnLPct,
                     UnrealizedPnL = p.UnrealizedPnL,
                     OpenedAt = p.OpenedAt,
-                    ClosedAt = p.ClosedAt
+                    ClosedAt = p.ClosedAt,
+                    // ML features (Phase 1 exit timing)
+                    EntryApr = p.EntryApr,
+                    PeakPnlPct = p.PeakPnlPct,
+                    PnlHistoryJson = p.PnlHistoryJson
                 }).ToList();
 
                 await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positionDtos);

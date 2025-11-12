@@ -18,10 +18,10 @@ class TradingConfig:
     to teach the agent to adapt to different risk profiles.
     """
 
-    # Position sizing and leverage
-    max_leverage: float = 1.0                    # Maximum leverage allowed (1-10x)
-    target_utilization: float = 0.9              # Target capital utilization (0-1, e.g., 0.9 = 90%)
-    max_positions: int = 5                        # Maximum concurrent positions (1-5)
+    # Position sizing and leverage (Phase 1: Moderate defaults for exit timing learning)
+    max_leverage: float = 3.0                    # Maximum leverage allowed (1-10x)
+    target_utilization: float = 0.6              # Target capital utilization (0-1, e.g., 0.6 = 60%)
+    max_positions: int = 3                        # Maximum concurrent positions (1-5)
 
     # Risk management
     stop_loss_threshold: float = -0.02           # P&L% threshold for automatic exit (e.g., -0.02 = -2%)

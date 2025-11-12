@@ -1,7 +1,7 @@
 """
 Fit and save a StandardScaler for opportunity features.
 
-This script loads the training data, extracts the 20 opportunity features (full mode),
+This script loads the training data, extracts the 19 opportunity features (full mode),
 fits a StandardScaler, and saves it to disk for use during training and inference.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 def extract_opportunity_features(row):
-    """Extract the 20 features from a single opportunity (matches full mode)."""
+    """Extract the 19 features from a single opportunity (matches full mode, no net_funding_rate)."""
     features = [
         # Funding rates (raw)
         row.get('long_funding_rate', 0),
@@ -41,9 +41,6 @@ def extract_opportunity_features(row):
         np.log10(max(float(row.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
         float(row.get('estimatedProfitPercentage', 0) or 0),
         float(row.get('positionCostPercent', 0.2) or 0.2),
-
-        # Net funding rate (short - long)
-        row.get('short_funding_rate', 0) - row.get('long_funding_rate', 0),
     ]
 
     # Convert to float and handle NaN/inf
@@ -69,7 +66,7 @@ def main():
     print(f"   Loaded {len(df):,} opportunities")
 
     # Extract all features
-    print("\nExtracting 20 features from each opportunity (full mode)...")
+    print("\nExtracting 19 features from each opportunity (full mode, no net_funding_rate)...")
     all_features = []
     for idx, row in df.iterrows():
         features = extract_opportunity_features(row)
@@ -95,7 +92,6 @@ def main():
         'spread_volatility_stddev',
         'volume_24h_log', 'bidAskSpreadPercent', 'orderbookDepthUsd_log',
         'estimatedProfitPercentage', 'positionCostPercent',
-        'net_funding_rate'
     ]
 
     for i, name in enumerate(feature_names):

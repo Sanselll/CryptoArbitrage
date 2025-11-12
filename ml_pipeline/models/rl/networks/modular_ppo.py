@@ -370,11 +370,11 @@ class ModularPPONetwork(nn.Module):
     """
     Complete modular PPO network combining all components.
 
-    Processes 275-dim observation:
+    Processes 301-dim observation (Phase 2: Added APR comparison features):
     - Config (5) → ConfigEncoder → 16
-    - Portfolio (10) → PortfolioEncoder → 32
-    - Executions (60) → ExecutionEncoder → 64
-    - Opportunities (200) → OpportunityEncoder → 128
+    - Portfolio (6) → PortfolioEncoder → 32
+    - Executions (100) → ExecutionEncoder → 64  # Phase 2: +3 APR comparison features per position
+    - Opportunities (190) → OpportunityEncoder → 128
     - Fusion → 256
     - Actor → 36 action logits
     - Critic → 1 value
@@ -385,17 +385,17 @@ class ModularPPONetwork(nn.Module):
 
         # Encoders
         self.config_encoder = ConfigEncoder(input_dim=5, output_dim=16)
-        self.portfolio_encoder = PortfolioEncoder(input_dim=10, output_dim=32)
+        self.portfolio_encoder = PortfolioEncoder(input_dim=6, output_dim=32)
         self.execution_encoder = ExecutionEncoder(
             num_slots=5,
-            features_per_slot=12,
+            features_per_slot=20,  # Phase 2: +3 APR comparison features (was 17)
             embedding_dim=32,
             num_heads=2,
             output_dim=64
         )
         self.opportunity_encoder = OpportunityEncoder(
             num_slots=10,
-            features_per_slot=20,
+            features_per_slot=19,
             embedding_dim=64,
             num_heads=4,
             output_dim=128
@@ -421,7 +421,7 @@ class ModularPPONetwork(nn.Module):
         Forward pass through entire network.
 
         Args:
-            obs: (batch_size, 275) observation
+            obs: (batch_size, 301) observation (Phase 2: APR comparison features)
             action_mask: (batch_size, 36) boolean mask (optional)
 
         Returns:
@@ -429,10 +429,10 @@ class ModularPPONetwork(nn.Module):
             value: (batch_size, 1) state value estimate
         """
         # Split observation into components
-        config = obs[:, 0:5]           # (batch, 5)
-        portfolio = obs[:, 5:15]       # (batch, 10)
-        executions = obs[:, 15:75]     # (batch, 60)
-        opportunities = obs[:, 75:275] # (batch, 200)
+        config = obs[:, 0:5]            # (batch, 5)
+        portfolio = obs[:, 5:11]        # (batch, 6)
+        executions = obs[:, 11:111]     # (batch, 100) - Phase 2: +15 dims
+        opportunities = obs[:, 111:301] # (batch, 190)
 
         # Encode each component
         config_emb = self.config_encoder(config)
@@ -456,7 +456,7 @@ class ModularPPONetwork(nn.Module):
         Get action distribution for sampling.
 
         Args:
-            obs: (batch_size, 275) observation
+            obs: (batch_size, 301) observation (Phase 2: APR comparison)
             action_mask: (batch_size, 36) boolean mask (optional)
 
         Returns:
@@ -473,7 +473,7 @@ class ModularPPONetwork(nn.Module):
         Evaluate actions for PPO training.
 
         Args:
-            obs: (batch_size, 275) observations
+            obs: (batch_size, 301) observations (Phase 2: APR comparison)
             actions: (batch_size,) actions taken
             action_mask: (batch_size, 36) boolean mask (optional)
 
@@ -506,7 +506,7 @@ if __name__ == "__main__":
 
     # Test forward pass
     batch_size = 4
-    obs = torch.randn(batch_size, 275)
+    obs = torch.randn(batch_size, 301)  # Phase 2: APR comparison features (was 286)
 
     # Create action mask (all valid)
     action_mask = torch.ones(batch_size, 36, dtype=torch.bool)

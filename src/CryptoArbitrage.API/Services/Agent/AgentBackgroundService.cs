@@ -355,6 +355,19 @@ public class AgentBackgroundService : BackgroundService
                 }
             }
 
+            // BUG FIX #5: Deduplicate positions by ID (multiple snapshots may contain same positions)
+            var countBeforeDedup = allPositions.Count;
+            allPositions = allPositions
+                .GroupBy(p => p.Id)
+                .Select(g => g.First())
+                .ToList();
+
+            if (countBeforeDedup != allPositions.Count)
+            {
+                _logger.LogWarning("Deduplicated {Before} positions to {After} unique positions for user {UserId}",
+                    countBeforeDedup, allPositions.Count, userId);
+            }
+
             _logger.LogDebug("Retrieved {Count} positions from repository for user {UserId}", allPositions.Count, userId);
         }
         catch (Exception ex)
@@ -451,17 +464,23 @@ public class AgentBackgroundService : BackgroundService
                         // For spot-perpetual strategy
                         Exchange = opportunity.Exchange,
                         FundingRate = opportunity.LongFundingRate, // Use long funding rate as primary
+                        FundingIntervalHours = opportunity.LongFundingIntervalHours,
 
                         // For cross-exchange strategy
                         LongExchange = opportunity.LongExchange,
                         ShortExchange = opportunity.ShortExchange,
                         LongFundingRate = opportunity.LongFundingRate,
                         ShortFundingRate = opportunity.ShortFundingRate,
+                        LongFundingIntervalHours = opportunity.LongFundingIntervalHours,
+                        ShortFundingIntervalHours = opportunity.ShortFundingIntervalHours,
 
                         // Spread information
                         SpreadRate = opportunity.SpreadRate,
                         AnnualizedSpread = opportunity.AnnualizedSpread,
-                        EstimatedProfitPercentage = opportunity.EstimatedProfitPercentage
+                        EstimatedProfitPercentage = opportunity.EstimatedProfitPercentage,
+
+                        // Pre-calculated FundApr (ensures consistency with opportunity)
+                        FundApr = opportunity.FundApr
                     };
 
                         _logger.LogInformation(

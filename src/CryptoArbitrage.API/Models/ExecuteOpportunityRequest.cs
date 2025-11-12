@@ -22,4 +22,12 @@ public class ExecuteOpportunityRequest
     public decimal SpreadRate { get; set; } // The actual spread/difference
     public decimal AnnualizedSpread { get; set; } // Annualized spread percentage
     public decimal EstimatedProfitPercentage { get; set; } // Estimated profit %
+
+    // Funding interval information (needed for accurate APR calculations)
+    public decimal? FundingIntervalHours { get; set; } // For SpotPerpetual: perp funding interval. Default: 8h
+    public decimal? LongFundingIntervalHours { get; set; } // For CrossExchange: long side interval. Default: 8h
+    public decimal? ShortFundingIntervalHours { get; set; } // For CrossExchange: short side interval. Default: 8h
+
+    // Pre-calculated FundApr from opportunity (ensures consistency with opportunity APR calculation)
+    public decimal? FundApr { get; set; } // Annualized funding rate difference (correctly calculated)
 }

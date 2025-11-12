@@ -77,53 +77,80 @@ public class RLPortfolioState
     public float MinLiquidationDistance { get; set; } = 1.0f;  // Closest position to liquidation (0-1)
     public float CapitalUtilization { get; set; } = 0.0f;  // Total notional value of positions / capital % (Feature #10)
 
-    // Position details (up to 5 slots × 12 features each = 60 features)
+    // Position details (up to 5 slots × 17 features each = 85 features) [PHASE 1: +5 exit timing features]
     public List<RLPositionState> Positions { get; set; } = new();
 }
 
 /// <summary>
-/// Position state for RL model evaluation (12 features per execution/position)
+/// Position state for RL model evaluation (17 features per execution/position) [PHASE 1: +5 exit timing features]
 /// Maps to rl_predictor.py:_build_execution_features()
 /// NOTE: Each "position" represents one EXECUTION (long + short pair), not individual legs
 /// ML predictor calculates most features from raw data fields below
 /// </summary>
 public class RLPositionState
 {
+    // Symbol for logging and debugging (not used by ML model)
+    public string Symbol { get; set; } = string.Empty;
+
     // ===== FIELDS USED DIRECTLY BY ML PREDICTOR =====
     // These are read directly from the position dict by rl_predictor.py
 
     // P&L metrics (used directly by ML)
-    public float UnrealizedPnlPct { get; set; }  // Net P&L % - read directly at line 219
-    public float LongPnlPct { get; set; }  // Long side P&L % - read directly at line 261
-    public float ShortPnlPct { get; set; }  // Short side P&L % - read directly at line 264
+    public float UnrealizedPnlPct { get; set; }  // Net P&L % - read directly at line 236
+    public float LongPnlPct { get; set; }  // Long side P&L % - read directly at line 273
+    public float ShortPnlPct { get; set; }  // Short side P&L % - read directly at line 276
 
     // Risk metric (used directly by ML)
-    public float LiquidationDistance { get; set; }  // Distance to liquidation - read directly at line 267
+    public float LiquidationDistance { get; set; }  // Distance to liquidation - read directly at line 280
 
     // ===== RAW DATA FIELDS (ML Calculates Features From These) =====
     // rl_predictor.py uses these to calculate: hours_held, net_funding_ratio, net_funding_rate,
     // current_spread_pct, entry_spread_pct, value_ratio, funding_efficiency
 
     // Time metrics
-    public float PositionAgeHours { get; set; }  // Raw hours held (ML normalizes by 72h at line 222)
+    public float PositionAgeHours { get; set; }  // Raw hours held (ML normalizes by 72h at line 234)
 
     // Funding amounts (raw USD values)
-    public float LongNetFundingUsd { get; set; }  // Long side funding USD (line 226)
-    public float ShortNetFundingUsd { get; set; }  // Short side funding USD (line 227)
+    public float LongNetFundingUsd { get; set; }  // Long side funding USD (line 238)
+    public float ShortNetFundingUsd { get; set; }  // Short side funding USD (line 239)
 
     // Funding rates (individual exchange rates)
-    public float ShortFundingRate { get; set; }  // Short exchange rate (line 232)
-    public float LongFundingRate { get; set; }  // Long exchange rate (line 233)
+    public float ShortFundingRate { get; set; }  // Short exchange rate (line 244)
+    public float LongFundingRate { get; set; }  // Long exchange rate (line 245)
 
     // Price data (raw prices for both legs)
-    public float CurrentLongPrice { get; set; }  // Current long price (line 236)
-    public float CurrentShortPrice { get; set; }  // Current short price (line 237)
-    public float EntryLongPrice { get; set; }  // Entry long price (line 245)
-    public float EntryShortPrice { get; set; }  // Entry short price (line 246)
+    public float CurrentLongPrice { get; set; }  // Current long price (line 248)
+    public float CurrentShortPrice { get; set; }  // Current short price (line 249)
+    public float EntryLongPrice { get; set; }  // Entry long price (line 257)
+    public float EntryShortPrice { get; set; }  // Entry short price (line 258)
 
     // Position sizing
-    public float PositionSizeUsd { get; set; }  // Position size per side in USD (line 225)
-    public float EntryFeesPaidUsd { get; set; }  // Entry fees paid (line 257)
+    public float PositionSizeUsd { get; set; }  // Position size per side in USD (line 237)
+    public float EntryFeesPaidUsd { get; set; }  // Entry fees paid (line 269)
+
+    // ===== PHASE 1 EXIT TIMING FEATURES (NEW) =====
+    // Used to calculate the 5 new exit timing features (features 13-17)
+
+    // For pnl_velocity calculation (feature 13)
+    public List<float> PnlHistory { get; set; } = new();  // Hourly P&L history (line 315)
+
+    // For peak_drawdown calculation (feature 14)
+    public float PeakPnlPct { get; set; }  // Peak P&L % reached (line 324)
+
+    // For apr_ratio calculation (feature 15)
+    public float EntryApr { get; set; }  // APR at entry time (line 331)
+
+    // ===== PHASE 2 APR COMPARISON FEATURES (NEW) =====
+    // Used to calculate the 3 new APR comparison features (features 18-20)
+
+    // For current_position_apr calculation (feature 18)
+    public float CurrentPositionApr { get; set; }  // Current APR of this position (calculated from live funding rates)
+
+    // For best_available_apr calculation (feature 19)
+    public float BestAvailableApr { get; set; }  // Max APR among current market opportunities
+
+    // For apr_advantage calculation (feature 20)
+    public float AprAdvantage { get; set; }  // current_position_apr - best_available_apr (negative = better opps exist)
 
     // ===== DEPRECATED FIELDS (kept for backward compatibility) =====
     // Backend still populates these but ML predictor ignores them

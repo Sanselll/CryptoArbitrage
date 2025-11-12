@@ -382,6 +382,12 @@ namespace CryptoArbitrage.API.Migrations
                     b.Property<DateTime?>("ClosedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<decimal>("EntryApr")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)")
+                        .HasDefaultValue(0m);
+
                     b.Property<decimal>("EntryPrice")
                         .HasPrecision(18, 8)
                         .HasColumnType("numeric(18,8)");
@@ -409,9 +415,15 @@ namespace CryptoArbitrage.API.Migrations
                         .HasPrecision(18, 8)
                         .HasColumnType("numeric(18,8)");
 
+                    b.Property<DateTime?>("LastPnlSnapshotTime")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<decimal>("Leverage")
                         .HasPrecision(5, 2)
                         .HasColumnType("numeric(5,2)");
+
+                    b.Property<decimal>("LongFundingIntervalHours")
+                        .HasColumnType("numeric");
 
                     b.Property<string>("Notes")
                         .HasColumnType("text");
@@ -422,6 +434,15 @@ namespace CryptoArbitrage.API.Migrations
                     b.Property<string>("OrderId")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("PeakPnlPct")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<string>("PnlHistoryJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<decimal>("PricePnLUsd")
                         .HasPrecision(18, 8)
@@ -444,6 +465,9 @@ namespace CryptoArbitrage.API.Migrations
 
                     b.Property<int>("ReconciliationStatus")
                         .HasColumnType("integer");
+
+                    b.Property<decimal>("ShortFundingIntervalHours")
+                        .HasColumnType("numeric");
 
                     b.Property<int>("Side")
                         .HasColumnType("integer");

@@ -31,6 +31,7 @@ public class RLPredictionService : IDisposable
     private readonly IDataRepository<MarketDataSnapshot> _marketDataRepository;
     private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
     private readonly IAgentConfigurationService _agentConfigService;
+    private readonly ITradingSessionService _sessionService;
 
     public RLPredictionService(
         ILogger<RLPredictionService> logger,
@@ -39,7 +40,8 @@ public class RLPredictionService : IDisposable
         IDataRepository<UserDataSnapshot> userDataRepository,
         IDataRepository<MarketDataSnapshot> marketDataRepository,
         IDataRepository<FundingRateDto> fundingRateRepository,
-        IAgentConfigurationService agentConfigService)
+        IAgentConfigurationService agentConfigService,
+        ITradingSessionService sessionService)
     {
         _logger = logger;
         _context = context;
@@ -47,6 +49,7 @@ public class RLPredictionService : IDisposable
         _marketDataRepository = marketDataRepository;
         _fundingRateRepository = fundingRateRepository;
         _agentConfigService = agentConfigService;
+        _sessionService = sessionService;
 
         // Get configuration (same ML API server, different port if needed)
         var host = configuration["MLApi:Host"] ?? "localhost";
@@ -193,8 +196,16 @@ public class RLPredictionService : IDisposable
             var numExecutions = positions.Select(p => p.ExecutionId).Distinct().Count();
             _logger.LogDebug("Found {Count} active positions across {Executions} executions", positions.Count, numExecutions);
 
-            // 3. Build complete portfolio state (10 portfolio features + 60 position features)
-            var portfolio = await BuildCompletePortfolioStateAsync(userId, positions, agentConfig, cancellationToken);
+            // 3. Calculate best available APR from ALL opportunities (including current positions)
+            // CRITICAL FIX: Include ALL opportunities, even those we have positions in
+            // The model needs to compare current position APR against all opportunities (including itself)
+            // Previously excluding current positions caused false "better opportunity" signals
+            var bestAvailableApr = oppList.Any() ? oppList.Max(o => (float)o.FundApr) : 0f;
+            _logger.LogDebug("Best available APR: {BestApr:F2}% (from ALL {Count} opportunities)",
+                bestAvailableApr, oppList.Count);
+
+            // 4. Build complete portfolio state (10 portfolio features + 100 position features) - Phase 2
+            var portfolio = await BuildCompletePortfolioStateAsync(userId, positions, agentConfig, bestAvailableApr, oppList, cancellationToken);
             _logger.LogInformation("Portfolio features: Capital=${Capital:F2}, Util={Util:F2}%, NumPos={NumPos}, AvgPnl={AvgPnl:F2}%",
                 portfolio.Capital, portfolio.MarginUtilization, portfolio.NumPositions, portfolio.AvgPositionPnlPct);
             _logger.LogInformation("Position features: {Count} slots prepared ({Active} active, {Empty} empty)",
@@ -202,7 +213,7 @@ public class RLPredictionService : IDisposable
                 portfolio.Positions.Count(p => p.IsActive),
                 portfolio.Positions.Count(p => !p.IsActive));
 
-            // 4. Build request payload
+            // 5. Build request payload
             var payload = new
             {
                 opportunities = oppList.Select(ConvertOpportunityToFeatures).ToList(),
@@ -210,7 +221,7 @@ public class RLPredictionService : IDisposable
                 trading_config = tradingConfig
             };
 
-            // 5. Serialize and send request
+            // 6. Serialize and send request
             var json = JsonSerializer.Serialize(payload, _jsonOptions);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -300,10 +311,18 @@ public class RLPredictionService : IDisposable
             var positions = ConvertPositionDtosToEntities(repositoryPositions, userId);
             _logger.LogInformation("Using {Count} positions from UserDataSnapshot repository (same source as frontend)", positions.Count);
 
-            // 3. Build complete portfolio state (10 portfolio features + 60 position features)
-            var portfolio = await BuildCompletePortfolioStateAsync(userId, positions, agentConfig, cancellationToken);
+            // 3. Calculate best available APR from ALL opportunities (including current positions)
+            // CRITICAL FIX: Include ALL opportunities, even those we have positions in
+            // The model needs to compare current position APR against all opportunities (including itself)
+            // Previously excluding current positions caused false "better opportunity" signals
+            var bestAvailableApr = oppList.Any() ? oppList.Max(o => (float)o.FundApr) : 0f;
+            _logger.LogDebug("Best available APR: {BestApr:F2}% (from ALL {Count} opportunities)",
+                bestAvailableApr, oppList.Count);
 
-            // 4. Build request payload for modular mode
+            // 4. Build complete portfolio state (10 portfolio features + 100 position features) - Phase 2
+            var portfolio = await BuildCompletePortfolioStateAsync(userId, positions, agentConfig, bestAvailableApr, oppList, cancellationToken);
+
+            // 5. Build request payload for modular mode
             var payload = new
             {
                 opportunities = oppList.Select(ConvertOpportunityToFeatures).ToList(),
@@ -311,7 +330,7 @@ public class RLPredictionService : IDisposable
                 trading_config = tradingConfig
             };
 
-            // 5. Serialize and send request
+            // 6. Serialize and send request
             var json = JsonSerializer.Serialize(payload, _jsonOptions);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -737,7 +756,12 @@ public class RLPredictionService : IDisposable
             ReconciliationStatus = dto.ReconciliationStatus,
             ReconciliationCompletedAt = dto.ReconciliationCompletedAt,
             OpenedAt = dto.OpenedAt,
-            ClosedAt = dto.ClosedAt
+            ClosedAt = dto.ClosedAt,
+
+            // ML features (Phase 1 exit timing) - now available from DTO
+            EntryApr = dto.EntryApr,
+            PeakPnlPct = dto.PeakPnlPct,
+            PnlHistoryJson = dto.PnlHistoryJson
             // Note: Position entity doesn't have TotalFundingFeePaid, TotalFundingFeeReceived, TradingFeePaid, ActiveOpportunityId
             // These are DTO-specific properties that aren't needed for ML feature calculation
         }).ToList();
@@ -755,6 +779,8 @@ public class RLPredictionService : IDisposable
         string userId,
         List<Position> positions,
         AgentConfiguration config,
+        float bestAvailableApr,
+        List<ArbitrageOpportunityDto> opportunities,
         CancellationToken cancellationToken)
     {
         // 1. Get total capital from UserDataSnapshot
@@ -767,23 +793,52 @@ public class RLPredictionService : IDisposable
         // 3. Calculate average position P&L
         var avgPnlPct = CalculateAvgPositionPnl(positions, totalCapital);
 
-        // 4. Get total P&L % from performance metrics
-        var totalPnlPct = await GetTotalPnlPctAsync(userId, cancellationToken);
+        // 4. Calculate total P&L % directly from positions (matches ML model expectations)
+        // CRITICAL FIX: Previously read from UserDataSnapshot which had stale/wrong data, causing immediate exits
+        // Now calculate directly from positions list like the test environment does
+        var totalPnlPct = CalculateTotalPnlPctFromPositions(positions, totalCapital);
+
+        // VERIFICATION: Compare old broken method vs new fixed method for monitoring
+        var oldTotalPnlPct = await CalculateTotalPnlPctFromUserDataAsync(userId, totalCapital, cancellationToken);
+        if (Math.Abs(totalPnlPct - oldTotalPnlPct) > 0.01f)  // Log if difference > 0.01%
+        {
+            _logger.LogWarning(
+                "P&L Calculation Discrepancy Detected! Fixed={FixedPnl}%, Old(broken)={OldPnl}%, Difference={Diff}%, " +
+                "NumPositions={NumPos}, AvgPosPnl={AvgPnl}%",
+                totalPnlPct, oldTotalPnlPct, totalPnlPct - oldTotalPnlPct,
+                positions.Count, avgPnlPct);
+        }
 
         // 5. Get max drawdown
         var drawdown = await GetMaxDrawdownAsync(userId, cancellationToken);
 
-        // 6. Calculate episode progress (0.5 default, can be enhanced with session start time)
-        var episodeProgress = 0.5f;  // TODO: Track session start time to calculate actual progress
+        // 6. Calculate episode progress based on session duration (not position age)
+        // This reflects how far through the current 24-hour trading session we are
+        var episodeProgress = _sessionService.CalculateEpisodeProgress();
 
-        // 7. Calculate minimum liquidation distance across all positions
-        var minLiqDistance = CalculateMinLiquidationDistance(positions);
+        // 7. Get market data snapshot (needed for liquidation distance and position states)
+        var marketSnapshot = await _marketDataRepository.GetAsync("market_data_snapshot", cancellationToken);
 
-        // 8. Calculate capital utilization (total value of positions / capital)
+        // 8. Calculate minimum liquidation distance across all positions
+        var minLiqDistance = CalculateMinLiquidationDistance(positions, marketSnapshot);
+
+        // 9. Calculate capital utilization (total value of positions / capital)
         var capitalUtil = CalculateCapitalUtilization(positions, totalCapital);
 
-        // 9. Build position features (5 slots × 12 features each)
-        var positionStates = await BuildPositionStatesAsync(positions, totalCapital, cancellationToken);
+        // 10. Build position features (5 slots × 20 features each) - Phase 2: +3 APR comparison features
+        var positionStates = await BuildPositionStatesAsync(positions, totalCapital, marketSnapshot, bestAvailableApr, opportunities, cancellationToken);
+
+        // Enhanced logging for P&L verification
+        var sumPositionPnls = positions.Count > 0 ? positions.Sum(p => p.UnrealizedPnL) : 0m;
+        var verifyPnlPct = totalCapital > 0 ? (float)(sumPositionPnls / totalCapital * 100) : 0f;
+
+        _logger.LogInformation(
+            "Portfolio State: Capital=${Capital}, TotalPnlPct={TotalPnlPct}% (verify={VerifyPnl}%), " +
+            "AvgPosPnl={AvgPnl}%, NumPositions={NumPositions}, MarginUtil={MarginUtil}%, " +
+            "EpisodeProgress={EpisodeProgress:F2}, SumPosPnl=${SumPnl}",
+            totalCapital, totalPnlPct, verifyPnlPct, avgPnlPct,
+            positions.Select(p => p.ExecutionId).Distinct().Count(),
+            utilization * 100, episodeProgress, sumPositionPnls);
 
         return new RLPortfolioState
         {
@@ -815,12 +870,12 @@ public class RLPredictionService : IDisposable
     private async Task<List<RLPositionState>> BuildPositionStatesAsync(
         List<Position> positions,
         decimal totalCapital,
+        MarketDataSnapshot? marketSnapshot,
+        float bestAvailableApr,
+        List<ArbitrageOpportunityDto> opportunities,
         CancellationToken cancellationToken)
     {
         var result = new List<RLPositionState>();
-
-        // Get market data for current prices
-        var marketSnapshot = await _marketDataRepository.GetAsync("market_data_snapshot", cancellationToken);
 
         // Group by ExecutionId (each execution = 1 position state with long + short)
         var executionGroups = positions
@@ -854,9 +909,32 @@ public class RLPredictionService : IDisposable
             // Calculate position size
             var positionSize = longPos.Quantity * longPos.EntryPrice;
 
+            // CRITICAL FIX: Calculate position age for P&L history delay
+            var positionAge = (DateTime.UtcNow - longPos.OpenedAt).TotalHours;
+
+            // Delay P&L history for 1 hour to match training environment
+            List<float> pnlHistoryToUse;
+            if (positionAge >= 1.0)
+            {
+                pnlHistoryToUse = ParsePnlHistory(longPos.PnlHistoryJson);
+                _logger.LogDebug(
+                    "Using P&L history for {Symbol} (age={Age:F1}h): {Count} samples",
+                    longPos.Symbol, positionAge, pnlHistoryToUse.Count);
+            }
+            else
+            {
+                pnlHistoryToUse = new List<float>();
+                _logger.LogDebug(
+                    "Delaying P&L history for {Symbol} (age={Age:F1}h < 1h): using empty list",
+                    longPos.Symbol, positionAge);
+            }
+
             // Build position state with raw data fields for ML predictor
             var state = new RLPositionState
             {
+                // Symbol for logging and debugging
+                Symbol = longPos.Symbol,
+
                 // ===== FIELDS USED DIRECTLY BY ML PREDICTOR =====
 
                 // P&L metrics (ML reads these directly)
@@ -870,7 +948,7 @@ public class RLPredictionService : IDisposable
                 // ===== RAW DATA FIELDS (ML Calculates Features From These) =====
 
                 // Time (ML will normalize by 72h)
-                PositionAgeHours = (float)(DateTime.UtcNow - longPos.OpenedAt).TotalHours,
+                PositionAgeHours = (float)positionAge,
 
                 // Funding amounts (USD)
                 LongNetFundingUsd = (float)longFunding,
@@ -888,12 +966,45 @@ public class RLPredictionService : IDisposable
 
                 // Position sizing
                 PositionSizeUsd = (float)positionSize,
-                EntryFeesPaidUsd = (float)(longPos.TradingFeesUsd + shortPos.TradingFeesUsd),
+                // FALLBACK: Calculate entry fees if database has 0 (legacy positions)
+                // Entry fees: 0.01% maker fee × 2 sides = 0.02% = 0.0002
+                EntryFeesPaidUsd = (longPos.TradingFeesUsd + shortPos.TradingFeesUsd) > 0
+                    ? (float)(longPos.TradingFeesUsd + shortPos.TradingFeesUsd)
+                    : (float)((longPos.Quantity * longPos.EntryPrice + shortPos.Quantity * shortPos.EntryPrice) * 0.0002m),
+
+                // ===== PHASE 1 EXIT TIMING FEATURES =====
+                // CRITICAL FIX: P&L history and peak delayed for 1 hour (calculated above)
+
+                // For pnl_velocity: Hourly P&L history (ML calculates velocity from this)
+                PnlHistory = pnlHistoryToUse,  // Empty for first hour, then real history
+
+                // For peak_drawdown: Peak P&L percentage reached (ML calculates drawdown from this)
+                // Only track peak after 1 hour to avoid false peaks from spread volatility
+                PeakPnlPct = positionAge >= 1.0
+                    ? (float)longPos.PeakPnlPct  // Use real peak after 1 hour
+                    : 0f,  // Zero for new positions (matches training)
+
+                // For apr_ratio: APR at entry time (ML calculates ratio vs current APR)
+                // Read from Position entity (now populated from database via UserDataCollector → PositionDto)
+                EntryApr = (float)longPos.EntryApr,
+
+                // ===== PHASE 2 APR COMPARISON FEATURES =====
+                // Calculate APR comparison features (features 18-20)
+
+                // Feature 18: Current Position APR (lookup from matching opportunity instead of recalculating)
+                // This ensures consistency with opportunity APR calculation (converts each funding rate to daily independently)
+                CurrentPositionApr = GetPositionAprFromOpportunities(longPos.Symbol, opportunities),
+
+                // Feature 19: Best Available APR (max APR among current opportunities)
+                BestAvailableApr = bestAvailableApr,
+
+                // Feature 20: APR Advantage (current - best, negative = better opportunities exist)
+                AprAdvantage = GetPositionAprFromOpportunities(longPos.Symbol, opportunities) - bestAvailableApr,
 
                 // ===== DEPRECATED FIELDS (kept for backward compatibility) =====
                 IsActive = true,
                 PnlPct = CalculateNetPnlPct(longPos, shortPos, longPrice, shortPrice),
-                HoursHeld = (float)(DateTime.UtcNow - longPos.OpenedAt).TotalHours / 72.0f,
+                HoursHeld = (float)(DateTime.UtcNow - longPos.OpenedAt).TotalHours,  // Actual hours, NOT normalized
                 NetFundingRatio = positionSize > 0 ? (float)(totalFunding / positionSize) : 0.0f,
                 FundingRate = (float)(shortFR - longFR),
                 CurrentSpreadPct = CalculateSpreadPct(longPrice, shortPrice),
@@ -913,6 +1024,9 @@ public class RLPredictionService : IDisposable
         {
             result.Add(new RLPositionState
             {
+                // Symbol for empty slot
+                Symbol = "",
+
                 // ML predictor reads these directly (all zeros for empty slot)
                 UnrealizedPnlPct = 0,
                 LongPnlPct = 0,
@@ -931,6 +1045,16 @@ public class RLPredictionService : IDisposable
                 EntryShortPrice = 0,
                 PositionSizeUsd = 0,
                 EntryFeesPaidUsd = 0,
+
+                // Phase 1 exit timing features (empty slot values)
+                PnlHistory = new List<float>(),
+                PeakPnlPct = 0f,
+                EntryApr = 0f,
+
+                // Phase 2 APR comparison features (empty slot values)
+                CurrentPositionApr = 0f,
+                BestAvailableApr = 0f,
+                AprAdvantage = 0f,
 
                 // Deprecated fields (kept for compatibility)
                 IsActive = false,
@@ -985,6 +1109,61 @@ public class RLPredictionService : IDisposable
         }
 
         return total;
+    }
+
+    private async Task<float> CalculateTotalPnlPctFromUserDataAsync(string userId, decimal totalCapital, CancellationToken cancellationToken)
+    {
+        // DEPRECATED: This method is kept for backward compatibility but no longer used
+        // It was reading stale data from UserDataSnapshot.Balance.UnrealizedPnL
+        // Now we calculate directly from positions in CalculateTotalPnlPctFromPositions
+
+        // Get UserDataSnapshot for all exchanges
+        var userDataDict = await _userDataRepository.GetByPatternAsync($"userdata:{userId}:*", cancellationToken);
+
+        if (!userDataDict.Any() || totalCapital == 0)
+            return 0.0f;
+
+        // Sum unrealized P&L from all open positions across all exchanges
+        decimal totalUnrealizedPnl = 0m;
+
+        foreach (var snapshot in userDataDict.Values)
+        {
+            if (snapshot?.Balance != null)
+            {
+                totalUnrealizedPnl += snapshot.Balance.UnrealizedPnL;
+            }
+        }
+
+        // Calculate percentage: (unrealized P&L / capital) * 100
+        var pnlPct = (float)(totalUnrealizedPnl / totalCapital * 100);
+
+        _logger.LogDebug(
+            "Total P&L (from UserData): UnrealizedPnL=${UnrealizedPnl}, Capital=${Capital}, PnlPct={PnlPct}%",
+            totalUnrealizedPnl, totalCapital, pnlPct);
+
+        return pnlPct;
+    }
+
+    /// <summary>
+    /// Calculate total P&L percentage directly from positions.
+    /// This ensures the value matches what the ML model expects (same as test environment).
+    /// </summary>
+    private float CalculateTotalPnlPctFromPositions(List<Position> positions, decimal totalCapital)
+    {
+        if (totalCapital == 0)
+            return 0.0f;
+
+        // Sum unrealized P&L from all positions directly
+        decimal totalUnrealizedPnl = positions.Sum(p => p.UnrealizedPnL);
+
+        // Calculate percentage: (unrealized P&L / capital) * 100
+        var pnlPct = (float)(totalUnrealizedPnl / totalCapital * 100);
+
+        _logger.LogDebug(
+            "Total P&L (from positions): UnrealizedPnL=${UnrealizedPnl}, Capital=${Capital}, PnlPct={PnlPct}%, NumPositions={NumPositions}",
+            totalUnrealizedPnl, totalCapital, pnlPct, positions.Count);
+
+        return pnlPct;
     }
 
     private async Task<float> GetTotalPnlPctAsync(string userId, CancellationToken cancellationToken)
@@ -1061,14 +1240,40 @@ public class RLPredictionService : IDisposable
         return pnls.Any() ? pnls.Average() : 0.0f;
     }
 
-    private float CalculateMinLiquidationDistance(List<Position> positions)
+    private float CalculateMinLiquidationDistance(List<Position> positions, MarketDataSnapshot? marketSnapshot)
     {
+        // Match ground truth: portfolio.py:get_min_liquidation_distance() (lines 523-546)
         if (!positions.Any())
-            return 1.0f;  // 1.0 = safe (no positions)
+            return 1.0f;  // 1.0 = safe (no positions, no liquidation risk)
 
-        // TODO: Implement actual liquidation price calculation
-        // For now, return safe distance
-        return 0.8f;  // 80% away from liquidation
+        // Calculate minimum liquidation distance across all position pairs
+        var minDistance = 1.0f;
+
+        var executionGroups = positions.GroupBy(p => p.ExecutionId);
+
+        foreach (var execution in executionGroups)
+        {
+            var longPos = execution.FirstOrDefault(p => p.Side == PositionSide.Long);
+            var shortPos = execution.FirstOrDefault(p => p.Side == PositionSide.Short);
+
+            if (longPos == null || shortPos == null)
+                continue;  // Skip incomplete executions
+
+            // Get current prices for this position
+            var longPrice = GetCurrentPrice(longPos.Exchange, longPos.Symbol, marketSnapshot);
+            var shortPrice = GetCurrentPrice(shortPos.Exchange, shortPos.Symbol, marketSnapshot);
+
+            if (longPrice == 0 || shortPrice == 0)
+                continue;  // Skip if no price data available
+
+            // Calculate liquidation distance for this execution
+            var distance = CalculateLiquidationDistance(longPos, shortPos, longPrice, shortPrice);
+
+            // Track minimum (most at risk)
+            minDistance = Math.Min(minDistance, distance);
+        }
+
+        return minDistance;
     }
 
     private float CalculateCapitalUtilization(List<Position> positions, decimal totalCapital)
@@ -1092,21 +1297,25 @@ public class RLPredictionService : IDisposable
 
     private float CalculateNetPnlPct(Position longPos, Position shortPos, decimal longPrice, decimal shortPrice)
     {
-        // Calculate unrealized P&L based on current prices
+        // Calculate position sizes
         var longValue = longPos.Quantity * longPos.EntryPrice;
         var shortValue = shortPos.Quantity * shortPos.EntryPrice;
-        var totalMargin = longPos.InitialMargin + shortPos.InitialMargin;
 
-        if (totalMargin == 0)
+        // Match ML environment: total_capital_used = position_size_usd * 2 (both long and short positions)
+        var totalCapitalUsed = longValue + shortValue;
+
+        if (totalCapitalUsed == 0)
             return 0.0f;
 
-        // Long P&L: (currentPrice - entryPrice) * quantity
-        // Short P&L: (entryPrice - currentPrice) * quantity
-        var longPnl = (longPrice - longPos.EntryPrice) * longPos.Quantity;
-        var shortPnl = (shortPos.EntryPrice - shortPrice) * shortPos.Quantity;
-        var totalPnl = longPnl + shortPnl;
+        // CRITICAL FIX: Use UnrealizedPnL from database (which comes from exchange and INCLUDES funding fees)
+        // Environment calculation: unrealized_pnl_usd = long_price_pnl + short_price_pnl + net_funding - entry_fees
+        // Exchange APIs provide unrealizedPnL that already includes funding fees
+        // DO NOT recalculate from scratch using only price changes, as that misses funding
+        var totalPnl = longPos.UnrealizedPnL + shortPos.UnrealizedPnL;
 
-        return (float)(totalPnl / totalMargin * 100);
+        // Use position size, NOT margin, to match ML training
+        // With 2x leverage: $10 profit on $1000 position = 1%, not 2%
+        return (float)(totalPnl / totalCapitalUsed * 100);
     }
 
     private float CalculateSpreadPct(decimal price1, decimal price2)
@@ -1114,7 +1323,8 @@ public class RLPredictionService : IDisposable
         if (price1 == 0 || price2 == 0)
             return 0.0f;
 
-        return (float)(Math.Abs(price1 - price2) / ((price1 + price2) / 2) * 100);
+        // CRITICAL: Return decimal (0.01 = 1%), NOT percentage (1.0 = 1%) to match ML environment
+        return (float)(Math.Abs(price1 - price2) / ((price1 + price2) / 2));
     }
 
     private float CalculateFundingEfficiency(decimal netFunding, decimal longFees, decimal shortFees)
@@ -1128,27 +1338,111 @@ public class RLPredictionService : IDisposable
 
     private float CalculateSidePnlPct(Position pos, decimal currentPrice)
     {
-        if (pos.InitialMargin == 0)
+        // Match ML environment: use position size, not margin
+        var positionSize = pos.Quantity * pos.EntryPrice;
+
+        if (positionSize == 0)
             return 0.0f;
 
-        decimal pnl;
-        if (pos.Side == PositionSide.Long)
-        {
-            pnl = (currentPrice - pos.EntryPrice) * pos.Quantity;
-        }
-        else // Short
-        {
-            pnl = (pos.EntryPrice - currentPrice) * pos.Quantity;
-        }
-
-        return (float)(pnl / pos.InitialMargin * 100);
+        // CRITICAL FIX: Use UnrealizedPnL from database (includes funding fees)
+        // This matches the environment which includes funding in long_pnl_pct and short_pnl_pct
+        return (float)(pos.UnrealizedPnL / positionSize * 100);
     }
 
     private float CalculateLiquidationDistance(Position longPos, Position shortPos, decimal longPrice, decimal shortPrice)
     {
-        // TODO: Implement actual liquidation price calculation
-        // For now, return safe distance
-        return 0.8f;  // 80% away from liquidation
+        // Match ML environment formula (portfolio.py:318-341)
+        // Liquidation occurs when loss reaches ~(1/leverage) of position value
+
+        // Get leverage (use max of both positions' leverage)
+        var leverage = Math.Max(longPos.Leverage, shortPos.Leverage);
+        if (leverage == 0)
+            return 1.0f;  // Safe distance if no leverage
+
+        // Long liquidation price: entry * (1 - 0.9 / leverage)
+        var longLiqPrice = longPos.EntryPrice * (1 - 0.9m / leverage);
+        var longDistance = longPrice > 0
+            ? (float)(Math.Abs(longPrice - longLiqPrice) / longPrice)
+            : 1.0f;
+
+        // Short liquidation price: entry * (1 + 0.9 / leverage)
+        var shortLiqPrice = shortPos.EntryPrice * (1 + 0.9m / leverage);
+        var shortDistance = shortPrice > 0
+            ? (float)(Math.Abs(shortLiqPrice - shortPrice) / shortPrice)
+            : 1.0f;
+
+        // Return minimum distance (most at risk)
+        return Math.Min(longDistance, shortDistance);
+    }
+
+    private float CalculateEntryApr(decimal longFundingRate, decimal shortFundingRate)
+    {
+        // Calculate APR from funding rates
+        // APR = (short_funding_rate - long_funding_rate) * 365 * 3
+        // Where:
+        //   - Net funding rate = short rate - long rate (arbitrage profit)
+        //   - 365 = days per year
+        //   - 3 = number of 8-hour funding intervals per day (24h / 8h = 3)
+        // NOTE: Using current rates as proxy for entry rates since historical rates aren't stored
+        var netFundingRate = shortFundingRate - longFundingRate;
+        var apr = (float)(netFundingRate * 365 * 3 * 100);  // Convert to percentage
+        return apr;
+    }
+
+    private float CalculateCurrentPositionApr(decimal shortFundingRate, decimal longFundingRate,
+        decimal longIntervalHours, decimal shortIntervalHours)
+    {
+        // DEPRECATED: This method has a bug - it subtracts funding rates before converting to daily
+        // which is incorrect when intervals differ (e.g., 1h vs 8h)
+        // Use GetPositionAprFromOpportunities instead for correct APR calculation
+
+        var netFundingRate = shortFundingRate - longFundingRate;
+        var avgIntervalHours = (longIntervalHours + shortIntervalHours) / 2m;
+
+        // Avoid division by zero
+        if (avgIntervalHours <= 0)
+            avgIntervalHours = 8m;  // Fallback to default 8h
+
+        var paymentsPerDay = 24m / avgIntervalHours;
+        var apr = (float)(netFundingRate * paymentsPerDay * 365m * 100m);
+
+        return apr;
+    }
+
+    private float GetPositionAprFromOpportunities(string symbol, List<ArbitrageOpportunityDto> opportunities)
+    {
+        // Lookup the matching opportunity for this position's symbol
+        // The opportunity APR is calculated correctly (converts each funding rate to daily independently)
+        var matchingOpp = opportunities.FirstOrDefault(o => o.Symbol == symbol);
+        if (matchingOpp != null)
+        {
+            return (float)matchingOpp.FundApr;
+        }
+
+        // Fallback: If no matching opportunity found, return 0
+        // This can happen if the opportunity expired but position still exists
+        _logger.LogWarning("No matching opportunity found for position symbol {Symbol}, using APR=0", symbol);
+        return 0f;
+    }
+
+    private List<float> ParsePnlHistory(string? pnlHistoryJson)
+    {
+        // Parse JSON array of hourly P&L snapshots from Position.PnlHistoryJson
+        if (string.IsNullOrEmpty(pnlHistoryJson))
+        {
+            return new List<float>();  // Return empty list if no history yet
+        }
+
+        try
+        {
+            var pnlHistory = System.Text.Json.JsonSerializer.Deserialize<List<decimal>>(pnlHistoryJson);
+            return pnlHistory?.Select(p => (float)p).ToList() ?? new List<float>();
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse PnlHistoryJson, returning empty list");
+            return new List<float>();
+        }
     }
 
     #endregion

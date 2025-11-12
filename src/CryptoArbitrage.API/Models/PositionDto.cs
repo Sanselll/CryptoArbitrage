@@ -34,4 +34,9 @@ public class PositionDto
     public DateTime OpenedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
     public int? ActiveOpportunityId { get; set; }
+
+    // ML features (Phase 1 exit timing)
+    public decimal EntryApr { get; set; }  // APR at entry time (for apr_ratio feature)
+    public decimal PeakPnlPct { get; set; }  // Peak P&L percentage (for drawdown feature)
+    public string? PnlHistoryJson { get; set; }  // Hourly P&L snapshots (for velocity feature)
 }

@@ -36,6 +36,11 @@ from models.rl.algorithms.ppo_trainer import PPOTrainer
 
 def evaluate(trainer, env, num_episodes: int = 1):
     """Evaluate the agent with detailed trading metrics (same as train_ppo.py)."""
+    # CRITICAL: Set network to eval mode for evaluation (disables dropout)
+    # This ensures evaluation metrics match production inference
+    was_training = trainer.network.training
+    trainer.network.eval()
+
     # Episode-level metrics
     eval_rewards = []
     eval_lengths = []
@@ -134,6 +139,10 @@ def evaluate(trainer, env, num_episodes: int = 1):
     total_losses = sum(all_losing_pnl) if all_losing_pnl else 0.001  # Avoid division by zero
     profit_factor = total_wins / total_losses
 
+    # Restore original training mode
+    if was_training:
+        trainer.network.train()
+
     return {
         # Episode metrics
         'mean_reward': np.mean(eval_rewards),
@@ -176,10 +185,10 @@ class PBTHyperparameters:
     entropy_coef: float = 0.01
     vf_coef: float = 0.5
 
-    # Reward hyperparameters (Simplified RL-v2 approach)
-    pnl_reward_scale: float = 3.0
-    entry_penalty_scale: float = 1.0
-    stop_loss_penalty: float = -1.0
+    # Reward hyperparameters (Balanced RL-v2 approach)
+    funding_reward_scale: float = 1.0  # Funding P&L weight
+    price_reward_scale: float = 1.0    # Price P&L weight (equal balance)
+    liquidation_penalty_scale: float = 10.0  # Safety penalty (10 for less conservative, 0 to disable)
 
     def perturb(self, factor: float = 0.2) -> 'PBTHyperparameters':
         """
@@ -200,10 +209,10 @@ class PBTHyperparameters:
             clip_range=np.clip(self.clip_range * multiplier, 0.15, 0.30),
             entropy_coef=np.clip(self.entropy_coef * multiplier, 0.001, 0.02),
             vf_coef=np.clip(self.vf_coef * multiplier, 0.5, 1.0),
-            # Reward hyperparameters (Simplified)
-            pnl_reward_scale=np.clip(self.pnl_reward_scale * multiplier, 1.0, 5.0),
-            entry_penalty_scale=np.clip(self.entry_penalty_scale * multiplier, 0.5, 2.0),
-            stop_loss_penalty=np.clip(self.stop_loss_penalty * multiplier, -3.0, -0.5),
+            # Reward hyperparameters (Balanced RL-v2)
+            funding_reward_scale=np.clip(self.funding_reward_scale * multiplier, 0.5, 2.0),
+            price_reward_scale=np.clip(self.price_reward_scale * multiplier, 0.5, 2.0),
+            liquidation_penalty_scale=np.clip(self.liquidation_penalty_scale * multiplier, 0.0, 20.0),
         )
 
     def to_dict(self) -> dict:
@@ -242,6 +251,7 @@ def train_agent_parallel(agent_id: int,
                          use_curriculum: bool,
                          curriculum_state: dict,
                          price_history_path: str,
+                         feature_scaler_path: str,
                          device: str) -> Tuple[int, List[float], int, int, dict]:
     """
     Train a single agent for N episodes (parallel-safe function).
@@ -300,11 +310,11 @@ def train_agent_parallel(agent_id: int,
             episode_length_days = 7
             step_hours = 5.0 / 60.0  # 5 minutes
 
-        # Create reward config from agent's hyperparameters (Simplified)
+        # Create reward config from agent's hyperparameters (Pure RL-v2)
         reward_config = RewardConfig(
-            pnl_reward_scale=hyperparams.pnl_reward_scale,
-            entry_penalty_scale=hyperparams.entry_penalty_scale,
-            stop_loss_penalty=hyperparams.stop_loss_penalty,
+            funding_reward_scale=hyperparams.funding_reward_scale,
+            price_reward_scale=hyperparams.price_reward_scale,
+            liquidation_penalty_scale=hyperparams.liquidation_penalty_scale,
         )
 
         # Create environment
@@ -316,12 +326,12 @@ def train_agent_parallel(agent_id: int,
             episode_length_days=episode_length_days,
             step_hours=step_hours,
             price_history_path=price_history_path,
-            feature_scaler_path=self.feature_scaler_path,
+            feature_scaler_path=feature_scaler_path,
             verbose=False,
         )
 
-        # Train episode
-        stats = trainer.train_episode(env, max_steps=10000)
+        # Train episode (match regular PPO training max_steps)
+        stats = trainer.train_episode(env, max_steps=1000)
 
         # Update state
         episodes_completed += 1
@@ -407,11 +417,11 @@ class PBTManager:
 
     def _create_environment(self, data_path: str, verbose: bool = False):
         """Create an environment (train or test)."""
-        # Use default reward config (Simplified RL-v2 approach)
+        # Use default reward config (Pure RL-v2 approach)
         reward_config = RewardConfig(
-            pnl_reward_scale=3.0,
-            entry_penalty_scale=1.0,
-            stop_loss_penalty=-1.0,
+            funding_reward_scale=5.0,
+            price_reward_scale=1.0,
+            liquidation_penalty_scale=1000.0,
         )
 
         # Use default trading config
@@ -479,9 +489,9 @@ class PBTManager:
             self.agents.append(agent)
 
             print(f"Agent {i}: LR={hyperparams.learning_rate:.2e}, "
-                  f"PNL={hyperparams.pnl_reward_scale:.1f}, "
-                  f"Entry={hyperparams.entry_penalty_scale:.1f}, "
-                  f"StopLoss={hyperparams.stop_loss_penalty:.1f}")
+                  f"Funding={hyperparams.funding_reward_scale:.1f}, "
+                  f"Price={hyperparams.price_reward_scale:.1f}, "
+                  f"Liq={hyperparams.liquidation_penalty_scale:.0f}")
 
         print()
 
@@ -498,11 +508,11 @@ class PBTManager:
                 trading_config = TradingConfig.sample_random()
                 episode_length_days = 7
 
-            # Create reward config from agent's hyperparameters (Simplified)
+            # Create reward config from agent's hyperparameters (Pure RL-v2)
             reward_config = RewardConfig(
-                pnl_reward_scale=agent.hyperparams.pnl_reward_scale,
-                entry_penalty_scale=agent.hyperparams.entry_penalty_scale,
-                stop_loss_penalty=agent.hyperparams.stop_loss_penalty,
+                funding_reward_scale=agent.hyperparams.funding_reward_scale,
+                price_reward_scale=agent.hyperparams.price_reward_scale,
+                liquidation_penalty_scale=agent.hyperparams.liquidation_penalty_scale,
             )
 
             # Create environment
@@ -514,7 +524,7 @@ class PBTManager:
                 episode_length_days=episode_length_days,
                 step_hours=5.0 / 60.0,  # 5 minutes (consistent with parallel training)
                 price_history_path=self.price_history_path,
-                simple_mode=False,
+                feature_scaler_path=self.feature_scaler_path,  # For 19 features per opportunity
                 verbose=False,
             )
 
@@ -563,6 +573,7 @@ class PBTManager:
                 self.use_curriculum,
                 curriculum_state,
                 self.price_history_path,
+                self.feature_scaler_path,
                 self.device,
             )
             training_args.append(args)
@@ -625,8 +636,8 @@ class PBTManager:
                   f"Episodes={agent.episodes_completed}")
         print()
 
-        # Identify top and bottom quartiles
-        quartile_size = self.population_size // 4
+        # Identify top and bottom quartiles (at least 1 agent each for small populations)
+        quartile_size = max(1, self.population_size // 4)
         top_agents = agents_sorted[:quartile_size]  # Top 25%
         bottom_agents = agents_sorted[-quartile_size:]  # Bottom 25%
 
@@ -664,7 +675,7 @@ class PBTManager:
 
             print(f"  Agent {bottom_agent.agent_id}: "
                   f"LR {old_hyperparams.learning_rate:.2e}→{new_hyperparams.learning_rate:.2e}, "
-                  f"PNL {old_hyperparams.pnl_reward_scale:.1f}→{new_hyperparams.pnl_reward_scale:.1f}")
+                  f"Funding {old_hyperparams.funding_reward_scale:.1f}→{new_hyperparams.funding_reward_scale:.1f}")
 
         print()
 

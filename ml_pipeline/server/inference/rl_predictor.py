@@ -5,11 +5,11 @@ Loads and runs the trained modular PPO model to provide action predictions
 for funding arbitrage opportunities.
 
 Architecture:
-- 275-dim observation space:
+- 301-dim observation space (Phase 2: APR comparison features):
   * Config: 5 dims (max_leverage, target_utilization, max_positions, stop_loss, liq_buffer)
-  * Portfolio: 10 dims (capital_ratio, available_ratio, margin_util, etc.)
-  * Executions: 60 dims (5 positions × 12 features each)
-  * Opportunities: 200 dims (10 opportunities × 20 features each)
+  * Portfolio: 6 dims (num_positions_ratio, avg_pnl, total_pnl, drawdown, liq_distance, utilization)
+  * Executions: 100 dims (5 positions × 20 features each) [PHASE 2: +3 APR comparison features]
+  * Opportunities: 190 dims (10 opportunities × 19 features each)
 
 - 36 actions:
   * 0: HOLD
@@ -80,15 +80,16 @@ class ModularRLPredictor:
 
         # Load feature scaler (critical for proper predictions!)
         self.feature_scaler = None
-        scaler_path = Path(feature_scaler_path)
-        if scaler_path.exists():
-            with open(scaler_path, 'rb') as f:
-                self.feature_scaler = pickle.load(f)
-            print(f"✅ Feature scaler loaded from: {feature_scaler_path}")
-            print(f"   Features will be standardized (mean=0, std=1)")
-        else:
-            print(f"⚠️  WARNING: Feature scaler not found at: {feature_scaler_path}")
-            print(f"   Using raw features (may cause poor predictions!)")
+        if feature_scaler_path is not None:
+            scaler_path = Path(feature_scaler_path)
+            if scaler_path.exists():
+                with open(scaler_path, 'rb') as f:
+                    self.feature_scaler = pickle.load(f)
+                print(f"✅ Feature scaler loaded from: {feature_scaler_path}")
+                print(f"   Features will be standardized (mean=0, std=1)")
+            else:
+                print(f"⚠️  WARNING: Feature scaler not found at: {feature_scaler_path}")
+                print(f"   Using raw features (may cause poor predictions!)")
 
         # Create network
         self.network = ModularPPONetwork()
@@ -114,7 +115,7 @@ class ModularRLPredictor:
         # Get model info
         total_params = sum(p.numel() for p in self.network.parameters())
         print(f"   Network parameters: {total_params:,}")
-        print(f"   Observation space: 275 dimensions")
+        print(f"   Observation space: 301 dimensions (Phase 2: +3 APR comparison features)")
         print(f"   Action space: 36 actions")
 
     def _build_config_features(self, trading_config: Dict) -> np.ndarray:
@@ -135,76 +136,80 @@ class ModularRLPredictor:
             float(trading_config.get('liquidation_buffer', 0.15)),
         ], dtype=np.float32)
 
-    def _build_portfolio_features(self, portfolio: Dict) -> np.ndarray:
+    def _build_portfolio_features(self, portfolio: Dict, trading_config: Dict) -> np.ndarray:
         """
-        Build portfolio features (10 dimensions).
+        Build portfolio features (6 dimensions) - Removed 4 redundant features.
 
         Args:
             portfolio: Portfolio state dict
+            trading_config: Trading configuration dict
 
         Returns:
-            10-dimensional array
+            6-dimensional array
         """
-        capital = portfolio.get('total_capital', portfolio.get('capital', 10000.0))
-        initial_capital = portfolio.get('initial_capital', 10000.0)
-        capital_ratio = capital / initial_capital if initial_capital > 0 else 1.0
-
-        available_margin = portfolio.get('available_margin', capital)
-        available_ratio = available_margin / capital if capital > 0 else 1.0
-
-        margin_util = portfolio.get('margin_utilization', 0.0) / 100.0  # Convert % to decimal
-
-        num_positions = len(portfolio.get('positions', []))
-        max_positions = portfolio.get('max_positions', 3)
+        # Count only ACTIVE positions, not empty padded slots
+        positions = portfolio.get('positions', [])
+        num_positions = sum(1 for p in positions if p.get('is_active', False) or p.get('position_is_active', 0.0) > 0.5)
+        max_positions = trading_config.get('max_positions', 2)  # FIX: Get from trading_config, not portfolio
         num_positions_ratio = num_positions / max_positions if max_positions > 0 else 0.0
 
         total_pnl_pct = portfolio.get('total_pnl_pct', 0.0) / 100.0
         max_drawdown_pct = portfolio.get('max_drawdown', 0.0) / 100.0
 
-        # Episode progress (placeholder - backend should provide this)
-        episode_progress = 0.5
+        # FIX: Calculate minimum liquidation distance from active positions (matches environment)
+        min_liq_distance = 1.0  # Default for no positions
+        if num_positions > 0:
+            active_liq_distances = [
+                p.get('liquidation_distance', 1.0)
+                for p in positions
+                if p.get('is_active', False) or p.get('position_is_active', 0.0) > 0.5
+            ]
+            if active_liq_distances:
+                min_liq_distance = min(active_liq_distances)
 
-        # Min liquidation distance (placeholder)
-        min_liq_distance = 1.0
-
-        capital_utilization = portfolio.get('utilization', 0.0) / 100.0
+        capital_utilization = portfolio.get('capital_utilization', 0.0) / 100.0
 
         return np.array([
-            capital_ratio,
-            available_ratio,
-            margin_util,
             num_positions_ratio,
-            0.0,  # avg_position_pnl_pct (placeholder)
+            0.0,  # avg_position_pnl_pct (placeholder - always 0 in production since no closed positions tracked)
             total_pnl_pct,
             max_drawdown_pct,
-            episode_progress,
             min_liq_distance,
             capital_utilization,
         ], dtype=np.float32)
 
-    def _build_execution_features(self, portfolio: Dict) -> np.ndarray:
+    def _build_execution_features(self, portfolio: Dict, best_available_apr: float = 0.0) -> np.ndarray:
         """
-        Build execution features for up to 5 position slots (60 dimensions total).
+        Build execution features for up to 5 position slots (100 dimensions total).
 
-        Each position has 12 features:
-        1. unrealized_pnl_pct
-        2. hours_held
-        3. net_funding_ratio
-        4. net_funding_rate
-        5. current_spread_pct
-        6. entry_spread_pct
-        7. value_to_capital_ratio
-        8. funding_efficiency
-        9. long_pnl_pct
-        10. short_pnl_pct
-        11. liquidation_distance
-        12. position_is_active (1.0 if slot filled, 0.0 if empty)
+        Each position has 20 features:
+        1. position_is_active (1.0 if slot filled, 0.0 if empty)
+        2. net_pnl_pct
+        3. hours_held
+        4. net_funding_ratio
+        5. net_funding_rate
+        6. current_spread_pct
+        7. entry_spread_pct
+        8. value_to_capital_ratio
+        9. funding_efficiency
+        10. long_pnl_pct
+        11. short_pnl_pct
+        12. liquidation_distance
+        13. pnl_velocity (Phase 1 - hourly P&L change rate)
+        14. peak_drawdown (Phase 1 - decline from peak P&L)
+        15. apr_ratio (Phase 1 - current APR / entry APR)
+        16. return_efficiency (Phase 1 - P&L per hour held)
+        17. is_old_loser (Phase 1 - binary flag for old unprofitable positions)
+        18. current_position_apr (Phase 2 - APR of this position)
+        19. best_available_apr (Phase 2 - max APR among market opportunities)
+        20. apr_advantage (Phase 2 - current - best, negative = better opportunities exist)
 
         Args:
             portfolio: Portfolio state dict
+            best_available_apr: Maximum APR among current opportunities (for Phase 2 features)
 
         Returns:
-            60-dimensional array (5 slots × 12 features)
+            100-dimensional array (5 slots × 20 features)
         """
         positions = portfolio.get('positions', [])
         capital = portfolio.get('total_capital', portfolio.get('capital', 10000.0))
@@ -214,6 +219,15 @@ class ModularRLPredictor:
         for slot_idx in range(5):
             if slot_idx < len(positions):
                 pos = positions[slot_idx]
+
+                # Check if position is ACTUALLY active (not just a padded empty slot)
+                # If not active, return all zeros for this slot (matching environment behavior)
+                is_active = pos.get('is_active', False) or pos.get('position_is_active', 0.0) > 0.5
+                if not is_active:
+                    # Empty/inactive slot - all zeros (matches environment's behavior)
+                    slot_features = [0.0] * 20  # Phase 2: 20 features per slot
+                    all_features.extend(slot_features)
+                    continue
 
                 # 1. Net P&L %
                 net_pnl_pct = pos.get('unrealized_pnl_pct', 0.0) / 100.0
@@ -254,7 +268,8 @@ class ModularRLPredictor:
                 value_ratio = total_capital_used / capital if capital > 0 else 0.0
 
                 # 8. Funding efficiency
-                total_fees = pos.get('entry_fees_paid_usd', 0.0) + (total_capital_used * 0.0006)
+                # FIX: Use 0.0002 taker fee to match environment (not 0.0006)
+                total_fees = pos.get('entry_fees_paid_usd', 0.0) + (total_capital_used * 0.0002)
                 funding_efficiency = net_funding_usd / total_fees if total_fees > 0 else 0.0
 
                 # 9. Long side P&L %
@@ -288,16 +303,106 @@ class ModularRLPredictor:
                         liquidation_distance = 1.0  # Safe default (no liquidation risk)
 
                 # 12. Position is active
-                position_is_active = 1.0
+                # Check if position is ACTUALLY active (not just a padded empty slot)
+                is_active = pos.get('is_active', False) or pos.get('position_is_active', 0.0) > 0.5
+                position_is_active = 1.0 if is_active else 0.0
 
+                # === NEW PHASE 1 EXIT TIMING FEATURES ===
+
+                # 13. P&L Velocity (hourly P&L change rate)
+                # FIX: Must normalize by /100 to match environment (line 749 in portfolio.py)
+                pnl_history = pos.get('pnl_history', [])
+                if len(pnl_history) >= 2:
+                    # Calculate linear change: (latest - earliest) / hours_elapsed
+                    hours_elapsed = len(pnl_history) - 1
+                    raw_pnl_velocity = (pnl_history[-1] - pnl_history[0]) / hours_elapsed if hours_elapsed > 0 else 0.0
+                    pnl_velocity = raw_pnl_velocity / 100  # Normalize to same scale as net_pnl_pct
+                else:
+                    pnl_velocity = 0.0
+
+                # 14. Peak Drawdown (decline from peak P&L)
+                peak_pnl_pct = pos.get('peak_pnl_pct', 0.0) / 100.0
+                if peak_pnl_pct > 0:
+                    peak_drawdown = (peak_pnl_pct - net_pnl_pct) / peak_pnl_pct
+                else:
+                    peak_drawdown = 0.0
+
+                # 15. APR Ratio (current APR / entry APR)
+                # FIX: Match environment's get_apr_ratio() logic with dynamic intervals
+                entry_apr = pos.get('entry_apr', 0.0)
+                if entry_apr > 0:
+                    # Calculate current APR from current funding rates using dynamic intervals
+                    long_interval = pos.get('long_funding_interval_hours', 8)
+                    short_interval = pos.get('short_funding_interval_hours', 8)
+                    avg_interval = (long_interval + short_interval) / 2.0
+
+                    if avg_interval > 0:
+                        payments_per_year = (365 * 24) / avg_interval
+                        current_apr = net_funding_rate * payments_per_year * 100  # Percentage
+                        apr_ratio = current_apr / entry_apr
+                    else:
+                        apr_ratio = 1.0
+                else:
+                    apr_ratio = 1.0  # Default to 1.0 if no entry APR
+
+                # 16. Return Efficiency (P&L per hour held)
+                raw_hours_held = pos.get('position_age_hours', pos.get('hours_held', 0.0))
+                if raw_hours_held > 0:
+                    return_efficiency = net_pnl_pct / raw_hours_held
+                else:
+                    return_efficiency = 0.0
+
+                # 17. Old Loser Flag (binary: 1.0 if old AND losing, 0.0 otherwise)
+                age_threshold_hours = 48.0
+                is_old_loser = 1.0 if (raw_hours_held > age_threshold_hours and net_pnl_pct < 0) else 0.0
+
+                # === NEW PHASE 2 APR COMPARISON FEATURES ===
+
+                # 18. Current Position APR (APR of this position)
+                # Calculate from current funding rates, normalized to 0-1 range (50% APR → 0.5)
+                # CRITICAL: Use actual funding intervals, not hardcoded assumptions
+                long_interval = pos.get('long_funding_interval', pos.get('long_funding_interval_hours', 8))
+                short_interval = pos.get('short_funding_interval', pos.get('short_funding_interval_hours', 8))
+
+                # Calculate weighted average interval (matches environment.py logic)
+                if long_interval == short_interval:
+                    avg_interval_hours = long_interval
+                else:
+                    long_rate = pos.get('long_funding_rate', 0.0)
+                    short_rate = pos.get('short_funding_rate', 0.0)
+                    avg_interval_hours = (
+                        (abs(long_rate) * long_interval + abs(short_rate) * short_interval) /
+                        (abs(long_rate) + abs(short_rate) + 1e-9)
+                    )
+
+                # Convert to APR: rate_per_interval * (payments_per_day) * 365 days
+                payments_per_day = 24.0 / avg_interval_hours
+                annual_rate = net_funding_rate * payments_per_day * 365.0
+                current_position_apr = (annual_rate * 100) / 100.0  # Already in %, just normalize to 0-1
+
+                # 19. Best Available APR (max APR among market opportunities)
+                best_available_apr_norm = best_available_apr / 100.0  # Normalize to 0-1 range
+
+                # 20. APR Advantage (current - best, negative = better opportunities exist)
+                # Scaled to [-1, 1] range: -1 = much worse, 0 = equal, +1 = much better
+                apr_advantage = current_position_apr - best_available_apr_norm
+
+                # CRITICAL: Feature order MUST match environment.py get_execution_state() exactly!
+                # Environment order: is_active, net_pnl_pct, hours_held, net_funding_ratio, net_funding_rate,
+                #                    current_spread_pct, entry_spread_pct, value_ratio, funding_efficiency,
+                #                    long_pnl_pct, short_pnl_pct, liquidation_distance,
+                #                    pnl_velocity, peak_drawdown, apr_ratio, return_efficiency, is_old_loser,
+                #                    current_position_apr, best_available_apr_norm, apr_advantage (Phase 2)
                 slot_features = [
-                    net_pnl_pct, hours_held, net_funding_ratio, net_funding_rate,
+                    position_is_active, net_pnl_pct, hours_held, net_funding_ratio, net_funding_rate,
                     current_spread_pct, entry_spread_pct, value_ratio, funding_efficiency,
-                    long_pnl_pct, short_pnl_pct, liquidation_distance, position_is_active
+                    long_pnl_pct, short_pnl_pct, liquidation_distance,
+                    pnl_velocity, peak_drawdown, apr_ratio, return_efficiency, is_old_loser,
+                    current_position_apr, best_available_apr_norm, apr_advantage  # Phase 2
                 ]
             else:
                 # Empty slot - all zeros
-                slot_features = [0.0] * 12
+                slot_features = [0.0] * 20  # Phase 2: 20 features per slot
 
             all_features.extend(slot_features)
 
@@ -305,16 +410,19 @@ class ModularRLPredictor:
 
     def _build_opportunity_features(self, opportunities: List[Dict]) -> np.ndarray:
         """
-        Build opportunity features for up to 10 slots (200 dimensions total).
+        Build opportunity features for up to 10 slots (190 dimensions total).
 
-        Each opportunity has 20 features (no momentum features, matches full mode).
+        Each opportunity has 19 features (removed duplicate net_funding_rate).
         Features are standardized using the feature scaler if available.
+
+        CRITICAL: Feature scaler must be applied to ALL slots (including empty ones)
+        to match training behavior. Empty slots are padded with zeros BEFORE scaling.
 
         Args:
             opportunities: List of up to 10 opportunity dicts
 
         Returns:
-            200-dimensional array (10 slots × 20 features)
+            190-dimensional array (10 slots × 19 features)
         """
         all_features = []
 
@@ -342,22 +450,21 @@ class ModularRLPredictor:
                     np.log10(max(float(opp.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
                     float(opp.get('estimatedProfitPercentage', 0) or 0),
                     float(opp.get('positionCostPercent', 0.2) or 0.2),
-                    opp.get('short_funding_rate', 0.0) - opp.get('long_funding_rate', 0.0),  # Net funding rate
                 ]
 
                 # Convert to float32 and ensure no NaN/inf
                 features = [float(np.nan_to_num(x, nan=0.0, posinf=100.0, neginf=-100.0)) for x in features]
-
-                # Apply feature scaler if available
-                if self.feature_scaler is not None:
-                    # Scaler now expects 20 features (matches full mode)
-                    features_array = np.array(features)
-                    # Scale
-                    features_scaled = self.feature_scaler.transform(features_array.reshape(1, 20))
-                    features = features_scaled.flatten().tolist()
             else:
-                # Empty slot - all zeros
-                features = [0.0] * 20
+                # Empty slot - all zeros BEFORE scaling
+                features = [0.0] * 19
+
+            # CRITICAL FIX: Apply feature scaler to ALL slots (including empty ones)
+            # This matches the training environment behavior where scaler transforms
+            # all 10 slots regardless of whether they contain real opportunities
+            if self.feature_scaler is not None:
+                features_array = np.array(features, dtype=np.float32)
+                features_scaled = self.feature_scaler.transform(features_array.reshape(1, 19))
+                features = features_scaled.flatten().tolist()
 
             all_features.extend(features)
 
@@ -370,7 +477,7 @@ class ModularRLPredictor:
         opportunities: List[Dict]
     ) -> np.ndarray:
         """
-        Build complete 275-dim observation vector.
+        Build complete 301-dim observation vector (Phase 2: APR comparison features).
 
         Args:
             trading_config: Trading configuration dict
@@ -378,21 +485,26 @@ class ModularRLPredictor:
             opportunities: List of up to 10 opportunity dicts
 
         Returns:
-            275-dimensional observation array
+            301-dimensional observation array
         """
         # Config features (5)
         config_features = self._build_config_features(trading_config)
 
-        # Portfolio features (10)
-        portfolio_features = self._build_portfolio_features(portfolio)
+        # Portfolio features (6)
+        portfolio_features = self._build_portfolio_features(portfolio, trading_config)
 
-        # Execution features (60)
-        execution_features = self._build_execution_features(portfolio)
+        # Calculate best available APR from opportunities (for Phase 2 APR comparison features)
+        best_available_apr = 0.0
+        if len(opportunities) > 0:
+            best_available_apr = max(opp.get('fund_apr', 0.0) for opp in opportunities)
 
-        # Opportunity features (200)
+        # Execution features (100 = 5 slots × 20 features) - Phase 2: +3 APR comparison features
+        execution_features = self._build_execution_features(portfolio, best_available_apr)
+
+        # Opportunity features (190)
         opportunity_features = self._build_opportunity_features(opportunities)
 
-        # Concatenate all (5 + 10 + 60 + 200 = 275)
+        # Concatenate all (5 + 6 + 100 + 190 = 301)
         observation = np.concatenate([
             config_features,
             portfolio_features,
@@ -411,9 +523,11 @@ class ModularRLPredictor:
         """
         Generate action mask (36 dimensions).
 
+        IMPORTANT: Must match environment.py _get_action_mask() logic EXACTLY.
+
         Args:
-            opportunities: List of opportunity dicts (includes has_existing_position flag)
-            num_positions: Current number of open positions
+            opportunities: List of opportunity dicts
+            num_positions: Current number of positions (len(portfolio.positions))
             max_positions: Maximum allowed positions
 
         Returns:
@@ -424,19 +538,15 @@ class ModularRLPredictor:
         # HOLD is always valid
         mask[0] = True
 
-        # ENTER actions: valid if opportunity exists AND we can open position AND no existing position
+        # ENTER actions: valid if opportunity exists AND we can open position
         has_capacity = num_positions < max_positions
 
         if has_capacity:
             for i in range(10):
                 if i < len(opportunities):
-                    opp = opportunities[i]
-                    # CRITICAL: Check if opportunity already has an open position
-                    # This prevents duplicate ENTER actions on the same opportunity
-                    has_existing_position = opp.get('has_existing_position', False)
-
-                    if not has_existing_position:
-                        # Enable all three size variants for this opportunity
+                    # Check if this opportunity already has an existing position
+                    # to prevent duplicate positions for the same symbol
+                    if not opportunities[i].get('has_existing_position', False):
                         mask[1 + i] = True      # SMALL
                         mask[11 + i] = True     # MEDIUM
                         mask[21 + i] = True     # LARGE
@@ -541,56 +651,61 @@ class ModularRLPredictor:
         # Build observation
         obs = self._build_observation(trading_config, portfolio, opportunities)
 
-        # DEBUG: Log input data structure for analysis
-        print(f"\n{'='*80}")
-        print(f"ML PREDICTOR INPUT DATA")
-        print(f"{'='*80}")
-        print(f"\n📊 PORTFOLIO STATE:")
-        print(f"  Positions count: {len(portfolio.get('positions', []))}")
-        print(f"  Total capital: ${portfolio.get('total_capital', 0):.2f}")
-        print(f"  Utilization: {portfolio.get('utilization', 0):.2f}%")
-        print(f"  Total PnL %: {portfolio.get('total_pnl_pct', 0):.2f}%")
+        # DEBUG: Log input data structure for analysis (DISABLED - set to True to enable)
+        VERBOSE_DEBUG = False
+        if VERBOSE_DEBUG:
+            print(f"\n{'='*80}")
+            print(f"ML PREDICTOR INPUT DATA")
+            print(f"{'='*80}")
+            print(f"\n📊 PORTFOLIO STATE:")
+            print(f"  Positions count: {len(portfolio.get('positions', []))}")
+            print(f"  Total capital: ${portfolio.get('total_capital', 0):.2f}")
+            print(f"  Capital Utilization: {portfolio.get('capital_utilization', 0):.2f}%")
+            print(f"  Total PnL %: {portfolio.get('total_pnl_pct', 0):.2f}%")
 
-        # Log each position in detail
-        for i, pos in enumerate(portfolio.get('positions', [])):
-            print(f"\n  Position {i+1}:")
-            print(f"    Symbol: {pos.get('symbol', 'N/A')}")
-            print(f"    Hours held (raw): {pos.get('hours_held', 0):.2f}h")
-            print(f"    Unrealized PnL %: {pos.get('unrealized_pnl_pct', 0):.2f}%")
-            print(f"    Long net funding USD: ${pos.get('long_net_funding_usd', 0):.2f}")
-            print(f"    Short net funding USD: ${pos.get('short_net_funding_usd', 0):.2f}")
-            print(f"    Position size USD: ${pos.get('position_size_usd', 0):.2f}")
-            print(f"    Current long price: ${pos.get('current_long_price', 0):.2f}")
-            print(f"    Current short price: ${pos.get('current_short_price', 0):.2f}")
-            print(f"    Entry long price: ${pos.get('entry_long_price', 0):.2f}")
-            print(f"    Entry short price: ${pos.get('entry_short_price', 0):.2f}")
-            print(f"    Current spread %: {pos.get('current_spread_pct', 0):.4f}")
-            print(f"    Entry spread %: {pos.get('entry_spread_pct', 0):.4f}")
-            print(f"    Long PnL %: {pos.get('long_pnl_pct', 0):.2f}%")
-            print(f"    Short PnL %: {pos.get('short_pnl_pct', 0):.2f}%")
-            print(f"    Liquidation distance: {pos.get('liquidation_distance', 1.0):.4f}")
-            print(f"    Position is active: {pos.get('position_is_active', 0)}")
+            # Log each position in detail
+            for i, pos in enumerate(portfolio.get('positions', [])):
+                print(f"\n  Position {i+1}:")
+                print(f"    Symbol: {pos.get('symbol', 'N/A')}")
+                print(f"    Hours held (raw): {pos.get('hours_held', 0):.2f}h")
+                print(f"    Unrealized PnL %: {pos.get('unrealized_pnl_pct', 0):.2f}%")
+                print(f"    Long net funding USD: ${pos.get('long_net_funding_usd', 0):.2f}")
+                print(f"    Short net funding USD: ${pos.get('short_net_funding_usd', 0):.2f}")
+                print(f"    Position size USD: ${pos.get('position_size_usd', 0):.2f}")
+                print(f"    Current long price: ${pos.get('current_long_price', 0):.2f}")
+                print(f"    Current short price: ${pos.get('current_short_price', 0):.2f}")
+                print(f"    Entry long price: ${pos.get('entry_long_price', 0):.2f}")
+                print(f"    Entry short price: ${pos.get('entry_short_price', 0):.2f}")
+                print(f"    Current spread %: {pos.get('current_spread_pct', 0):.4f}")
+                print(f"    Entry spread %: {pos.get('entry_spread_pct', 0):.4f}")
+                print(f"    Long PnL %: {pos.get('long_pnl_pct', 0):.2f}%")
+                print(f"    Short PnL %: {pos.get('short_pnl_pct', 0):.2f}%")
+                print(f"    Liquidation distance: {pos.get('liquidation_distance', 1.0):.4f}")
+                print(f"    Position is active: {pos.get('position_is_active', 0)}")
 
-        print(f"\n⚙️  TRADING CONFIG:")
-        print(f"  Max leverage: {trading_config.get('max_leverage', 1.0)}")
-        print(f"  Target utilization: {trading_config.get('target_utilization', 0.5)}")
-        print(f"  Max positions: {trading_config.get('max_positions', 3)}")
+            print(f"\n⚙️  TRADING CONFIG:")
+            print(f"  Max leverage: {trading_config.get('max_leverage', 1.0)}")
+            print(f"  Target utilization: {trading_config.get('target_utilization', 0.5)}")
+            print(f"  Max positions: {trading_config.get('max_positions', 3)}")
 
-        print(f"\n🎯 OPPORTUNITIES: {len(opportunities)}")
-        for i, opp in enumerate(opportunities[:3]):  # Show first 3
-            print(f"  Opp {i+1}: {opp.get('symbol', 'N/A')} - Fund APR: {opp.get('fund_apr', 0):.2f}%")
+            print(f"\n🎯 OPPORTUNITIES: {len(opportunities)}")
+            for i, opp in enumerate(opportunities[:3]):  # Show first 3
+                print(f"  Opp {i+1}: {opp.get('symbol', 'N/A')} - Fund APR: {opp.get('fund_apr', 0):.2f}%")
 
-        print(f"\n📈 OBSERVATION VECTOR:")
-        print(f"  Shape: {obs.shape}")
-        print(f"  Config features (5): {obs[:5]}")
-        print(f"  Portfolio features (10): {obs[5:15]}")
-        print(f"  Execution features (60): First 12: {obs[15:27]}")
-        print(f"  Opportunity features (200): First 20: {obs[75:95]}")
-        print(f"{'='*80}\n")
+            print(f"\n📈 OBSERVATION VECTOR:")
+            print(f"  Shape: {obs.shape}")
+            print(f"  Config features (5): {obs[:5]}")
+            print(f"  Portfolio features (10): {obs[5:15]}")
+            print(f"  Execution features (85): First 17: {obs[15:32]}")
+            print(f"  Opportunity features (200): First 20: {obs[100:120]}")
+            print(f"{'='*80}\n")
 
-        # Build action mask (count only ACTIVE positions, not empty slots)
+        # Build action mask
+        # CRITICAL: Must match environment logic exactly!
+        # Environment uses len(self.portfolio.positions) which only counts real Position objects
+        # We receive a padded list (5 slots), so count only non-empty positions (symbol != '')
         positions = portfolio.get('positions', [])
-        num_positions = sum(1 for p in positions if p.get('is_active', False) or p.get('position_is_active', 0.0) > 0.5)
+        num_positions = sum(1 for p in positions if p.get('symbol', '') != '')
         max_positions = trading_config.get('max_positions', 3)
         action_mask = self._get_action_mask(opportunities, num_positions, max_positions)
 
@@ -644,9 +759,10 @@ class ModularRLPredictor:
             'model_type': 'ModularPPO',
             'architecture': 'modular_network_with_attention',
             'action_space': 36,
-            'observation_space': 275,
+            'observation_space': 301,  # Phase 2: +3 APR comparison features
             'max_opportunities': 10,
             'max_positions': 5,
+            'position_features': 20,  # Phase 2: +3 APR comparison features
             'network_parameters': sum(p.numel() for p in self.network.parameters()),
         }
 

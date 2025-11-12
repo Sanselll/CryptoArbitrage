@@ -79,6 +79,20 @@ public class ArbitrageDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(e => e.RealizedPnLUsd).HasPrecision(18, 8);
             entity.Property(e => e.RealizedPnLPct).HasPrecision(18, 8);
             entity.Property(e => e.UnrealizedPnL).HasPrecision(18, 8);
+
+            // Phase 1 Exit Timing Features - Configure JSON and precision
+            entity.Property(e => e.PnlHistoryJson)
+                .HasColumnType("jsonb")  // PostgreSQL JSONB for efficient queries
+                .IsRequired(false);  // Nullable - will be null until first snapshot
+            entity.Property(e => e.PeakPnlPct)
+                .HasPrecision(18, 8)
+                .HasDefaultValue(0m);  // Default to 0
+            entity.Property(e => e.EntryApr)
+                .HasPrecision(18, 8)
+                .HasDefaultValue(0m);  // Default to 0
+            entity.Property(e => e.LastPnlSnapshotTime)
+                .IsRequired(false);  // Nullable - will be null until first snapshot
+
             entity.Property(e => e.OrderId).HasMaxLength(100);
             entity.Property(e => e.CloseOrderId).HasMaxLength(100);
 

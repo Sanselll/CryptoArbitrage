@@ -78,6 +78,12 @@ class Position:
     realized_pnl_usd: Optional[float] = None
     realized_pnl_pct: Optional[float] = None
 
+    # NEW: Peak tracking for exit timing (Phase 1 - Observation Features)
+    peak_pnl_pct: float = 0.0  # Highest P&L % achieved
+    peak_pnl_time: Optional[pd.Timestamp] = None  # When peak occurred
+    pnl_history: List[float] = field(default_factory=list)  # Last 6 hours of P&L % for velocity
+    entry_apr: float = 0.0  # Annualized profit rate at entry (for comparison)
+
     def to_trade_record(self) -> dict:
         """Convert position to trade record for CSV logging."""
         total_funding_usd = self.long_net_funding_usd + self.short_net_funding_usd
@@ -154,6 +160,15 @@ class Position:
             self.last_short_funding_time = self.short_next_funding_time
             self.short_next_funding_time += timedelta(hours=self.short_funding_interval_hours)
 
+        # NEW: Calculate entry APR for comparison (Phase 1 - Observation Features)
+        # Annualize the net funding rate (long receives negative rate, short pays positive rate)
+        net_funding_rate_per_interval = self.short_funding_rate - self.long_funding_rate
+        # Average intervals to get hours per payment
+        avg_interval_hours = (self.long_funding_interval_hours + self.short_funding_interval_hours) / 2.0
+        # Convert to APR: (rate_per_interval * payments_per_year * 100)
+        payments_per_year = (365 * 24) / avg_interval_hours
+        self.entry_apr = net_funding_rate_per_interval * payments_per_year * 100
+
     def update_funding_rates(self, long_funding_rate: float, short_funding_rate: float):
         """
         Update the funding rates for this position.
@@ -222,6 +237,17 @@ class Position:
             self.unrealized_pnl_pct = 0.0
             self.long_pnl_pct = 0.0
             self.short_pnl_pct = 0.0
+
+        # NEW: Track P&L history for velocity calculation (Phase 1 - Observation Features)
+        # Keep last 6 hours of P&L percentages
+        self.pnl_history.append(self.unrealized_pnl_pct)
+        if len(self.pnl_history) > 6:
+            self.pnl_history.pop(0)  # Remove oldest
+
+        # NEW: Track peak P&L (Phase 1 - Observation Features)
+        if self.unrealized_pnl_pct > self.peak_pnl_pct:
+            self.peak_pnl_pct = self.unrealized_pnl_pct
+            self.peak_pnl_time = current_time
 
         # Return change in P&L for reward calculation
         pnl_change_usd = self.unrealized_pnl_usd - previous_pnl_usd
@@ -339,6 +365,71 @@ class Position:
 
         # Return minimum (most dangerous side)
         return min(long_distance, short_distance)
+
+    # NEW: Phase 1 - Observation Features for Exit Timing
+    def get_pnl_velocity(self) -> float:
+        """Calculate hourly P&L change rate from history.
+
+        Returns:
+            P&L velocity in percentage points per hour (e.g., -0.5 means declining at 0.5% per hour)
+        """
+        if len(self.pnl_history) < 2:
+            return 0.0
+        # Linear change: (latest - earliest) / hours_elapsed
+        hours_elapsed = len(self.pnl_history) - 1
+        return (self.pnl_history[-1] - self.pnl_history[0]) / hours_elapsed
+
+    def get_peak_drawdown(self) -> float:
+        """Calculate percentage decline from peak P&L.
+
+        Returns:
+            Drawdown as a ratio (0-1), where 0.3 means current P&L is 30% below peak
+        """
+        if self.peak_pnl_pct <= 0:
+            return 0.0  # No peak yet (never been profitable)
+        drawdown = (self.peak_pnl_pct - self.unrealized_pnl_pct) / self.peak_pnl_pct
+        return max(0.0, drawdown)  # Clamp to 0 if above peak
+
+    def get_apr_ratio(self) -> float:
+        """Calculate current APR / entry APR to detect funding rate deterioration.
+
+        Returns:
+            Ratio (e.g., 0.5 means current APR is half of entry APR)
+        """
+        if self.entry_apr == 0:
+            return 1.0  # Neutral if no entry APR
+
+        # Calculate current APR from current funding rates
+        net_funding_rate = self.short_funding_rate - self.long_funding_rate
+        avg_interval = (self.long_funding_interval_hours + self.short_funding_interval_hours) / 2.0
+        if avg_interval == 0:
+            return 1.0
+
+        payments_per_year = (365 * 24) / avg_interval
+        current_apr = net_funding_rate * payments_per_year * 100
+
+        return current_apr / self.entry_apr
+
+    def get_return_efficiency(self) -> float:
+        """Calculate P&L percentage per hour held (age-adjusted performance).
+
+        Returns:
+            P&L efficiency in percentage points per hour (e.g., 0.1 means earning 0.1% per hour)
+        """
+        if self.hours_held == 0:
+            return 0.0
+        return self.unrealized_pnl_pct / self.hours_held
+
+    def is_old_loser(self, age_threshold_hours: float = 48.0) -> bool:
+        """Check if position is old AND losing (for conditional age penalty).
+
+        Args:
+            age_threshold_hours: Age threshold in hours (default 48h)
+
+        Returns:
+            True if position is losing AND held longer than threshold
+        """
+        return self.unrealized_pnl_pct < 0 and self.hours_held > age_threshold_hours
 
     def get_breakdown(self) -> Dict:
         """Get detailed P&L breakdown for analysis."""
@@ -566,20 +657,37 @@ class Portfolio:
 
         return weighted_pnl / total_capital_used
 
-    def get_execution_state(self, exec_idx: int, price_data: Dict[str, Dict[str, float]]) -> np.ndarray:
+    def get_total_funding_usd(self) -> float:
         """
-        Get state features for a single execution slot (12 dimensions).
+        Get total funding earned across all open positions (USD).
+
+        This is used to separate funding P&L from price P&L for reward calculation.
+        Funding fees are the real profit source in arbitrage trading (paid every 1-8h).
+
+        Returns:
+            Total net funding earned in USD (sum of long + short funding for all positions)
+        """
+        return sum(
+            pos.long_net_funding_usd + pos.short_net_funding_usd
+            for pos in self.positions
+        )
+
+    def get_execution_state(self, exec_idx: int, price_data: Dict[str, Dict[str, float]],
+                           best_available_apr: float = 0.0) -> np.ndarray:
+        """
+        Get state features for a single execution slot (20 dimensions - Phase 2: APR comparison features).
 
         Args:
             exec_idx: Execution index (0-4)
             price_data: Current price data for all symbols
+            best_available_apr: Maximum APR among current opportunities (for comparison)
 
         Returns:
-            12-dimensional array of execution features
+            20-dimensional array of execution features
         """
         if exec_idx >= len(self.positions):
             # No position in this slot - return zeros
-            return np.zeros(12, dtype=np.float32)
+            return np.zeros(20, dtype=np.float32)
 
         pos = self.positions[exec_idx]
 
@@ -636,6 +744,35 @@ class Portfolio:
         # 12. liquidation_distance_pct
         liquidation_distance_pct = pos.get_liquidation_distance(current_long_price, current_short_price)
 
+        # NEW: Phase 1 - Exit Timing Features (13-17)
+        # 13. pnl_velocity (hourly P&L change rate)
+        pnl_velocity = pos.get_pnl_velocity() / 100  # Normalize to same scale as net_pnl_pct
+
+        # 14. peak_drawdown (decline from peak P&L)
+        peak_drawdown = pos.get_peak_drawdown()
+
+        # 15. apr_ratio (current APR / entry APR)
+        apr_ratio = pos.get_apr_ratio()
+
+        # 16. return_efficiency (P&L per hour held)
+        return_efficiency = pos.get_return_efficiency() / 100  # Normalize to same scale
+
+        # 17. is_old_loser (binary: position is old AND losing)
+        is_old_loser = 1.0 if pos.is_old_loser(age_threshold_hours=48.0) else 0.0
+
+        # NEW: Phase 2 - APR Comparison Features (18-20)
+        # These help agent understand if better opportunities exist (fixes "hold forever" bias)
+
+        # 18. current_position_apr (APR of this position)
+        current_position_apr = pos.calculate_current_apr() / 100.0  # Normalize to 0-1 range (50% APR → 0.5)
+
+        # 19. best_available_apr (max APR among market opportunities)
+        best_available_apr_norm = best_available_apr / 100.0  # Normalize to 0-1 range
+
+        # 20. apr_advantage (current - best, negative = better opportunities exist)
+        # Scaled to [-1, 1] range: -1 = much worse, 0 = equal, +1 = much better
+        apr_advantage = (current_position_apr - best_available_apr_norm)
+
         return np.array([
             is_active,
             net_pnl_pct,
@@ -648,23 +785,34 @@ class Portfolio:
             funding_efficiency,
             long_pnl_pct,
             short_pnl_pct,
-            liquidation_distance_pct
+            liquidation_distance_pct,
+            pnl_velocity,
+            peak_drawdown,
+            apr_ratio,
+            return_efficiency,
+            is_old_loser,
+            current_position_apr,
+            best_available_apr_norm,
+            apr_advantage
         ], dtype=np.float32)
 
-    def get_all_execution_states(self, price_data: Dict[str, Dict[str, float]], max_positions: int = 5) -> np.ndarray:
+    def get_all_execution_states(self, price_data: Dict[str, Dict[str, float]],
+                                max_positions: int = 5,
+                                best_available_apr: float = 0.0) -> np.ndarray:
         """
-        Get execution state features for all 5 slots (60 dimensions total).
+        Get execution state features for all 5 slots (100 dimensions total - Phase 2: APR comparison features).
 
         Args:
             price_data: Current price data for all symbols
             max_positions: Maximum number of position slots (default 5)
+            best_available_apr: Maximum APR among current opportunities (for comparison)
 
         Returns:
-            60-dimensional array (5 slots × 12 features)
+            100-dimensional array (5 slots × 20 features)
         """
         all_features = []
         for i in range(max_positions):
-            exec_features = self.get_execution_state(i, price_data)
+            exec_features = self.get_execution_state(i, price_data, best_available_apr)
             all_features.extend(exec_features)
 
         return np.array(all_features, dtype=np.float32)

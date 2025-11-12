@@ -43,11 +43,15 @@ def parse_args():
     parser.add_argument('--initial-capital', type=float, default=10000.0,
                         help='Initial capital in USD')
     parser.add_argument('--episode-length-days', type=int, default=5,
-                        help='Episode length in days')
+                        help='Episode length in days (for training episodes)')
     parser.add_argument('--step-minutes', type=int, default=5,
                         help='Minutes per prediction step (default: 5 = 5-minute intervals)')
     parser.add_argument('--sample-random-config', action='store_true',
                         help='Sample random TradingConfig each episode for diversity')
+    parser.add_argument('--eval-full-test', action='store_true', default=True,
+                        help='Use entire test dataset for evaluation (default: True)')
+    parser.add_argument('--no-eval-full-test', action='store_false', dest='eval_full_test',
+                        help='Use episode-length-days for evaluation instead of full test dataset')
 
     # Trading config (if not sampling random)
     parser.add_argument('--max-leverage', type=float, default=2.0,
@@ -57,13 +61,15 @@ def parse_args():
     parser.add_argument('--max-positions', type=int, default=2,
                         help='Maximum concurrent positions (1-5)')
 
-    # Reward config (Simplified RL-v2 approach)
-    parser.add_argument('--pnl-reward-scale', type=float, default=3.0,
-                        help='Scale for hourly P&L reward (main learning signal)')
-    parser.add_argument('--entry-penalty-scale', type=float, default=1.0,
-                        help='Scale for entry fee penalty (discourages overtrading)')
-    parser.add_argument('--stop-loss-penalty', type=float, default=-1.0,
-                        help='Penalty when position hits stop-loss (basic risk management)')
+    # Reward config (Balanced RL-v2 approach + Opportunity Cost)
+    parser.add_argument('--funding-reward-scale', type=float, default=1.0,
+                        help='Scale for funding P&L reward (equal weight with price)')
+    parser.add_argument('--price-reward-scale', type=float, default=1.0,
+                        help='Scale for price P&L reward (equal weight with funding)')
+    parser.add_argument('--liquidation-penalty-scale', type=float, default=10.0,
+                        help='Penalty scale for approaching liquidation (10 for less conservative, 0 to disable)')
+    parser.add_argument('--opportunity-cost-scale', type=float, default=0.0,
+                        help='Opportunity cost penalty (DISABLED by default - causes overtrading, use 0.0)')
 
     # PPO hyperparameters
     parser.add_argument('--learning-rate', type=float, default=3e-4,
@@ -76,8 +82,8 @@ def parse_args():
                         help='PPO clip range')
     parser.add_argument('--value-coef', type=float, default=0.5,
                         help='Value loss coefficient')
-    parser.add_argument('--entropy-coef', type=float, default=0.03,
-                        help='Entropy coefficient')
+    parser.add_argument('--entropy-coef', type=float, default=0.05,
+                        help='Entropy coefficient (balanced to maintain exploration without over-trading)')
     parser.add_argument('--n-epochs', type=int, default=4,
                         help='Number of epochs per update')
     parser.add_argument('--batch-size', type=int, default=64,
@@ -88,7 +94,7 @@ def parse_args():
                         help='Number of training episodes')
     parser.add_argument('--eval-every', type=int, default=50,
                         help='Evaluate every N episodes')
-    parser.add_argument('--save-every', type=int, default=100,
+    parser.add_argument('--save-every', type=int, default=50,
                         help='Save checkpoint every N episodes')
     parser.add_argument('--device', type=str, default='cpu',
                         choices=['cpu', 'cuda', 'mps'],
@@ -111,8 +117,15 @@ def parse_args():
     return parser.parse_args()
 
 
-def create_environment(args, data_path: str, verbose: bool = True):
-    """Create environment (train or test)."""
+def create_environment(args, data_path: str, is_test_env: bool = False, verbose: bool = True):
+    """Create environment (train or test).
+
+    Args:
+        args: Command-line arguments
+        data_path: Path to data CSV file
+        is_test_env: If True, this is a test environment (may use full range)
+        verbose: Print environment info
+    """
     # Create TradingConfig
     if args.sample_random_config:
         trading_config = None  # Will sample random each episode
@@ -123,15 +136,19 @@ def create_environment(args, data_path: str, verbose: bool = True):
             max_positions=args.max_positions,
         )
 
-    # Create RewardConfig (Simplified RL-v2 approach)
+    # Create RewardConfig (RL-v2 + Opportunity Cost)
     reward_config = RewardConfig(
-        pnl_reward_scale=args.pnl_reward_scale,
-        entry_penalty_scale=args.entry_penalty_scale,
-        stop_loss_penalty=args.stop_loss_penalty,
+        funding_reward_scale=args.funding_reward_scale,
+        price_reward_scale=args.price_reward_scale,
+        liquidation_penalty_scale=args.liquidation_penalty_scale,
+        opportunity_cost_scale=args.opportunity_cost_scale,
     )
 
     # Convert step minutes to hours for the environment
     step_hours = args.step_minutes / 60.0
+
+    # For test environments, optionally use full range
+    use_full_range = is_test_env and args.eval_full_test
 
     # Create environment
     env = FundingArbitrageEnv(
@@ -144,19 +161,35 @@ def create_environment(args, data_path: str, verbose: bool = True):
         sample_random_config=args.sample_random_config,
         episode_length_days=args.episode_length_days,
         step_hours=step_hours,
+        use_full_range_episodes=use_full_range,
         verbose=verbose,
     )
 
     if verbose:
-        total_steps = int((args.episode_length_days * 24 * 60) / args.step_minutes)
-        print(f"Step interval: {args.step_minutes} minute(s) ({step_hours:.4f} hours)")
-        print(f"Episode: {args.episode_length_days} days = {total_steps} steps")
+        if use_full_range:
+            # Calculate actual data range for display
+            import pandas as pd
+            df = pd.read_csv(data_path)
+            df['entry_time'] = pd.to_datetime(df['entry_time'])
+            data_days = (df['entry_time'].max() - df['entry_time'].min()).total_seconds() / 86400
+            total_steps = int((data_days * 24 * 60) / args.step_minutes)
+            print(f"Step interval: {args.step_minutes} minute(s) ({step_hours:.4f} hours)")
+            print(f"🌐 FULL TEST RANGE: {data_days:.1f} days = ~{total_steps:,} steps")
+        else:
+            total_steps = int((args.episode_length_days * 24 * 60) / args.step_minutes)
+            print(f"Step interval: {args.step_minutes} minute(s) ({step_hours:.4f} hours)")
+            print(f"Episode: {args.episode_length_days} days = {total_steps} steps")
 
     return env
 
 
 def evaluate(trainer, env, num_episodes: int = 5):
     """Evaluate the agent with detailed trading metrics."""
+    # CRITICAL: Set network to eval mode for evaluation (disables dropout)
+    # This ensures evaluation metrics match production inference
+    was_training = trainer.network.training
+    trainer.network.eval()
+
     # Episode-level metrics
     eval_rewards = []
     eval_lengths = []
@@ -255,6 +288,10 @@ def evaluate(trainer, env, num_episodes: int = 5):
     total_losses = sum(all_losing_pnl) if all_losing_pnl else 0.001  # Avoid division by zero
     profit_factor = total_wins / total_losses
 
+    # Restore original training mode
+    if was_training:
+        trainer.network.train()
+
     return {
         # Episode metrics
         'mean_reward': np.mean(eval_rewards),
@@ -301,12 +338,12 @@ def train(args):
     print("\n" + "=" * 80)
     print("CREATING TRAIN ENVIRONMENT")
     print("=" * 80)
-    train_env = create_environment(args, data_path=args.train_data_path, verbose=True)
+    train_env = create_environment(args, data_path=args.train_data_path, is_test_env=False, verbose=True)
 
     print("\n" + "=" * 80)
     print("CREATING TEST ENVIRONMENT (for evaluation)")
     print("=" * 80)
-    test_env = create_environment(args, data_path=args.test_data_path, verbose=True)
+    test_env = create_environment(args, data_path=args.test_data_path, is_test_env=True, verbose=True)
 
     # Create network
     print("\n" + "=" * 80)

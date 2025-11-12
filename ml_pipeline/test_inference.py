@@ -10,6 +10,7 @@ from pathlib import Path
 
 from models.rl.core.environment import FundingArbitrageEnv
 from models.rl.core.config import TradingConfig
+from models.rl.core.reward_config import RewardConfig
 from models.rl.networks.modular_ppo import ModularPPONetwork
 from models.rl.algorithms.ppo_trainer import PPOTrainer
 
@@ -18,18 +19,22 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Test model inference')
 
     # Trading configuration
-    parser.add_argument('--leverage', type=float, default=1.0,
-                        help='Max leverage (default: 1.0x)')
-    parser.add_argument('--utilization', type=float, default=0.9,
-                        help='Capital utilization (default: 0.9 = 90%%)')
-    parser.add_argument('--max-positions', type=int, default=5,
-                        help='Max concurrent positions (default: 5)')
+    parser.add_argument('--leverage', type=float, default=2.0,
+                        help='Max leverage (default: 2.0x)')
+    parser.add_argument('--utilization', type=float, default=0.8,
+                        help='Capital utilization (default: 0.8 = 80%%)')
+    parser.add_argument('--max-positions', type=int, default=2,
+                        help='Max concurrent positions (default: 2)')
 
     # Test configuration
     parser.add_argument('--num-episodes', type=int, default=1,
                         help='Number of episodes to test (default: 1)')
-    parser.add_argument('--episode-length-days', type=int, default=7,
-                        help='Episode length in days (default: 7)')
+    parser.add_argument('--full-test', action='store_true', default=True,
+                        help='Use entire test dataset (default: True). If disabled, uses --episode-length-days.')
+    parser.add_argument('--no-full-test', action='store_false', dest='full_test',
+                        help='Disable full test mode and use --episode-length-days instead')
+    parser.add_argument('--episode-length-days', type=int, default=5,
+                        help='Episode length in days (only used if --no-full-test is specified, default: 5)')
     parser.add_argument('--step-minutes', type=int, default=5,
                         help='Minutes per prediction step (default: 5 = 5-minute intervals)')
     parser.add_argument('--test-data-path', type=str, default='data/rl_test.csv',
@@ -46,6 +51,8 @@ def parse_args():
                         help='Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler.pkl)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducible results (default: 42)')
+    parser.add_argument('--force-zero-pnl', action='store_true',
+                        help='Force total_pnl_pct to always be 0 in observations (simulates production bug)')
 
     return parser.parse_args()
 
@@ -64,13 +71,19 @@ def test_model_inference(args):
     # Create environment (use test data)
     print("\n1. Creating test environment...")
 
-    # Trading config from command-line arguments
+    # Trading config - use command-line args
     trading_config = TradingConfig(
         max_leverage=args.leverage,
         target_utilization=args.utilization,
         max_positions=args.max_positions,
-        stop_loss_threshold=-0.02,  # -2% stop loss
-        liquidation_buffer=0.15,    # 15% liquidation buffer
+    )
+
+    # Reward config (match training defaults)
+    reward_config = RewardConfig(
+        funding_reward_scale=1.0,
+        price_reward_scale=1.0,
+        liquidation_penalty_scale=10.0,
+        opportunity_cost_scale=0.0,  # Disabled by default
     )
 
     # Convert step minutes to hours for the environment
@@ -80,19 +93,37 @@ def test_model_inference(args):
         data_path=args.test_data_path,
         initial_capital=args.initial_capital,
         trading_config=trading_config,
+        reward_config=reward_config,
         episode_length_days=args.episode_length_days,
         step_hours=step_hours,
         price_history_path=args.price_history_path,
         feature_scaler_path=args.feature_scaler_path,
+        use_full_range_episodes=args.full_test,
+        force_zero_total_pnl_pct=args.force_zero_pnl,
         verbose=False,
     )
 
-    # Calculate total steps
-    total_steps = int((args.episode_length_days * 24 * 60) / args.step_minutes)
-
     print("✅ Test environment created")
     print(f"   Data: {args.test_data_path}")
-    print(f"   Episode length: {args.episode_length_days} days ({total_steps} steps at {args.step_minutes}-minute intervals)")
+
+    # Show episode configuration based on mode
+    if args.full_test:
+        # Calculate actual data range
+        import pandas as pd
+        test_df = pd.read_csv(args.test_data_path)
+        test_df['entry_time'] = pd.to_datetime(test_df['entry_time'])
+        data_start = test_df['entry_time'].min()
+        data_end = test_df['entry_time'].max()
+        data_days = (data_end - data_start).total_seconds() / 86400
+        total_steps = int((data_days * 24 * 60) / args.step_minutes)
+
+        print(f"   🌐 FULL TEST MODE: Testing on ENTIRE test dataset")
+        print(f"   Episode length: {data_days:.1f} days ({data_start} to {data_end})")
+        print(f"   Total steps: ~{total_steps:,} steps at {args.step_minutes}-minute intervals")
+    else:
+        total_steps = int((args.episode_length_days * 24 * 60) / args.step_minutes)
+        print(f"   Episode length: {args.episode_length_days} days ({total_steps} steps at {args.step_minutes}-minute intervals)")
+
     print(f"   Step interval: {args.step_minutes} minute(s) ({step_hours:.4f} hours)")
     print(f"   Initial capital: ${args.initial_capital:,.2f}")
     print(f"   Leverage: {args.leverage}x")
@@ -100,6 +131,8 @@ def test_model_inference(args):
     print(f"   Max Positions: {args.max_positions}")
     if args.price_history_path:
         print(f"   Price History: {args.price_history_path} (dynamic funding updates enabled)")
+    if args.force_zero_pnl:
+        print(f"   ⚠️  FORCING total_pnl_pct = 0 in observations (production bug simulation)")
 
     # Create network
     print("\n2. Creating network...")
@@ -119,6 +152,9 @@ def test_model_inference(args):
     print("\n4. Loading trained model...")
     try:
         trainer.load(args.checkpoint)
+        # CRITICAL: Set network to eval mode for inference (disables dropout)
+        # This must match the server predictor which uses eval mode
+        trainer.network.eval()
         print(f"✅ Model loaded from {args.checkpoint}")
     except FileNotFoundError:
         print(f"⚠️  No checkpoint found at {args.checkpoint} - using random weights")
@@ -153,7 +189,7 @@ def test_model_inference(args):
     all_losing_pnl = []
 
     for episode in range(args.num_episodes):
-        obs, info = env.reset()
+        obs, info = env.reset(seed=args.seed)
         episode_reward = 0.0
         episode_length = 0
         done = False

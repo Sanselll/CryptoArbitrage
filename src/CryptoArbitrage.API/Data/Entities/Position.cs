@@ -42,6 +42,16 @@ public class Position
     public decimal RealizedPnLPct { get; set; }     // Percentage return on capital used
     public decimal UnrealizedPnL { get; set; }      // For open positions only
 
+    // Phase 1 Exit Timing Features - ML model tracking for better exit decisions
+    public string? PnlHistoryJson { get; set; }      // JSON array of last 6 P&L % snapshots (updated every collection cycle)
+    public decimal PeakPnlPct { get; set; } = 0m;  // Maximum P&L % reached during position lifetime
+    public decimal EntryApr { get; set; } = 0m;     // Funding APR at position entry time
+    public DateTime? LastPnlSnapshotTime { get; set; }  // Last time P&L was snapshotted
+
+    // Funding interval metadata (needed for accurate APR calculations)
+    public decimal LongFundingIntervalHours { get; set; } = 8m;  // Default 8h for most coins
+    public decimal ShortFundingIntervalHours { get; set; } = 8m;  // Default 8h for most coins
+
     // Fee tracking: Calculated on-the-fly from PositionTransaction table (no storage needed)
 
     // Order/Position references

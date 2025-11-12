@@ -71,12 +71,12 @@ def initialize_predictor():
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='checkpoints/best_model.pt',
+                model_path='checkpoints/checkpoint_ep550.pt',
                 device='cpu'
             )
             print("✅ Modular RL predictor initialized successfully")
-            print("   Model: ModularPPONetwork (275 dims = 5 config + 10 portfolio + 60 executions + 200 opportunities)")
-            print("   Path: checkpoints/best_model.pt (Episode 1100 - Balanced Trading)")
+            print("   Model: ModularPPONetwork (301 dims = 5 config + 6 portfolio + 100 executions + 190 opportunities)")
+            print("   Path: checkpoints/checkpoint_ep550.pt (Episode 550)")
             print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
         except Exception as e:
             print(f"⚠️  Warning: Could not initialize RL predictor: {e}")
