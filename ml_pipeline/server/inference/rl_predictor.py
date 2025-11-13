@@ -359,26 +359,10 @@ class ModularRLPredictor:
                 # === NEW PHASE 2 APR COMPARISON FEATURES ===
 
                 # 18. Current Position APR (APR of this position)
-                # Calculate from current funding rates, normalized to 0-1 range (50% APR → 0.5)
-                # CRITICAL: Use actual funding intervals, not hardcoded assumptions
-                long_interval = pos.get('long_funding_interval', pos.get('long_funding_interval_hours', 8))
-                short_interval = pos.get('short_funding_interval', pos.get('short_funding_interval_hours', 8))
-
-                # Calculate weighted average interval (matches environment.py logic)
-                if long_interval == short_interval:
-                    avg_interval_hours = long_interval
-                else:
-                    long_rate = pos.get('long_funding_rate', 0.0)
-                    short_rate = pos.get('short_funding_rate', 0.0)
-                    avg_interval_hours = (
-                        (abs(long_rate) * long_interval + abs(short_rate) * short_interval) /
-                        (abs(long_rate) + abs(short_rate) + 1e-9)
-                    )
-
-                # Convert to APR: rate_per_interval * (payments_per_day) * 365 days
-                payments_per_day = 24.0 / avg_interval_hours
-                annual_rate = net_funding_rate * payments_per_day * 365.0
-                current_position_apr = (annual_rate * 100) / 100.0  # Already in %, just normalize to 0-1
+                # CRITICAL FIX: Use the backend's current_position_apr directly!
+                # Backend correctly fetches this from the matching opportunity via GetPositionAprFromOpportunities()
+                # DO NOT recalculate here - position funding intervals may be defaults (8h/8h) not actual values
+                current_position_apr = pos.get('current_position_apr', 0.0) / 100.0  # Normalize to 0-1 range
 
                 # 19. Best Available APR (max APR among market opportunities)
                 best_available_apr_norm = best_available_apr / 100.0  # Normalize to 0-1 range
@@ -612,6 +596,144 @@ class ModularRLPredictor:
                 'size': None,
             }
 
+    def _log_position_features_readable(self, portfolio: Dict, obs: np.ndarray, opportunities: List[Dict]):
+        """
+        Log position features in human-readable format for debugging.
+
+        Logs raw feature values, normalized values sent to model, and APR calculation details.
+        Helps identify feature distribution mismatches between training and production.
+
+        Args:
+            portfolio: Portfolio state dict with positions
+            obs: Full observation vector (301 dims)
+            opportunities: List of opportunity dicts for best_available_apr
+        """
+        try:
+            import datetime
+            from pathlib import Path
+
+            # Log to project directory
+            log_path = Path(__file__).parent.parent.parent / 'production_features.log'
+
+            # Get active positions
+            positions = portfolio.get('positions', [])
+            active_positions = [p for p in positions if p.get('is_active', False) or p.get('position_is_active', 0.0) > 0.5]
+
+            if not active_positions:
+                return  # Nothing to log
+
+            # Find best available APR from opportunities
+            best_available_apr = 0.0
+            if opportunities:
+                best_available_apr = max(opp.get('fund_apr', 0.0) for opp in opportunities)
+
+            # Feature names for execution features (20 features per position)
+            feature_names = [
+                "position_is_active",
+                "net_pnl_pct",
+                "hours_held",
+                "net_funding_ratio",
+                "net_funding_rate",
+                "current_spread_pct",
+                "entry_spread_pct",
+                "value_ratio",
+                "funding_efficiency",
+                "long_pnl_pct",
+                "short_pnl_pct",
+                "liquidation_distance",
+                "pnl_velocity",
+                "peak_drawdown",
+                "apr_ratio",
+                "return_efficiency",
+                "is_old_loser",
+                "current_position_apr",
+                "best_available_apr",
+                "apr_advantage"
+            ]
+
+            with open(log_path, 'a') as f:
+                f.write("=" * 80 + "\n")
+                f.write(f"{datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC - Position Features\n")
+                f.write("=" * 80 + "\n")
+
+                for slot_idx, pos in enumerate(active_positions):
+                    symbol = pos.get('symbol', 'UNKNOWN')
+                    raw_hours_held = pos.get('position_age_hours', pos.get('hours_held', 0.0))
+                    entry_apr = pos.get('entry_apr', 0.0)
+
+                    f.write(f"\nSymbol: {symbol}\n")
+                    f.write(f"Hours Held: {raw_hours_held:.2f}h ({raw_hours_held*60:.0f} minutes)\n")
+                    f.write(f"Entry APR: {entry_apr:.0f}%\n")
+                    f.write(f"\n")
+
+                    # Extract normalized features from observation vector
+                    # Observation structure: config(5) + portfolio(6) + execution(100) + opportunities(190)
+                    # Execution features start at index 11, each position has 20 features
+                    feat_start_idx = 11 + (slot_idx * 20)
+                    normalized_features = obs[feat_start_idx:feat_start_idx+20]
+
+                    # Calculate raw (un-normalized) values
+                    raw_features = {}
+                    norm_features = {}
+
+                    # Get raw values from position dict
+                    net_pnl_pct_raw = pos.get('unrealized_pnl_pct', 0.0)
+                    long_funding_rate = pos.get('long_funding_rate', 0.0)
+                    short_funding_rate = pos.get('short_funding_rate', 0.0)
+                    net_funding_rate = short_funding_rate - long_funding_rate
+
+                    # Use backend's current_position_apr (correctly fetched from opportunity)
+                    current_position_apr = pos.get('current_position_apr', 0.0)
+
+                    peak_pnl_pct_raw = pos.get('peak_pnl_pct', 0.0)
+
+                    # Write raw features
+                    f.write("Raw Features (before normalization):\n")
+                    f.write(f"  1. position_is_active         : {normalized_features[0]:.4f}\n")
+                    f.write(f"  2. net_pnl_pct                : {net_pnl_pct_raw:.4f}%\n")
+                    f.write(f"  3. hours_held                 : {raw_hours_held:.4f}h\n")
+                    f.write(f"  4. net_funding_ratio          : {normalized_features[3]:.4f}\n")
+                    f.write(f"  5. net_funding_rate           : {net_funding_rate:.6f}\n")
+                    f.write(f"  6. current_spread_pct         : {normalized_features[5]:.6f}\n")
+                    f.write(f"  7. entry_spread_pct           : {normalized_features[6]:.6f}\n")
+                    f.write(f"  8. value_ratio                : {normalized_features[7]:.4f}\n")
+                    f.write(f"  9. funding_efficiency         : {normalized_features[8]:.4f}\n")
+                    f.write(f" 10. long_pnl_pct               : {pos.get('long_pnl_pct', 0.0):.4f}%\n")
+                    f.write(f" 11. short_pnl_pct              : {pos.get('short_pnl_pct', 0.0):.4f}%\n")
+                    f.write(f" 12. liquidation_distance       : {normalized_features[11]:.4f}\n")
+                    f.write(f" 13. pnl_velocity               : {normalized_features[12]:.6f}\n")
+                    f.write(f" 14. peak_drawdown              : {normalized_features[13]:.4f}\n")
+                    f.write(f" 15. apr_ratio                  : {normalized_features[14]:.4f}\n")
+                    f.write(f" 16. return_efficiency          : {normalized_features[15]:.6f}\n")
+                    f.write(f" 17. is_old_loser               : {normalized_features[16]:.0f}\n")
+                    f.write(f" 18. current_position_apr       : {current_position_apr:.2f}%\n")
+                    f.write(f" 19. best_available_apr         : {best_available_apr:.2f}%\n")
+                    f.write(f" 20. apr_advantage              : {current_position_apr - best_available_apr:.2f}%\n")
+
+                    f.write(f"\nNormalized Features (sent to model):\n")
+                    for i, (name, val) in enumerate(zip(feature_names, normalized_features)):
+                        f.write(f" {i+1:2d}. {name:30s}: {val:12.6f}\n")
+
+                    f.write(f"\nAPR Debug (using backend's value from opportunity):\n")
+                    f.write(f"  long_funding_rate             : {long_funding_rate:.6f}\n")
+                    f.write(f"  short_funding_rate            : {short_funding_rate:.6f}\n")
+                    f.write(f"  net_funding_rate              : {net_funding_rate:.6f}\n")
+                    f.write(f"  current_position_apr (backend): {current_position_apr:.2f}%\n")
+                    f.write(f"  Note: Backend fetches APR from matching opportunity via GetPositionAprFromOpportunities()\n")
+
+                    f.write(f"\nPeak Drawdown Debug:\n")
+                    f.write(f"  peak_pnl_pct                  : {peak_pnl_pct_raw:.4f}%\n")
+                    f.write(f"  net_pnl_pct                   : {net_pnl_pct_raw:.4f}%\n")
+                    f.write(f"  peak_drawdown (normalized)    : {normalized_features[13]:.4f}\n")
+
+                    f.write("\n")
+
+                f.write("\n\n")
+        except Exception as e:
+            # Don't crash if logging fails
+            print(f"Warning: Failed to write readable feature log: {e}")
+            pass
+
     def predict_opportunities(
         self,
         opportunities: List[Dict],
@@ -650,6 +772,35 @@ class ModularRLPredictor:
 
         # Build observation
         obs = self._build_observation(trading_config, portfolio, opportunities)
+
+        # Log readable features for debugging (production)
+        self._log_position_features_readable(portfolio, obs, opportunities)
+
+        # FEATURE ANALYSIS: Log observation vector to file for debugging
+        # This helps identify feature distribution mismatches between test and production
+        import json
+        import datetime
+        try:
+            feature_log_path = '/tmp/ml_observation_log.jsonl'
+            num_positions = sum(1 for p in portfolio.get('positions', []) if p.get('symbol', '') != '')
+
+            log_entry = {
+                'timestamp': datetime.datetime.utcnow().isoformat(),
+                'num_positions': num_positions,
+                'num_opportunities': len(opportunities),
+                'observation_vector': obs.tolist(),
+                'config_features': obs[:5].tolist(),
+                'portfolio_features': obs[5:11].tolist(),
+                'execution_features_pos0': obs[11:31].tolist() if num_positions > 0 else [],
+                'opportunity_features_opp0': obs[111:130].tolist() if len(opportunities) > 0 else [],
+            }
+
+            # Append to log file
+            with open(feature_log_path, 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
+        except Exception as e:
+            # Don't crash if logging fails
+            pass
 
         # DEBUG: Log input data structure for analysis (DISABLED - set to True to enable)
         VERBOSE_DEBUG = False

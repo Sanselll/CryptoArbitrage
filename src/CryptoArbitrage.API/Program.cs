@@ -343,7 +343,6 @@ builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 });
 
 // ML Services - Using HTTP API to call Python Flask server
-builder.Services.AddScoped<ITradingSessionService, TradingSessionService>();
 builder.Services.AddSingleton<RLPredictionService>();
 
 // ============================================================================

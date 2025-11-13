@@ -31,7 +31,6 @@ public class RLPredictionService : IDisposable
     private readonly IDataRepository<MarketDataSnapshot> _marketDataRepository;
     private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
     private readonly IAgentConfigurationService _agentConfigService;
-    private readonly ITradingSessionService _sessionService;
 
     public RLPredictionService(
         ILogger<RLPredictionService> logger,
@@ -40,8 +39,7 @@ public class RLPredictionService : IDisposable
         IDataRepository<UserDataSnapshot> userDataRepository,
         IDataRepository<MarketDataSnapshot> marketDataRepository,
         IDataRepository<FundingRateDto> fundingRateRepository,
-        IAgentConfigurationService agentConfigService,
-        ITradingSessionService sessionService)
+        IAgentConfigurationService agentConfigService)
     {
         _logger = logger;
         _context = context;
@@ -49,7 +47,6 @@ public class RLPredictionService : IDisposable
         _marketDataRepository = marketDataRepository;
         _fundingRateRepository = fundingRateRepository;
         _agentConfigService = agentConfigService;
-        _sessionService = sessionService;
 
         // Get configuration (same ML API server, different port if needed)
         var host = configuration["MLApi:Host"] ?? "localhost";
@@ -793,28 +790,24 @@ public class RLPredictionService : IDisposable
         // 3. Calculate average position P&L
         var avgPnlPct = CalculateAvgPositionPnl(positions, totalCapital);
 
-        // 4. Calculate total P&L % directly from positions (matches ML model expectations)
-        // CRITICAL FIX: Previously read from UserDataSnapshot which had stale/wrong data, causing immediate exits
-        // Now calculate directly from positions list like the test environment does
-        var totalPnlPct = CalculateTotalPnlPctFromPositions(positions, totalCapital);
-
-        // VERIFICATION: Compare old broken method vs new fixed method for monitoring
-        var oldTotalPnlPct = await CalculateTotalPnlPctFromUserDataAsync(userId, totalCapital, cancellationToken);
-        if (Math.Abs(totalPnlPct - oldTotalPnlPct) > 0.01f)  // Log if difference > 0.01%
-        {
-            _logger.LogWarning(
-                "P&L Calculation Discrepancy Detected! Fixed={FixedPnl}%, Old(broken)={OldPnl}%, Difference={Diff}%, " +
-                "NumPositions={NumPos}, AvgPosPnl={AvgPnl}%",
-                totalPnlPct, oldTotalPnlPct, totalPnlPct - oldTotalPnlPct,
-                positions.Count, avgPnlPct);
-        }
+        // 4. Calculate total P&L % from position P&L (MATCHES TEST ENVIRONMENT EXACTLY)
+        // Test environment (portfolio.py:897-898):
+        //   total_pnl_pct = (total_capital - initial_capital) / initial_capital * 100
+        // Where total_capital starts at $10k and accumulates position P&L as they close
+        //
+        // In production, we calculate the equivalent by summing unrealized P&L from ALL positions
+        // divided by total capital (portfolio.py:222-232 for individual position P&L)
+        var totalPnlPct = totalCapital > 0 && positions.Any()
+            ? (float)(positions.Sum(p => p.UnrealizedPnL) / totalCapital * 100m)
+            : 0.0f;
 
         // 5. Get max drawdown
         var drawdown = await GetMaxDrawdownAsync(userId, cancellationToken);
 
-        // 6. Calculate episode progress based on session duration (not position age)
-        // This reflects how far through the current 24-hour trading session we are
-        var episodeProgress = _sessionService.CalculateEpisodeProgress();
+        // 6. Episode progress removed (was session-based, not needed without TradingSessionService)
+        // In test environment, this tracks progress through 72-hour episodes
+        // In production, we don't have fixed-length episodes, so set to 0
+        var episodeProgress = 0.0f;
 
         // 7. Get market data snapshot (needed for liquidation distance and position states)
         var marketSnapshot = await _marketDataRepository.GetAsync("market_data_snapshot", cancellationToken);
@@ -844,7 +837,7 @@ public class RLPredictionService : IDisposable
         {
             // Core metrics
             Capital = totalCapital,
-            InitialCapital = totalCapital,  // Use current capital as initial
+            InitialCapital = totalCapital,  // Set to current capital (we calculate total_pnl_pct from position P&L instead)
             NumPositions = positions.Select(p => p.ExecutionId).Distinct().Count(),
             MarginUtilization = utilization * 100,  // Feature #3: margin locked / capital (as percentage 0-100)
 
@@ -909,25 +902,18 @@ public class RLPredictionService : IDisposable
             // Calculate position size
             var positionSize = longPos.Quantity * longPos.EntryPrice;
 
-            // CRITICAL FIX: Calculate position age for P&L history delay
+            // Calculate position age for logging
             var positionAge = (DateTime.UtcNow - longPos.OpenedAt).TotalHours;
 
-            // Delay P&L history for 1 hour to match training environment
-            List<float> pnlHistoryToUse;
-            if (positionAge >= 1.0)
-            {
-                pnlHistoryToUse = ParsePnlHistory(longPos.PnlHistoryJson);
-                _logger.LogDebug(
-                    "Using P&L history for {Symbol} (age={Age:F1}h): {Count} samples",
-                    longPos.Symbol, positionAge, pnlHistoryToUse.Count);
-            }
-            else
-            {
-                pnlHistoryToUse = new List<float>();
-                _logger.LogDebug(
-                    "Delaying P&L history for {Symbol} (age={Age:F1}h < 1h): using empty list",
-                    longPos.Symbol, positionAge);
-            }
+            // CRITICAL FIX: Use P&L history directly from database (no delay)
+            // Test environment (portfolio.py:243-245) appends to pnl_history every step (1 hour)
+            // Production: UserDataCollector appends every 5 minutes
+            // We send whatever history exists to match test behavior where pnl_history
+            // starts accumulating from the first hour
+            var pnlHistoryToUse = ParsePnlHistory(longPos.PnlHistoryJson);
+            _logger.LogDebug(
+                "Using P&L history for {Symbol} (age={Age:F1}h): {Count} samples",
+                longPos.Symbol, positionAge, pnlHistoryToUse.Count);
 
             // Build position state with raw data fields for ML predictor
             var state = new RLPositionState
@@ -973,16 +959,18 @@ public class RLPredictionService : IDisposable
                     : (float)((longPos.Quantity * longPos.EntryPrice + shortPos.Quantity * shortPos.EntryPrice) * 0.0002m),
 
                 // ===== PHASE 1 EXIT TIMING FEATURES =====
-                // CRITICAL FIX: P&L history and peak delayed for 1 hour (calculated above)
 
-                // For pnl_velocity: Hourly P&L history (ML calculates velocity from this)
-                PnlHistory = pnlHistoryToUse,  // Empty for first hour, then real history
+                // For pnl_velocity: P&L history (ML calculates velocity from this)
+                // Test environment: appends every hour starting from hour 1
+                // Production: UserDataCollector appends every 5 minutes
+                // We send whatever history exists (no delay)
+                PnlHistory = pnlHistoryToUse,
 
                 // For peak_drawdown: Peak P&L percentage reached (ML calculates drawdown from this)
-                // Only track peak after 1 hour to avoid false peaks from spread volatility
-                PeakPnlPct = positionAge >= 1.0
-                    ? (float)longPos.PeakPnlPct  // Use real peak after 1 hour
-                    : 0f,  // Zero for new positions (matches training)
+                // Test environment: tracks peak from beginning (portfolio.py:247-250)
+                // Production: UserDataCollector tracks peak from beginning
+                // We send whatever peak exists (no delay)
+                PeakPnlPct = (float)longPos.PeakPnlPct,
 
                 // For apr_ratio: APR at entry time (ML calculates ratio vs current APR)
                 // Read from Position entity (now populated from database via UserDataCollector → PositionDto)
@@ -991,8 +979,8 @@ public class RLPredictionService : IDisposable
                 // ===== PHASE 2 APR COMPARISON FEATURES =====
                 // Calculate APR comparison features (features 18-20)
 
-                // Feature 18: Current Position APR (lookup from matching opportunity instead of recalculating)
-                // This ensures consistency with opportunity APR calculation (converts each funding rate to daily independently)
+                // Feature 18: Current Position APR (direct from opportunities, matching test_inference)
+                // Use raw opportunity APR without smoothing to match test behavior
                 CurrentPositionApr = GetPositionAprFromOpportunities(longPos.Symbol, opportunities),
 
                 // Feature 19: Best Available APR (max APR among current opportunities)
@@ -1221,15 +1209,20 @@ public class RLPredictionService : IDisposable
 
     private float CalculateAvgPositionPnl(List<Position> positions, decimal totalCapital)
     {
-        if (!positions.Any() || totalCapital == 0)
-            return 0.0f;
+        // Match test environment: only calculate from CLOSED positions
+        // This prevents the model from seeing negative P&L immediately on open positions
+        var closedPositions = positions.Where(p => p.Status == PositionStatus.Closed).ToList();
 
-        var executionGroups = positions.GroupBy(p => p.ExecutionId);
+        if (!closedPositions.Any() || totalCapital == 0)
+            return 0.0f; // No closed positions yet, return 0
+
+        var executionGroups = closedPositions.GroupBy(p => p.ExecutionId);
         var pnls = new List<float>();
 
         foreach (var execution in executionGroups)
         {
-            var totalPnl = execution.Sum(p => p.UnrealizedPnL);
+            // For closed positions, use RealizedPnLUsd instead of UnrealizedPnL
+            var totalPnl = execution.Sum(p => p.RealizedPnLUsd);
             var totalMargin = execution.Sum(p => p.InitialMargin);
             if (totalMargin > 0)
             {
@@ -1423,6 +1416,31 @@ public class RLPredictionService : IDisposable
         // This can happen if the opportunity expired but position still exists
         _logger.LogWarning("No matching opportunity found for position symbol {Symbol}, using APR=0", symbol);
         return 0f;
+    }
+
+    private float GetSmoothedPositionApr(string symbol, decimal entryApr, List<ArbitrageOpportunityDto> opportunities)
+    {
+        // Get current market APR for this symbol
+        var currentMarketApr = GetPositionAprFromOpportunities(symbol, opportunities);
+
+        // If no market APR available or very close to entry, use entry APR
+        // This prevents sudden drops when opportunity disappears temporarily
+        if (currentMarketApr == 0f)
+        {
+            _logger.LogDebug("No market APR for {Symbol}, using entry APR {EntryApr}", symbol, entryApr);
+            return (float)entryApr;
+        }
+
+        // Apply exponential smoothing between entry APR and current market APR
+        // Alpha = 0.1 means 10% weight to current, 90% to entry
+        // This strongly reduces sensitivity to rapid APR changes for maximum position stability
+        const float alpha = 0.1f;
+        var smoothedApr = (alpha * currentMarketApr) + ((1 - alpha) * (float)entryApr);
+
+        _logger.LogDebug("APR smoothing for {Symbol}: Entry={EntryApr:F0}, Market={MarketApr:F0}, Smoothed={SmoothedApr:F0}",
+            symbol, entryApr, currentMarketApr, smoothedApr);
+
+        return smoothedApr;
     }
 
     private List<float> ParsePnlHistory(string? pnlHistoryJson)

@@ -53,6 +53,10 @@ def parse_args():
                         help='Random seed for reproducible results (default: 42)')
     parser.add_argument('--force-zero-pnl', action='store_true',
                         help='Force total_pnl_pct to always be 0 in observations (simulates production bug)')
+    parser.add_argument('--start-time', type=str, default=None,
+                        help='Start time for filtering test data (e.g., "2025-11-13 09:20:00")')
+    parser.add_argument('--end-time', type=str, default=None,
+                        help='End time for filtering test data (e.g., "2025-11-13 09:30:00")')
 
     return parser.parse_args()
 
@@ -67,6 +71,38 @@ def test_model_inference(args):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     print(f"\n🎲 Random seed: {args.seed}")
+
+    # Filter test data by time range if specified
+    test_data_path = args.test_data_path
+    if args.start_time or args.end_time:
+        print("\n⏱️  Filtering test data by time range...")
+        import tempfile
+
+        df = pd.read_csv(args.test_data_path)
+        df['entry_time'] = pd.to_datetime(df['entry_time'], utc=True)
+
+        print(f"   Original: {len(df)} rows ({df['entry_time'].min()} to {df['entry_time'].max()})")
+
+        if args.start_time:
+            start_dt = pd.to_datetime(args.start_time, utc=True)
+            df = df[df['entry_time'] >= start_dt]
+            print(f"   Filtered start >= {start_dt}: {len(df)} rows")
+
+        if args.end_time:
+            end_dt = pd.to_datetime(args.end_time, utc=True)
+            df = df[df['entry_time'] <= end_dt]
+            print(f"   Filtered end <= {end_dt}: {len(df)} rows")
+
+        if len(df) == 0:
+            raise ValueError("No data found in specified time range!")
+
+        print(f"   Final: {len(df)} rows ({df['entry_time'].min()} to {df['entry_time'].max()})")
+
+        # Save filtered data to temporary file
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        df.to_csv(temp_file.name, index=False)
+        test_data_path = temp_file.name
+        print(f"   Saved filtered data to: {test_data_path}")
 
     # Create environment (use test data)
     print("\n1. Creating test environment...")
@@ -90,7 +126,7 @@ def test_model_inference(args):
     step_hours = args.step_minutes / 60.0
 
     env = FundingArbitrageEnv(
-        data_path=args.test_data_path,
+        data_path=test_data_path,
         initial_capital=args.initial_capital,
         trading_config=trading_config,
         reward_config=reward_config,
@@ -104,12 +140,11 @@ def test_model_inference(args):
     )
 
     print("✅ Test environment created")
-    print(f"   Data: {args.test_data_path}")
+    print(f"   Data: {test_data_path}")
 
     # Show episode configuration based on mode
     if args.full_test:
         # Calculate actual data range
-        import pandas as pd
         test_df = pd.read_csv(args.test_data_path)
         test_df['entry_time'] = pd.to_datetime(test_df['entry_time'])
         data_start = test_df['entry_time'].min()
@@ -200,6 +235,123 @@ def test_model_inference(args):
             # Count opportunities available at this step
             if hasattr(env, 'current_opportunities'):
                 opportunities_count += len(env.current_opportunities)
+
+            # Log features for first 5 steps only (to avoid flooding)
+            if episode_length < 5:
+                try:
+                    import datetime
+                    from pathlib import Path
+
+                    log_path = Path('test_features.log')
+
+                    # Get active positions from environment's portfolio
+                    portfolio = env.portfolio
+                    active_positions = [p for p in portfolio.positions if p.hours_held > 0]
+
+                    if active_positions:
+                        # Find best available APR from opportunities
+                        best_available_apr = 0.0
+                        if hasattr(env, 'current_opportunities') and env.current_opportunities:
+                            best_available_apr = max(opp.get('fund_apr', 0.0) for opp in env.current_opportunities)
+
+                        # Feature names
+                        feature_names = [
+                            "position_is_active", "net_pnl_pct", "hours_held", "net_funding_ratio",
+                            "net_funding_rate", "current_spread_pct", "entry_spread_pct", "value_ratio",
+                            "funding_efficiency", "long_pnl_pct", "short_pnl_pct", "liquidation_distance",
+                            "pnl_velocity", "peak_drawdown", "apr_ratio", "return_efficiency",
+                            "is_old_loser", "current_position_apr", "best_available_apr", "apr_advantage"
+                        ]
+
+                        with open(log_path, 'a') as f:
+                            f.write("=" * 80 + "\n")
+                            f.write(f"{datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC - Test Position Features (Step {episode_length})\n")
+                            f.write("=" * 80 + "\n")
+
+                            for slot_idx, pos in enumerate(active_positions):
+                                symbol = pos.symbol
+                                raw_hours_held = pos.hours_held
+                                entry_apr = pos.entry_apr if hasattr(pos, 'entry_apr') else 0.0
+
+                                f.write(f"\nSymbol: {symbol}\n")
+                                f.write(f"Hours Held: {raw_hours_held:.2f}h ({raw_hours_held*60:.0f} minutes)\n")
+                                f.write(f"Entry APR: {entry_apr:.0f}%\n\n")
+
+                                # Extract normalized features from observation vector
+                                feat_start_idx = 11 + (slot_idx * 20)
+                                normalized_features = obs[feat_start_idx:feat_start_idx+20]
+
+                                # Get raw values
+                                net_pnl_pct_raw = pos.unrealized_pnl_pct * 100
+                                long_funding_rate = pos.long_funding_rate
+                                short_funding_rate = pos.short_funding_rate
+                                net_funding_rate = short_funding_rate - long_funding_rate
+
+                                # Calculate APR
+                                long_interval = pos.long_funding_interval_hours
+                                short_interval = pos.short_funding_interval_hours
+                                if long_interval == short_interval:
+                                    avg_interval_hours = long_interval
+                                else:
+                                    avg_interval_hours = (
+                                        (abs(long_funding_rate) * long_interval + abs(short_funding_rate) * short_interval) /
+                                        (abs(long_funding_rate) + abs(short_funding_rate) + 1e-9)
+                                    )
+                                payments_per_day = 24.0 / avg_interval_hours
+                                annual_rate = net_funding_rate * payments_per_day * 365.0
+                                current_position_apr = annual_rate * 100
+
+                                peak_pnl_pct_raw = pos.peak_pnl_pct * 100 if hasattr(pos, 'peak_pnl_pct') else 0.0
+
+                                # Write raw features
+                                f.write("Raw Features (before normalization):\n")
+                                f.write(f"  1. position_is_active         : {normalized_features[0]:.4f}\n")
+                                f.write(f"  2. net_pnl_pct                : {net_pnl_pct_raw:.4f}%\n")
+                                f.write(f"  3. hours_held                 : {raw_hours_held:.4f}h\n")
+                                f.write(f"  4. net_funding_ratio          : {normalized_features[3]:.4f}\n")
+                                f.write(f"  5. net_funding_rate           : {net_funding_rate:.6f}\n")
+                                f.write(f"  6. current_spread_pct         : {normalized_features[5]:.6f}\n")
+                                f.write(f"  7. entry_spread_pct           : {normalized_features[6]:.6f}\n")
+                                f.write(f"  8. value_ratio                : {normalized_features[7]:.4f}\n")
+                                f.write(f"  9. funding_efficiency         : {normalized_features[8]:.4f}\n")
+                                f.write(f" 10. long_pnl_pct               : {pos.long_pnl_pct*100:.4f}%\n")
+                                f.write(f" 11. short_pnl_pct              : {pos.short_pnl_pct*100:.4f}%\n")
+                                f.write(f" 12. liquidation_distance       : {normalized_features[11]:.4f}\n")
+                                f.write(f" 13. pnl_velocity               : {normalized_features[12]:.6f}\n")
+                                f.write(f" 14. peak_drawdown              : {normalized_features[13]:.4f}\n")
+                                f.write(f" 15. apr_ratio                  : {normalized_features[14]:.4f}\n")
+                                f.write(f" 16. return_efficiency          : {normalized_features[15]:.6f}\n")
+                                f.write(f" 17. is_old_loser               : {normalized_features[16]:.0f}\n")
+                                f.write(f" 18. current_position_apr       : {current_position_apr:.2f}%\n")
+                                f.write(f" 19. best_available_apr         : {best_available_apr:.2f}%\n")
+                                f.write(f" 20. apr_advantage              : {current_position_apr - best_available_apr:.2f}%\n")
+
+                                f.write(f"\nNormalized Features (sent to model):\n")
+                                for i, (name, val) in enumerate(zip(feature_names, normalized_features)):
+                                    f.write(f" {i+1:2d}. {name:30s}: {val:12.6f}\n")
+
+                                f.write(f"\nAPR Calculation Debug:\n")
+                                f.write(f"  long_funding_rate             : {long_funding_rate:.6f}\n")
+                                f.write(f"  short_funding_rate            : {short_funding_rate:.6f}\n")
+                                f.write(f"  net_funding_rate              : {net_funding_rate:.6f}\n")
+                                f.write(f"  long_funding_interval         : {long_interval:.1f}h\n")
+                                f.write(f"  short_funding_interval        : {short_interval:.1f}h\n")
+                                f.write(f"  avg_funding_interval          : {avg_interval_hours:.1f}h\n")
+                                f.write(f"  payments_per_day              : {payments_per_day:.2f}\n")
+                                f.write(f"  annual_rate                   : {annual_rate:.6f}\n")
+                                f.write(f"  current_position_apr          : {current_position_apr:.2f}%\n")
+
+                                f.write(f"\nPeak Drawdown Debug:\n")
+                                f.write(f"  peak_pnl_pct                  : {peak_pnl_pct_raw:.4f}%\n")
+                                f.write(f"  net_pnl_pct                   : {net_pnl_pct_raw:.4f}%\n")
+                                f.write(f"  peak_drawdown (normalized)    : {normalized_features[13]:.4f}\n")
+                                f.write("\n")
+
+                            f.write("\n\n")
+                except Exception as e:
+                    # Don't crash if logging fails
+                    print(f"Warning: Failed to write test feature log: {e}")
+                    pass
 
             # Get action mask
             if hasattr(env, '_get_action_mask'):

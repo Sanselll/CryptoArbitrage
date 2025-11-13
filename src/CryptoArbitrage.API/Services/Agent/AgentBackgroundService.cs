@@ -293,14 +293,17 @@ public class AgentBackgroundService : BackgroundService
 
         var numExecutionsForLogging = positions.Select(p => p.ExecutionId).Distinct().Count();
 
-        _logger.LogInformation("========== AGENT SENDING TO ML API ==========");
+        _logger.LogInformation("========== AGENT STATUS ==========");
         _logger.LogInformation("User: {UserId}, Executions: {ExecutionCount} ({PositionCount} individual positions)",
             userId, numExecutionsForLogging, positions.Count);
         foreach (var pos in positions)
         {
-            _logger.LogInformation("  - Position: {Symbol} {Side} on {Exchange}, ExecutionId: {ExecutionId}",
-                pos.Symbol, pos.Side, pos.Exchange, pos.ExecutionId);
+            var ageHours = (DateTime.UtcNow - pos.OpenedAt).TotalHours;
+            _logger.LogInformation("  - Position: {Symbol} {Side} on {Exchange}, ExecutionId: {ExecutionId}, Age: {Age:F2}h",
+                pos.Symbol, pos.Side, pos.Exchange, pos.ExecutionId, ageHours);
         }
+
+        _logger.LogInformation("========== AGENT SENDING TO ML API ==========");
         _logger.LogInformation("=============================================");
 
 
