@@ -355,6 +355,10 @@ builder.Services.AddScoped<IAgentConfigurationService, AgentConfigurationService
 // Agent Background Service - continuous autonomous trading
 builder.Services.AddHostedService<AgentBackgroundService>();
 
+// Production Data Collection - ML training data collection
+builder.Services.AddSingleton<ProductionDataPersister>();
+builder.Services.AddHostedService<ProductionDataCollectionService>();
+
 // ============================================================================
 
 // Add exchange connectors and services

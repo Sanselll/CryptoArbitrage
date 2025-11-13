@@ -82,7 +82,7 @@ class Position:
     peak_pnl_pct: float = 0.0  # Highest P&L % achieved
     peak_pnl_time: Optional[pd.Timestamp] = None  # When peak occurred
     pnl_history: List[float] = field(default_factory=list)  # Last 6 hours of P&L % for velocity
-    entry_apr: float = 0.0  # Annualized profit rate at entry (for comparison)
+    entry_apr: float = 0.0  # Annualized profit rate from opportunity (fund_apr)
 
     def to_trade_record(self) -> dict:
         """Convert position to trade record for CSV logging."""
@@ -160,14 +160,8 @@ class Position:
             self.last_short_funding_time = self.short_next_funding_time
             self.short_next_funding_time += timedelta(hours=self.short_funding_interval_hours)
 
-        # NEW: Calculate entry APR for comparison (Phase 1 - Observation Features)
-        # Annualize the net funding rate (long receives negative rate, short pays positive rate)
-        net_funding_rate_per_interval = self.short_funding_rate - self.long_funding_rate
-        # Average intervals to get hours per payment
-        avg_interval_hours = (self.long_funding_interval_hours + self.short_funding_interval_hours) / 2.0
-        # Convert to APR: (rate_per_interval * payments_per_year * 100)
-        payments_per_year = (365 * 24) / avg_interval_hours
-        self.entry_apr = net_funding_rate_per_interval * payments_per_year * 100
+        # NEW: entry_apr is now passed directly from opportunity (fund_apr field)
+        # No calculation needed - APR comes from opportunity detection
 
     def update_funding_rates(self, long_funding_rate: float, short_funding_rate: float):
         """
@@ -390,8 +384,11 @@ class Position:
         drawdown = (self.peak_pnl_pct - self.unrealized_pnl_pct) / self.peak_pnl_pct
         return max(0.0, drawdown)  # Clamp to 0 if above peak
 
-    def get_apr_ratio(self) -> float:
+    def get_apr_ratio(self, current_apr: float) -> float:
         """Calculate current APR / entry APR to detect funding rate deterioration.
+
+        Args:
+            current_apr: Current APR for this symbol (looked up from opportunities)
 
         Returns:
             Ratio (e.g., 0.5 means current APR is half of entry APR)
@@ -399,15 +396,7 @@ class Position:
         if self.entry_apr == 0:
             return 1.0  # Neutral if no entry APR
 
-        # Calculate current APR from current funding rates
-        net_funding_rate = self.short_funding_rate - self.long_funding_rate
-        avg_interval = (self.long_funding_interval_hours + self.short_funding_interval_hours) / 2.0
-        if avg_interval == 0:
-            return 1.0
-
-        payments_per_year = (365 * 24) / avg_interval
-        current_apr = net_funding_rate * payments_per_year * 100
-
+        # Use the looked-up current APR from opportunities
         return current_apr / self.entry_apr
 
     def get_return_efficiency(self) -> float:
@@ -487,37 +476,37 @@ class Position:
 
     def calculate_current_apr(self) -> float:
         """
-        Calculate current annualized percentage rate (APR) based on current funding rates.
+        Calculate current APR from the position's current funding rates.
+
+        Since funding rates are updated dynamically at each timestep, this returns
+        the APR the position is currently earning based on the latest market rates.
 
         Returns:
             float: Annualized APR in percentage (e.g., 15.5 for 15.5% APR)
         """
-        # Net funding rate per payment (short pays, long receives = positive carry)
-        net_funding_rate = self.short_funding_rate - self.long_funding_rate
+        # Calculate net funding rate (short pays, long receives, so net = short - long)
+        net_funding_rate_per_interval = self.short_funding_rate - self.long_funding_rate
 
-        # Use weighted average of funding intervals if different
-        # (most common case: both are 1h or 8h, so this is just the common interval)
+        # Calculate weighted average interval if different
         if self.long_funding_interval_hours == self.short_funding_interval_hours:
             avg_interval_hours = self.long_funding_interval_hours
         else:
-            # Weighted by rate contribution
+            # Weight by absolute funding rate magnitude
+            long_weight = abs(self.long_funding_rate)
+            short_weight = abs(self.short_funding_rate)
+            total_weight = long_weight + short_weight + 1e-9  # Avoid division by zero
+
             avg_interval_hours = (
-                (abs(self.long_funding_rate) * self.long_funding_interval_hours +
-                 abs(self.short_funding_rate) * self.short_funding_interval_hours) /
-                (abs(self.long_funding_rate) + abs(self.short_funding_rate) + 1e-9)
+                (long_weight * self.long_funding_interval_hours +
+                 short_weight * self.short_funding_interval_hours) /
+                total_weight
             )
 
-        # Convert to daily rate (24 hours)
-        payments_per_day = 24.0 / avg_interval_hours
-        daily_rate = net_funding_rate * payments_per_day
+        # Calculate annualized rate
+        payments_per_year = (365 * 24) / avg_interval_hours
+        annual_rate = net_funding_rate_per_interval * payments_per_year
 
-        # Annualize (365 days)
-        annual_rate = daily_rate * 365.0
-
-        # Convert to percentage
-        apr_pct = annual_rate * 100.0
-
-        return apr_pct
+        return annual_rate * 100  # Convert to percentage
 
 
 class Portfolio:
@@ -673,7 +662,8 @@ class Portfolio:
         )
 
     def get_execution_state(self, exec_idx: int, price_data: Dict[str, Dict[str, float]],
-                           best_available_apr: float = 0.0) -> np.ndarray:
+                           best_available_apr: float = 0.0,
+                           current_opportunities: Optional[List[Dict]] = None) -> np.ndarray:
         """
         Get state features for a single execution slot (20 dimensions - Phase 2: APR comparison features).
 
@@ -681,6 +671,7 @@ class Portfolio:
             exec_idx: Execution index (0-4)
             price_data: Current price data for all symbols
             best_available_apr: Maximum APR among current opportunities (for comparison)
+            current_opportunities: List of current market opportunities to look up APR by symbol
 
         Returns:
             20-dimensional array of execution features
@@ -744,6 +735,20 @@ class Portfolio:
         # 12. liquidation_distance_pct
         liquidation_distance_pct = pos.get_liquidation_distance(current_long_price, current_short_price)
 
+        # NEW: Phase 2 - APR Comparison Features (18-20)
+        # These help agent understand if better opportunities exist (fixes "hold forever" bias)
+        # CALCULATED FIRST because apr_ratio (feature #15) needs current_position_apr_value
+
+        # 18. current_position_apr (APR of this position from current market)
+        # Look up the current APR for this symbol from current opportunities
+        current_position_apr_value = 0.0
+        if current_opportunities:
+            for opp in current_opportunities:
+                if opp['symbol'] == pos.symbol:
+                    current_position_apr_value = opp.get('fund_apr', 0.0)
+                    break
+        current_position_apr = current_position_apr_value / 100.0  # Normalize to 0-1 range (50% APR → 0.5)
+
         # NEW: Phase 1 - Exit Timing Features (13-17)
         # 13. pnl_velocity (hourly P&L change rate)
         pnl_velocity = pos.get_pnl_velocity() / 100  # Normalize to same scale as net_pnl_pct
@@ -752,19 +757,13 @@ class Portfolio:
         peak_drawdown = pos.get_peak_drawdown()
 
         # 15. apr_ratio (current APR / entry APR)
-        apr_ratio = pos.get_apr_ratio()
+        apr_ratio = pos.get_apr_ratio(current_position_apr_value)
 
         # 16. return_efficiency (P&L per hour held)
         return_efficiency = pos.get_return_efficiency() / 100  # Normalize to same scale
 
         # 17. is_old_loser (binary: position is old AND losing)
         is_old_loser = 1.0 if pos.is_old_loser(age_threshold_hours=48.0) else 0.0
-
-        # NEW: Phase 2 - APR Comparison Features (18-20)
-        # These help agent understand if better opportunities exist (fixes "hold forever" bias)
-
-        # 18. current_position_apr (APR of this position)
-        current_position_apr = pos.calculate_current_apr() / 100.0  # Normalize to 0-1 range (50% APR → 0.5)
 
         # 19. best_available_apr (max APR among market opportunities)
         best_available_apr_norm = best_available_apr / 100.0  # Normalize to 0-1 range
@@ -798,7 +797,8 @@ class Portfolio:
 
     def get_all_execution_states(self, price_data: Dict[str, Dict[str, float]],
                                 max_positions: int = 5,
-                                best_available_apr: float = 0.0) -> np.ndarray:
+                                best_available_apr: float = 0.0,
+                                current_opportunities: Optional[List[Dict]] = None) -> np.ndarray:
         """
         Get execution state features for all 5 slots (100 dimensions total - Phase 2: APR comparison features).
 
@@ -806,13 +806,14 @@ class Portfolio:
             price_data: Current price data for all symbols
             max_positions: Maximum number of position slots (default 5)
             best_available_apr: Maximum APR among current opportunities (for comparison)
+            current_opportunities: List of current market opportunities to look up APR by symbol
 
         Returns:
             100-dimensional array (5 slots × 20 features)
         """
         all_features = []
         for i in range(max_positions):
-            exec_features = self.get_execution_state(i, price_data, best_available_apr)
+            exec_features = self.get_execution_state(i, price_data, best_available_apr, current_opportunities)
             all_features.extend(exec_features)
 
         return np.array(all_features, dtype=np.float32)

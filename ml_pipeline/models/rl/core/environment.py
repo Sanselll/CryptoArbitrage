@@ -516,7 +516,13 @@ class FundingArbitrageEnv(gym.Env):
             apr_threshold = 10.0  # Only penalize if APR gap > 10% (e.g., 25% vs 35%+)
 
             for pos in self.portfolio.positions:
-                current_pos_apr = pos.calculate_current_apr()
+                # Look up current APR for this symbol from opportunities
+                current_pos_apr = 0.0
+                for opp in self.current_opportunities:
+                    if opp['symbol'] == pos.symbol:
+                        current_pos_apr = opp.get('fund_apr', 0.0)
+                        break
+
                 apr_gap = best_available_apr - current_pos_apr
 
                 # Only apply penalty if gap exceeds threshold (significantly better opportunity exists)
@@ -747,6 +753,7 @@ class FundingArbitrageEnv(gym.Env):
             short_funding_interval_hours=opp['short_funding_interval_hours'],
             long_next_funding_time=pd.to_datetime(opp['long_next_funding_time']),
             short_next_funding_time=pd.to_datetime(opp['short_next_funding_time']),
+            entry_apr=opp.get('fund_apr', 0.0),  # Use APR directly from opportunity
         )
 
         # Try to open position
@@ -1040,7 +1047,8 @@ class FundingArbitrageEnv(gym.Env):
         exec_features = self.portfolio.get_all_execution_states(
             price_data,
             max_positions=5,
-            best_available_apr=best_available_apr
+            best_available_apr=best_available_apr,
+            current_opportunities=self.current_opportunities
         )
         all_features.extend(exec_features)
 

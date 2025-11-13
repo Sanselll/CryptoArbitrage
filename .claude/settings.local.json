@@ -271,7 +271,10 @@
       "Bash(then tail -100 /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/training.log)",
       "Bash(else echo \"No training.log found\")",
       "Bash(else)",
-      "Bash(if [ -f /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/production_features.log ])"
+      "Bash(if [ -f /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/production_features.log ])",
+      "Bash(if [ -f data/production/2025-11-13/11-10.json ])",
+      "Bash(then cat data/production/2025-11-13/11-10.json)",
+      "Bash(else echo \"No snapshot yet\")"
     ],
     "deny": [],
     "ask": []

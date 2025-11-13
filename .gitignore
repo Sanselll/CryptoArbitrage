@@ -55,5 +55,5 @@ logs/
 RefSource/
 src/CryptoArbitrage.HistoricalCollector/data/
 
-# Backend dumps (opportunity snapshots)
-src/CryptoArbitrage.API/Data/backend_dumps/
+# Backend data directory (opportunity snapshots, runtime data)
+src/CryptoArbitrage.API/Data/

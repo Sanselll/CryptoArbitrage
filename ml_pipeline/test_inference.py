@@ -249,10 +249,14 @@ def test_model_inference(args):
                     active_positions = [p for p in portfolio.positions if p.hours_held > 0]
 
                     if active_positions:
-                        # Find best available APR from opportunities
+                        # Find best available APR and current position APR from opportunities
                         best_available_apr = 0.0
+                        current_market_aprs = {}  # Map symbol -> current APR
                         if hasattr(env, 'current_opportunities') and env.current_opportunities:
                             best_available_apr = max(opp.get('fund_apr', 0.0) for opp in env.current_opportunities)
+                            # Build lookup map for current APR by symbol
+                            for opp in env.current_opportunities:
+                                current_market_aprs[opp['symbol']] = opp.get('fund_apr', 0.0)
 
                         # Feature names
                         feature_names = [
@@ -277,6 +281,53 @@ def test_model_inference(args):
                                 f.write(f"Hours Held: {raw_hours_held:.2f}h ({raw_hours_held*60:.0f} minutes)\n")
                                 f.write(f"Entry APR: {entry_apr:.0f}%\n\n")
 
+                                # Write raw position data
+                                f.write("=" * 60 + "\n")
+                                f.write("RAW POSITION DATA\n")
+                                f.write("=" * 60 + "\n\n")
+
+                                f.write("Position Sizing:\n")
+                                f.write(f"  position_size_usd         : ${pos.position_size_usd:,.2f}\n")
+                                f.write(f"  total_capital (2x)        : ${pos.position_size_usd * 2:,.2f}\n")
+                                f.write(f"  leverage                  : {pos.leverage}x\n")
+
+                                f.write(f"\nEntry Prices:\n")
+                                f.write(f"  long_entry_price          : ${pos.entry_long_price:.6f}\n")
+                                f.write(f"  short_entry_price         : ${pos.entry_short_price:.6f}\n")
+                                f.write(f"  entry_spread              : ${abs(pos.entry_long_price - pos.entry_short_price):.6f}\n")
+                                f.write(f"  entry_spread_pct          : {abs(pos.entry_long_price - pos.entry_short_price) / ((pos.entry_long_price + pos.entry_short_price) / 2) * 100:.4f}%\n")
+
+                                f.write(f"\nP&L:\n")
+                                f.write(f"  unrealized_pnl_usd        : ${pos.unrealized_pnl_usd:,.2f}\n")
+                                f.write(f"  unrealized_pnl_pct        : {pos.unrealized_pnl_pct:.4f}%\n")
+                                f.write(f"  long_pnl_pct              : {pos.long_pnl_pct:.4f}%\n")
+                                f.write(f"  short_pnl_pct             : {pos.short_pnl_pct:.4f}%\n")
+                                f.write(f"  peak_pnl_pct              : {pos.peak_pnl_pct:.4f}%\n")
+
+                                f.write(f"\nFunding & Fees:\n")
+                                f.write(f"  long_net_funding_usd      : ${pos.long_net_funding_usd:,.2f}\n")
+                                f.write(f"  short_net_funding_usd     : ${pos.short_net_funding_usd:,.2f}\n")
+                                f.write(f"  total_net_funding_usd     : ${pos.long_net_funding_usd + pos.short_net_funding_usd:,.2f}\n")
+                                f.write(f"  entry_fees_paid_usd       : ${pos.entry_fees_paid_usd:,.2f}\n")
+                                f.write(f"  estimated_exit_fees_usd   : ${pos.position_size_usd * 2 * pos.taker_fee:,.2f}\n")
+                                f.write(f"  maker_fee                 : {pos.maker_fee * 100:.4f}%\n")
+                                f.write(f"  taker_fee                 : {pos.taker_fee * 100:.4f}%\n")
+
+                                f.write(f"\nFunding Rates (Current):\n")
+                                f.write(f"  long_exchange             : {pos.long_exchange}\n")
+                                f.write(f"  long_funding_rate         : {pos.long_funding_rate:.6f}\n")
+                                f.write(f"  long_funding_interval     : {pos.long_funding_interval_hours:.1f}h\n")
+                                f.write(f"  short_exchange            : {pos.short_exchange}\n")
+                                f.write(f"  short_funding_rate        : {pos.short_funding_rate:.6f}\n")
+                                f.write(f"  short_funding_interval    : {pos.short_funding_interval_hours:.1f}h\n")
+                                f.write(f"  net_funding_rate          : {pos.short_funding_rate - pos.long_funding_rate:.6f}\n")
+
+                                f.write(f"\nTimestamps:\n")
+                                f.write(f"  entry_time                : {pos.entry_time}\n")
+                                f.write(f"  hours_held                : {pos.hours_held:.2f}h\n")
+
+                                f.write("\n" + "=" * 60 + "\n\n")
+
                                 # Extract normalized features from observation vector
                                 feat_start_idx = 11 + (slot_idx * 20)
                                 normalized_features = obs[feat_start_idx:feat_start_idx+20]
@@ -287,7 +338,10 @@ def test_model_inference(args):
                                 short_funding_rate = pos.short_funding_rate
                                 net_funding_rate = short_funding_rate - long_funding_rate
 
-                                # Calculate APR
+                                # Look up current APR for this symbol from opportunities
+                                current_position_apr = current_market_aprs.get(pos.symbol, 0.0)
+
+                                # For debug display, also calculate what it would be from current funding rates
                                 long_interval = pos.long_funding_interval_hours
                                 short_interval = pos.short_funding_interval_hours
                                 if long_interval == short_interval:
@@ -299,7 +353,7 @@ def test_model_inference(args):
                                     )
                                 payments_per_day = 24.0 / avg_interval_hours
                                 annual_rate = net_funding_rate * payments_per_day * 365.0
-                                current_position_apr = annual_rate * 100
+                                current_funding_apr = annual_rate * 100
 
                                 peak_pnl_pct_raw = pos.peak_pnl_pct * 100 if hasattr(pos, 'peak_pnl_pct') else 0.0
 
@@ -330,16 +384,19 @@ def test_model_inference(args):
                                 for i, (name, val) in enumerate(zip(feature_names, normalized_features)):
                                     f.write(f" {i+1:2d}. {name:30s}: {val:12.6f}\n")
 
-                                f.write(f"\nAPR Calculation Debug:\n")
-                                f.write(f"  long_funding_rate             : {long_funding_rate:.6f}\n")
-                                f.write(f"  short_funding_rate            : {short_funding_rate:.6f}\n")
-                                f.write(f"  net_funding_rate              : {net_funding_rate:.6f}\n")
-                                f.write(f"  long_funding_interval         : {long_interval:.1f}h\n")
-                                f.write(f"  short_funding_interval        : {short_interval:.1f}h\n")
-                                f.write(f"  avg_funding_interval          : {avg_interval_hours:.1f}h\n")
-                                f.write(f"  payments_per_day              : {payments_per_day:.2f}\n")
-                                f.write(f"  annual_rate                   : {annual_rate:.6f}\n")
-                                f.write(f"  current_position_apr          : {current_position_apr:.2f}%\n")
+                                f.write(f"\nAPR Debug (current_position_apr looked up from current opportunities):\n")
+                                f.write(f"  entry_apr (from opportunity)  : {entry_apr:.2f}%\n")
+                                f.write(f"  current_position_apr (lookup) : {current_position_apr:.2f}%\n")
+                                f.write(f"\n  Current funding rates (for reference only):\n")
+                                f.write(f"    long_funding_rate           : {long_funding_rate:.6f}\n")
+                                f.write(f"    short_funding_rate          : {short_funding_rate:.6f}\n")
+                                f.write(f"    net_funding_rate            : {net_funding_rate:.6f}\n")
+                                f.write(f"    long_funding_interval       : {long_interval:.1f}h\n")
+                                f.write(f"    short_funding_interval      : {short_interval:.1f}h\n")
+                                f.write(f"    avg_funding_interval        : {avg_interval_hours:.1f}h\n")
+                                f.write(f"    payments_per_day            : {payments_per_day:.2f}\n")
+                                f.write(f"    annual_rate                 : {annual_rate:.6f}\n")
+                                f.write(f"    current_funding_apr (if recalc): {current_funding_apr:.2f}%\n")
 
                                 f.write(f"\nPeak Drawdown Debug:\n")
                                 f.write(f"  peak_pnl_pct                  : {peak_pnl_pct_raw:.4f}%\n")
