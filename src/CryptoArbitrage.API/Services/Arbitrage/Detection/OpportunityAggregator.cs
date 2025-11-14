@@ -330,7 +330,8 @@ public class OpportunityAggregator : IHostedService
 
     /// <summary>
     /// Marks detected opportunities that have existing open positions
-    /// Sets IsExistingPosition = true for matching opportunities
+    /// Sets IsExistingPosition = true for ALL opportunities matching symbols we have positions in
+    /// This prevents opening multiple positions for the same symbol with different exchange combinations
     /// </summary>
     private void MarkExistingPositions(
         List<ArbitrageOpportunityDto> opportunities,
@@ -338,10 +339,15 @@ public class OpportunityAggregator : IHostedService
     {
         int markedCount = 0;
 
+        // Extract just symbols from position keys (format: "SYMBOL|LongExchange|ShortExchange")
+        var positionSymbols = positionKeys
+            .Select(k => k.Split('|')[0])
+            .ToHashSet();
+
+        // Mark ALL opportunities for symbols we have positions in (any exchange combination)
         foreach (var opp in opportunities)
         {
-            var key = $"{opp.Symbol}|{opp.LongExchange}|{opp.ShortExchange}";
-            if (positionKeys.Contains(key))
+            if (positionSymbols.Contains(opp.Symbol))
             {
                 opp.IsExistingPosition = true;
                 markedCount++;
@@ -349,8 +355,9 @@ public class OpportunityAggregator : IHostedService
         }
 
         _logger.LogDebug(
-            "Marked {Marked} out of {Total} opportunities as existing positions",
+            "Marked {Marked} out of {Total} opportunities as existing positions (symbols: {Symbols})",
             markedCount,
-            opportunities.Count);
+            opportunities.Count,
+            string.Join(", ", positionSymbols));
     }
 }
