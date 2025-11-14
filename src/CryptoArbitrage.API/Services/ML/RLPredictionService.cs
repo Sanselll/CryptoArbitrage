@@ -13,8 +13,9 @@ using Microsoft.EntityFrameworkCore;
 namespace CryptoArbitrage.API.Services.ML;
 
 /// <summary>
-/// Service for getting RL (Reinforcement Learning) predictions from the Python ML API
-/// Centralizes ALL feature preparation (275 features total) matching the training environment
+/// Service for getting RL (Reinforcement Learning) predictions from the Python ML API (V3)
+/// Centralizes ALL feature preparation (203 features total - V3 refactoring) matching the training environment
+/// V3 Changes: 301→203 dims (Portfolio 10→3, Execution 100→85, Opportunity 190→110)
 /// Evaluates ENTER probabilities for opportunities and EXIT probabilities for positions
 /// </summary>
 public class RLPredictionService : IDisposable
@@ -152,13 +153,13 @@ public class RLPredictionService : IDisposable
     }
 
     /// <summary>
-    /// Evaluate opportunities with COMPLETE feature preparation (275 features total)
+    /// Evaluate opportunities with COMPLETE feature preparation (203 features total - V3 refactoring)
     /// This is the NEW centralized method that prepares ALL features internally
-    /// Features breakdown:
+    /// Features breakdown (V3):
     /// - Config: 5 features (from AgentConfiguration)
-    /// - Portfolio: 10 features (calculated from DB + repositories)
-    /// - Positions: 60 features (5 slots × 12 features, from Position entities)
-    /// - Opportunities: 200 features (10 slots × 20 features, from input)
+    /// - Portfolio: 3 features (V3: was 10, removed historical metrics)
+    /// - Execution: 85 features (5 slots × 17 features - V3: was 100, added velocities)
+    /// - Opportunities: 110 features (10 slots × 11 features - V3: was 190, removed market quality)
     /// </summary>
     /// <param name="userId">User ID to prepare context for</param>
     /// <param name="opportunities">List of opportunities to evaluate</param>
@@ -177,7 +178,7 @@ public class RLPredictionService : IDisposable
 
         try
         {
-            _logger.LogInformation("=== RLPredictionService: Preparing COMPLETE 275-feature payload ===");
+            _logger.LogInformation("=== RLPredictionService: Preparing COMPLETE 203-feature payload (V3) ===");
 
             // 1. Get or create AgentConfiguration (5 config features)
             var agentConfig = await _agentConfigService.GetOrCreateConfigurationAsync(userId);
@@ -201,7 +202,7 @@ public class RLPredictionService : IDisposable
             _logger.LogDebug("Best available APR: {BestApr:F2}% (from ALL {Count} opportunities)",
                 bestAvailableApr, oppList.Count);
 
-            // 4. Build complete portfolio state (10 portfolio features + 100 position features) - Phase 2
+            // 4. Build complete portfolio state (3 portfolio features + 85 execution features) - V3 refactoring
             var portfolio = await BuildCompletePortfolioStateAsync(userId, positions, agentConfig, bestAvailableApr, oppList, cancellationToken);
             _logger.LogInformation("Portfolio features: Capital=${Capital:F2}, Util={Util:F2}%, NumPos={NumPos}, AvgPnl={AvgPnl:F2}%",
                 portfolio.Capital, portfolio.MarginUtilization, portfolio.NumPositions, portfolio.AvgPositionPnlPct);
@@ -261,7 +262,7 @@ public class RLPredictionService : IDisposable
                 }
             }
 
-            _logger.LogInformation("✅ Complete 275-feature predictions received for {Count} opportunities", result.Count);
+            _logger.LogInformation("✅ Complete 203-feature predictions received for {Count} opportunities (V3)", result.Count);
             return result;
         }
         catch (Exception ex)
@@ -272,8 +273,8 @@ public class RLPredictionService : IDisposable
     }
 
     /// <summary>
-    /// Get modular action decision with COMPLETE feature preparation (for AgentBackgroundService)
-    /// Returns a SINGLE action decision (ENTER/EXIT/HOLD) based on all 275 features
+    /// Get modular action decision with COMPLETE feature preparation (for AgentBackgroundService) - V3
+    /// Returns a SINGLE action decision (ENTER/EXIT/HOLD) based on all 203 features (V3 refactoring)
     /// This is the method AgentBackgroundService should use
     /// </summary>
     public async Task<AgentPrediction?> GetModularActionAsync(
@@ -289,7 +290,7 @@ public class RLPredictionService : IDisposable
 
         try
         {
-            _logger.LogInformation("=== RLPredictionService: Preparing modular action with COMPLETE 275-feature payload ===");
+            _logger.LogInformation("=== RLPredictionService: Preparing modular action with COMPLETE 203-feature payload (V3) ===");
 
             // 1. Get or create AgentConfiguration (5 config features)
             var agentConfig = await _agentConfigService.GetOrCreateConfigurationAsync(userId);
@@ -316,7 +317,7 @@ public class RLPredictionService : IDisposable
             _logger.LogDebug("Best available APR: {BestApr:F2}% (from ALL {Count} opportunities)",
                 bestAvailableApr, oppList.Count);
 
-            // 4. Build complete portfolio state (10 portfolio features + 100 position features) - Phase 2
+            // 4. Build complete portfolio state (3 portfolio features + 85 execution features) - V3 refactoring
             var portfolio = await BuildCompletePortfolioStateAsync(userId, positions, agentConfig, bestAvailableApr, oppList, cancellationToken);
 
             // 5. Build request payload for modular mode
@@ -528,8 +529,9 @@ public class RLPredictionService : IDisposable
     }
 
     /// <summary>
-    /// Convert opportunity DTO to feature dictionary for Python API
-    /// Matches the 22 features expected by the RL model
+    /// Convert opportunity DTO to feature dictionary for Python API (V3)
+    /// Provides raw opportunity data - Python ML API extracts 11 features (V3: was 19)
+    /// V3 removed: market quality features (volume, spread, depth, cost)
     /// </summary>
     private object ConvertOpportunityToFeatures(ArbitrageOpportunityDto opp)
     {
@@ -560,8 +562,9 @@ public class RLPredictionService : IDisposable
     }
 
     /// <summary>
-    /// Convert execution (2 positions: long + short) to feature dictionary for Python API
-    /// Matches the 10 execution-level features expected by the RL model
+    /// Convert execution (2 positions: long + short) to feature dictionary for Python API (V3)
+    /// Provides raw position data - Python ML API extracts 17 features per slot (V3: was 20)
+    /// V3 added: velocity tracking (pnl, funding, spread)
     /// </summary>
     /// <param name="executionPositions">List of positions in this execution (should be 2: long + short)</param>
     /// <param name="opportunity">Optional current opportunity for blending estimated funding</param>
@@ -769,7 +772,8 @@ public class RLPredictionService : IDisposable
     // instead of querying the database directly
 
     /// <summary>
-    /// Build complete portfolio state (10 portfolio features + 60 position features = 5 slots × 12 features)
+    /// Build complete portfolio state (V3: 3 portfolio features + 85 execution features = 5 slots × 17 features)
+    /// V3 Changes: Portfolio 10→3 (removed historical), Execution 100→85 (added velocities)
     /// Matches environment.py:_get_observation() portfolio section
     /// </summary>
     private async Task<RLPortfolioState> BuildCompletePortfolioStateAsync(
@@ -818,7 +822,7 @@ public class RLPredictionService : IDisposable
         // 9. Calculate capital utilization (total value of positions / capital)
         var capitalUtil = CalculateCapitalUtilization(positions, totalCapital);
 
-        // 10. Build position features (5 slots × 20 features each) - Phase 2: +3 APR comparison features
+        // 10. Build position features (5 slots × 17 features each) - V3: Added velocities, removed historical
         var positionStates = await BuildPositionStatesAsync(positions, totalCapital, marketSnapshot, bestAvailableApr, opportunities, cancellationToken);
 
         // Enhanced logging for P&L verification
@@ -857,7 +861,8 @@ public class RLPredictionService : IDisposable
     }
 
     /// <summary>
-    /// Build position states (12 features per execution, up to 5 slots)
+    /// Build position states (V3: 17 features per execution, up to 5 slots - was 20)
+    /// V3: Added velocities (pnl, funding, spread), removed net funding metrics
     /// Matches portfolio.py:get_execution_state()
     /// </summary>
     private async Task<List<RLPositionState>> BuildPositionStatesAsync(

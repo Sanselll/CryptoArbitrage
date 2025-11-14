@@ -1,5 +1,32 @@
 """
 Test model inference - verify trained model can be loaded and used
+
+V3 Feature Architecture (203 dimensions total):
+  - Config: 5 features (max_leverage, target_utilization, max_positions, stop_loss, liq_buffer)
+  - Portfolio: 3 features (num_positions_ratio, liq_distance, utilization)
+  - Executions: 85 features (5 positions × 17 features each)
+  - Opportunities: 110 features (10 opportunities × 11 features each)
+
+V3 Position Features (17 per position):
+  1. is_active - Position active flag
+  2. net_pnl_pct - Net P&L percentage
+  3. hours_held_norm - Log-normalized hold time: log(hours+1)/log(73)
+  4. estimated_pnl_pct - Price P&L only (isolates price risk)
+  5. estimated_pnl_velocity - Trend signal for price movement
+  6. estimated_funding_8h_pct - Expected funding profit in next 8h
+  7. funding_velocity - Detects funding rate trends
+  8. spread_pct - Current price spread percentage
+  9. spread_velocity - Detects converging/diverging spreads
+  10. liquidation_distance_pct - Distance to liquidation
+  11. apr_ratio - Current APR / Entry APR
+  12. current_position_apr - Current market APR for this symbol
+  13. best_available_apr_norm - Best APR available (±5000% range)
+  14. apr_advantage - Current APR - Best Available APR
+  15. return_efficiency - Net P&L / (hours * entry APR/8760)
+  16. value_to_capital_ratio - Position value / total capital
+  17. pnl_imbalance - (long_pnl - short_pnl) / 2 (asymmetry indicator)
+
+Logs detailed feature breakdown to: test_features.log
 """
 
 import argparse
@@ -47,8 +74,8 @@ def parse_args():
                         help='Output CSV file for trade records (default: trades_inference.csv)')
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
-    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler.pkl',
-                        help='Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler.pkl)')
+    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler_v2.pkl',
+                        help='Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler_v2.pkl)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducible results (default: 42)')
     parser.add_argument('--force-zero-pnl', action='store_true',
@@ -258,13 +285,13 @@ def test_model_inference(args):
                             for opp in env.current_opportunities:
                                 current_market_aprs[opp['symbol']] = opp.get('fund_apr', 0.0)
 
-                        # Feature names
+                        # V3 Feature names (17 features per position)
                         feature_names = [
-                            "position_is_active", "net_pnl_pct", "hours_held", "net_funding_ratio",
-                            "net_funding_rate", "current_spread_pct", "entry_spread_pct", "value_ratio",
-                            "funding_efficiency", "long_pnl_pct", "short_pnl_pct", "liquidation_distance",
-                            "pnl_velocity", "peak_drawdown", "apr_ratio", "return_efficiency",
-                            "is_old_loser", "current_position_apr", "best_available_apr", "apr_advantage"
+                            "is_active", "net_pnl_pct", "hours_held_norm", "estimated_pnl_pct",
+                            "estimated_pnl_velocity", "estimated_funding_8h_pct", "funding_velocity",
+                            "spread_pct", "spread_velocity", "liquidation_distance_pct", "apr_ratio",
+                            "current_position_apr", "best_available_apr_norm", "apr_advantage",
+                            "return_efficiency", "value_to_capital_ratio", "pnl_imbalance"
                         ]
 
                         with open(log_path, 'a') as f:
@@ -328,9 +355,9 @@ def test_model_inference(args):
 
                                 f.write("\n" + "=" * 60 + "\n\n")
 
-                                # Extract normalized features from observation vector
-                                feat_start_idx = 11 + (slot_idx * 20)
-                                normalized_features = obs[feat_start_idx:feat_start_idx+20]
+                                # Extract normalized features from observation vector (V3: 5 config + 3 portfolio = 8 prefix)
+                                feat_start_idx = 8 + (slot_idx * 17)
+                                normalized_features = obs[feat_start_idx:feat_start_idx+17]
 
                                 # Get raw values
                                 net_pnl_pct_raw = pos.unrealized_pnl_pct * 100
@@ -355,53 +382,57 @@ def test_model_inference(args):
                                 annual_rate = net_funding_rate * payments_per_day * 365.0
                                 current_funding_apr = annual_rate * 100
 
-                                peak_pnl_pct_raw = pos.peak_pnl_pct * 100 if hasattr(pos, 'peak_pnl_pct') else 0.0
+                                # Calculate log-normalized hours for display
+                                import math
+                                hours_held_log_norm = math.log(raw_hours_held + 1) / math.log(73) if raw_hours_held >= 0 else 0.0
 
-                                # Write raw features
-                                f.write("Raw Features (before normalization):\n")
-                                f.write(f"  1. position_is_active         : {normalized_features[0]:.4f}\n")
+                                # Calculate pnl_imbalance
+                                pnl_imbalance = (pos.long_pnl_pct - pos.short_pnl_pct) / 2.0
+
+                                # Write V3 raw features
+                                f.write("Raw Features (before normalization) - V3:\n")
+                                f.write(f"  1. is_active                  : {normalized_features[0]:.4f}\n")
                                 f.write(f"  2. net_pnl_pct                : {net_pnl_pct_raw:.4f}%\n")
-                                f.write(f"  3. hours_held                 : {raw_hours_held:.4f}h\n")
-                                f.write(f"  4. net_funding_ratio          : {normalized_features[3]:.4f}\n")
-                                f.write(f"  5. net_funding_rate           : {net_funding_rate:.6f}\n")
-                                f.write(f"  6. current_spread_pct         : {normalized_features[5]:.6f}\n")
-                                f.write(f"  7. entry_spread_pct           : {normalized_features[6]:.6f}\n")
-                                f.write(f"  8. value_ratio                : {normalized_features[7]:.4f}\n")
-                                f.write(f"  9. funding_efficiency         : {normalized_features[8]:.4f}\n")
-                                f.write(f" 10. long_pnl_pct               : {pos.long_pnl_pct*100:.4f}%\n")
-                                f.write(f" 11. short_pnl_pct              : {pos.short_pnl_pct*100:.4f}%\n")
-                                f.write(f" 12. liquidation_distance       : {normalized_features[11]:.4f}\n")
-                                f.write(f" 13. pnl_velocity               : {normalized_features[12]:.6f}\n")
-                                f.write(f" 14. peak_drawdown              : {normalized_features[13]:.4f}\n")
-                                f.write(f" 15. apr_ratio                  : {normalized_features[14]:.4f}\n")
-                                f.write(f" 16. return_efficiency          : {normalized_features[15]:.6f}\n")
-                                f.write(f" 17. is_old_loser               : {normalized_features[16]:.0f}\n")
-                                f.write(f" 18. current_position_apr       : {current_position_apr:.2f}%\n")
-                                f.write(f" 19. best_available_apr         : {best_available_apr:.2f}%\n")
-                                f.write(f" 20. apr_advantage              : {current_position_apr - best_available_apr:.2f}%\n")
+                                f.write(f"  3. hours_held                 : {raw_hours_held:.4f}h (log-normalized)\n")
+                                f.write(f"  4. estimated_pnl_pct          : {normalized_features[3]:.4f}% (price P&L only)\n")
+                                f.write(f"  5. estimated_pnl_velocity     : {normalized_features[4]:.6f} (trend signal)\n")
+                                f.write(f"  6. estimated_funding_8h_pct   : {normalized_features[5]:.4f}% (expected funding)\n")
+                                f.write(f"  7. funding_velocity           : {normalized_features[6]:.6f} (funding trend)\n")
+                                f.write(f"  8. spread_pct                 : {normalized_features[7]:.6f}%\n")
+                                f.write(f"  9. spread_velocity            : {normalized_features[8]:.6f} (converging/diverging)\n")
+                                f.write(f" 10. liquidation_distance_pct  : {normalized_features[9]:.4f}%\n")
+                                f.write(f" 11. apr_ratio                  : {normalized_features[10]:.4f}\n")
+                                f.write(f" 12. current_position_apr       : {current_position_apr:.2f}%\n")
+                                f.write(f" 13. best_available_apr_norm    : {best_available_apr:.2f}% (±5000% range)\n")
+                                f.write(f" 14. apr_advantage              : {current_position_apr - best_available_apr:.2f}%\n")
+                                f.write(f" 15. return_efficiency          : {normalized_features[14]:.6f}\n")
+                                f.write(f" 16. value_to_capital_ratio     : {normalized_features[15]:.4f}\n")
+                                f.write(f" 17. pnl_imbalance              : {pnl_imbalance:.4f} (long-short asymmetry)\n")
 
-                                f.write(f"\nNormalized Features (sent to model):\n")
+                                f.write(f"\nNormalized Features (sent to model) - V3:\n")
                                 for i, (name, val) in enumerate(zip(feature_names, normalized_features)):
                                     f.write(f" {i+1:2d}. {name:30s}: {val:12.6f}\n")
 
-                                f.write(f"\nAPR Debug (current_position_apr looked up from current opportunities):\n")
+                                f.write(f"\nV3 Feature Details:\n")
+                                f.write(f"  hours_held_log_norm           : {hours_held_log_norm:.6f} (log({raw_hours_held:.2f}+1)/log(73))\n")
+                                f.write(f"  long_pnl_pct                  : {pos.long_pnl_pct*100:.4f}%\n")
+                                f.write(f"  short_pnl_pct                 : {pos.short_pnl_pct*100:.4f}%\n")
+                                f.write(f"  pnl_imbalance                 : {pnl_imbalance:.4f} ((long-short)/2)\n")
+
+                                f.write(f"\nAPR Context:\n")
                                 f.write(f"  entry_apr (from opportunity)  : {entry_apr:.2f}%\n")
                                 f.write(f"  current_position_apr (lookup) : {current_position_apr:.2f}%\n")
-                                f.write(f"\n  Current funding rates (for reference only):\n")
-                                f.write(f"    long_funding_rate           : {long_funding_rate:.6f}\n")
-                                f.write(f"    short_funding_rate          : {short_funding_rate:.6f}\n")
-                                f.write(f"    net_funding_rate            : {net_funding_rate:.6f}\n")
-                                f.write(f"    long_funding_interval       : {long_interval:.1f}h\n")
-                                f.write(f"    short_funding_interval      : {short_interval:.1f}h\n")
-                                f.write(f"    avg_funding_interval        : {avg_interval_hours:.1f}h\n")
-                                f.write(f"    payments_per_day            : {payments_per_day:.2f}\n")
-                                f.write(f"    annual_rate                 : {annual_rate:.6f}\n")
-                                f.write(f"    current_funding_apr (if recalc): {current_funding_apr:.2f}%\n")
+                                f.write(f"  best_available_apr            : {best_available_apr:.2f}%\n")
+                                f.write(f"  apr_advantage                 : {current_position_apr - best_available_apr:.2f}%\n")
 
-                                f.write(f"\nPeak Drawdown Debug:\n")
-                                f.write(f"  peak_pnl_pct                  : {peak_pnl_pct_raw:.4f}%\n")
-                                f.write(f"  net_pnl_pct                   : {net_pnl_pct_raw:.4f}%\n")
-                                f.write(f"  peak_drawdown (normalized)    : {normalized_features[13]:.4f}\n")
+                                f.write(f"\nFunding Rates (reference):\n")
+                                f.write(f"  long_funding_rate             : {long_funding_rate:.6f}\n")
+                                f.write(f"  short_funding_rate            : {short_funding_rate:.6f}\n")
+                                f.write(f"  net_funding_rate              : {net_funding_rate:.6f}\n")
+                                f.write(f"  long_funding_interval         : {long_interval:.1f}h\n")
+                                f.write(f"  short_funding_interval        : {short_interval:.1f}h\n")
+                                f.write(f"  avg_funding_interval          : {avg_interval_hours:.1f}h\n")
+                                f.write(f"  current_funding_apr (calc)    : {current_funding_apr:.2f}%\n")
                                 f.write("\n")
 
                             f.write("\n\n")

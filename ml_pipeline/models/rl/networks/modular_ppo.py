@@ -1,11 +1,11 @@
 """
-Modular PPO Network Architecture for Multi-Opportunity, Multi-Position Trading
+Modular PPO Network Architecture for Multi-Opportunity, Multi-Position Trading (V3)
 
-Implements Option B: Modular Encoders with Cross-Attention Fusion
-- ConfigEncoder: 5 → 16
-- PortfolioEncoder: 10 → 32
-- ExecutionEncoder: 5×12 → 64 (with self-attention)
-- OpportunityEncoder: 10×20 → 128 (with self-attention)
+V3 Refactoring (301→203 dimensions):
+- ConfigEncoder: 5 → 16 (unchanged)
+- PortfolioEncoder: 3 → 32 (was 6, removed historical metrics)
+- ExecutionEncoder: 5×17 → 64 (was 5×20, removed 8 features, added 6)
+- OpportunityEncoder: 10×11 → 128 (was 10×20, removed 9 market quality, added 1)
 - FusionLayer: Cross-attention → 256
 - Actor/Critic heads with action masking support
 """
@@ -48,13 +48,14 @@ class ConfigEncoder(nn.Module):
 
 class PortfolioEncoder(nn.Module):
     """
-    Encodes portfolio state into a dense representation.
+    Encodes portfolio state into a dense representation (V3: 3 features).
 
-    Input: 10 features (capital_ratio, available_ratio, margin_util, etc.)
+    V3: 10→3 features (removed avg_position_pnl_pct, total_pnl_pct, max_drawdown_pct)
+    Input: 3 features (num_positions_ratio, min_liquidation_distance, capital_utilization)
     Output: 32-dimensional embedding
     """
 
-    def __init__(self, input_dim: int = 10, hidden_dim: int = 32, output_dim: int = 32):
+    def __init__(self, input_dim: int = 3, hidden_dim: int = 32, output_dim: int = 32):
         super().__init__()
 
         self.net = nn.Sequential(
@@ -68,7 +69,7 @@ class PortfolioEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: (batch_size, 10) portfolio features
+            x: (batch_size, 3) portfolio features (V3: was 10)
         Returns:
             (batch_size, 32) portfolio embedding
         """
@@ -77,15 +78,16 @@ class PortfolioEncoder(nn.Module):
 
 class ExecutionEncoder(nn.Module):
     """
-    Encodes execution states with self-attention over position slots.
+    Encodes execution states with self-attention over position slots (V3: 17 features per slot).
 
-    Input: 60 features (5 positions × 12 features each)
+    V3: 5×12→5×17 (removed 8 features, added 6)
+    Input: 85 features (5 positions × 17 features each)
     Output: 64-dimensional embedding
     """
 
     def __init__(self,
                  num_slots: int = 5,
-                 features_per_slot: int = 12,
+                 features_per_slot: int = 17,  # V3: was 12, then 20, now 17
                  embedding_dim: int = 32,
                  num_heads: int = 2,
                  output_dim: int = 64):
@@ -120,7 +122,7 @@ class ExecutionEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: (batch_size, 60) execution features (5 slots × 12 features)
+            x: (batch_size, 85) execution features (5 slots × 17 features, V3: was 5×20)
         Returns:
             (batch_size, 64) execution embedding
         """
@@ -147,15 +149,16 @@ class ExecutionEncoder(nn.Module):
 
 class OpportunityEncoder(nn.Module):
     """
-    Encodes opportunity states with self-attention over opportunity slots.
+    Encodes opportunity states with self-attention over opportunity slots (V3: 11 features per slot).
 
-    Input: 200 features (10 opportunities × 20 features each)
+    V3: 10×20→10×11 (removed 9 market quality features, added 1 velocity)
+    Input: 110 features (10 opportunities × 11 features each)
     Output: 128-dimensional embedding
     """
 
     def __init__(self,
                  num_slots: int = 10,
-                 features_per_slot: int = 20,
+                 features_per_slot: int = 11,  # V3: was 20, now 11
                  embedding_dim: int = 64,
                  num_heads: int = 4,
                  output_dim: int = 128):
@@ -190,7 +193,7 @@ class OpportunityEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: (batch_size, 200) opportunity features (10 slots × 20 features)
+            x: (batch_size, 110) opportunity features (10 slots × 11 features, V3: was 10×20)
         Returns:
             (batch_size, 128) opportunity embedding
         """
@@ -368,13 +371,13 @@ class CriticHead(nn.Module):
 
 class ModularPPONetwork(nn.Module):
     """
-    Complete modular PPO network combining all components.
+    Complete modular PPO network combining all components (V3 Refactoring).
 
-    Processes 301-dim observation (Phase 2: Added APR comparison features):
-    - Config (5) → ConfigEncoder → 16
-    - Portfolio (6) → PortfolioEncoder → 32
-    - Executions (100) → ExecutionEncoder → 64  # Phase 2: +3 APR comparison features per position
-    - Opportunities (190) → OpportunityEncoder → 128
+    Processes 203-dim observation (V3: 301→203 dimensions):
+    - Config (5) → ConfigEncoder → 16  # unchanged
+    - Portfolio (3) → PortfolioEncoder → 32  # V3: was 6
+    - Executions (85) → ExecutionEncoder → 64  # V3: 5×17 (was 5×20)
+    - Opportunities (110) → OpportunityEncoder → 128  # V3: 10×11 (was 10×20)
     - Fusion → 256
     - Actor → 36 action logits
     - Critic → 1 value
@@ -383,19 +386,19 @@ class ModularPPONetwork(nn.Module):
     def __init__(self):
         super().__init__()
 
-        # Encoders
+        # Encoders (V3: Updated dimensions)
         self.config_encoder = ConfigEncoder(input_dim=5, output_dim=16)
-        self.portfolio_encoder = PortfolioEncoder(input_dim=6, output_dim=32)
+        self.portfolio_encoder = PortfolioEncoder(input_dim=3, output_dim=32)  # V3: was 6
         self.execution_encoder = ExecutionEncoder(
             num_slots=5,
-            features_per_slot=20,  # Phase 2: +3 APR comparison features (was 17)
+            features_per_slot=17,  # V3: was 20
             embedding_dim=32,
             num_heads=2,
             output_dim=64
         )
         self.opportunity_encoder = OpportunityEncoder(
             num_slots=10,
-            features_per_slot=19,
+            features_per_slot=11,  # V3: was 19
             embedding_dim=64,
             num_heads=4,
             output_dim=128
@@ -418,21 +421,21 @@ class ModularPPONetwork(nn.Module):
                 obs: torch.Tensor,
                 action_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass through entire network.
+        Forward pass through entire network (V3 Refactoring).
 
         Args:
-            obs: (batch_size, 301) observation (Phase 2: APR comparison features)
+            obs: (batch_size, 203) observation (V3: was 301)
             action_mask: (batch_size, 36) boolean mask (optional)
 
         Returns:
             action_logits: (batch_size, 36) masked action logits
             value: (batch_size, 1) state value estimate
         """
-        # Split observation into components
-        config = obs[:, 0:5]            # (batch, 5)
-        portfolio = obs[:, 5:11]        # (batch, 6)
-        executions = obs[:, 11:111]     # (batch, 100) - Phase 2: +15 dims
-        opportunities = obs[:, 111:301] # (batch, 190)
+        # Split observation into components (V3: 203 dims total)
+        config = obs[:, 0:5]            # (batch, 5) - unchanged
+        portfolio = obs[:, 5:8]         # (batch, 3) - V3: was 5:11
+        executions = obs[:, 8:93]       # (batch, 85) - V3: was 11:111
+        opportunities = obs[:, 93:203]  # (batch, 110) - V3: was 111:301
 
         # Encode each component
         config_emb = self.config_encoder(config)
@@ -456,7 +459,7 @@ class ModularPPONetwork(nn.Module):
         Get action distribution for sampling.
 
         Args:
-            obs: (batch_size, 301) observation (Phase 2: APR comparison)
+            obs: (batch_size, 203) observation (V3: was 301)
             action_mask: (batch_size, 36) boolean mask (optional)
 
         Returns:
@@ -473,7 +476,7 @@ class ModularPPONetwork(nn.Module):
         Evaluate actions for PPO training.
 
         Args:
-            obs: (batch_size, 301) observations (Phase 2: APR comparison)
+            obs: (batch_size, 203) observations (V3: was 301)
             actions: (batch_size,) actions taken
             action_mask: (batch_size, 36) boolean mask (optional)
 

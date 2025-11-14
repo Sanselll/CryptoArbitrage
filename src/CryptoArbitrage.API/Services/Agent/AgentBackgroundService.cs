@@ -25,6 +25,7 @@ public class AgentBackgroundService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AgentBackgroundService> _logger;
     private readonly RLPredictionService _rlPredictionService;
+    private readonly AgentDecisionRepository _decisionRepository;
     private readonly HttpClient _httpClient;
     private readonly string _mlApiBaseUrl;
     private readonly JsonSerializerOptions _jsonOptions;
@@ -41,11 +42,13 @@ public class AgentBackgroundService : BackgroundService
         IServiceProvider serviceProvider,
         ILogger<AgentBackgroundService> logger,
         RLPredictionService rlPredictionService,
+        AgentDecisionRepository decisionRepository,
         IConfiguration configuration)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
         _rlPredictionService = rlPredictionService;
+        _decisionRepository = decisionRepository;
 
         // Configure ML API client
         var host = configuration["MLApi:Host"] ?? "localhost";
@@ -327,7 +330,7 @@ public class AgentBackgroundService : BackgroundService
 
         // 7. Update stats and broadcast decision
         await UpdateAgentStatsAsync(userId, prediction.Action, context);
-        await BroadcastAgentDecisionAsync(userId, prediction, userOpportunities, positions, executionResult, signalR);
+        await BroadcastAgentDecisionAsync(userId, prediction, userOpportunities, positions, executionResult, signalR, context);
 
         // 8. Broadcast update via SignalR
         await BroadcastAgentUpdateAsync(userId, signalR, context);
@@ -579,14 +582,31 @@ public class AgentBackgroundService : BackgroundService
 
                     if (response.Success)
                     {
-                        // Calculate profit from position
-                        result.ProfitUsd = positionToExit.UnrealizedPnL;
-                        var entryValue = positionToExit.Quantity * positionToExit.EntryPrice;
-                        result.ProfitPct = entryValue > 0 ? (positionToExit.UnrealizedPnL / entryValue) * 100 : 0;
+                        // Calculate profit from ALL positions in this execution (both long and short)
+                        // Use fresh database data, not stale UserDataSnapshot
+                        var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
+                        var execPositions = await dbContext.Positions
+                            .Where(p => p.ExecutionId == executionId)
+                            .ToListAsync();
 
-                        _logger.LogInformation(
-                            "Agent successfully executed EXIT for Execution {ExecutionId}: {Message}",
-                            executionId, response.Message);
+                        if (execPositions.Any())
+                        {
+                            // Calculate total P&L from both long and short positions
+                            var totalPnl = execPositions.Sum(p => p.UnrealizedPnL);
+                            var totalInitialMargin = execPositions.Sum(p => p.InitialMargin);
+
+                            result.ProfitUsd = totalPnl;
+                            // Use InitialMargin (capital at risk) as denominator, not entryValue
+                            result.ProfitPct = totalInitialMargin > 0 ? (totalPnl / totalInitialMargin) * 100 : 0;
+
+                            _logger.LogInformation(
+                                "Agent successfully executed EXIT for Execution {ExecutionId}: P&L=${ProfitUsd:F2} ({ProfitPct:F2}%) from {Count} positions, {Message}",
+                                executionId, totalPnl, result.ProfitPct, execPositions.Count, response.Message);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No positions found for execution {ExecutionId} when calculating profit", executionId);
+                        }
                     }
                     else
                     {
@@ -710,7 +730,7 @@ public class AgentBackgroundService : BackgroundService
     }
 
     /// <summary>
-    /// Broadcast agent decision via SignalR
+    /// Broadcast agent decision via SignalR and store in repository
     /// </summary>
     private async Task BroadcastAgentDecisionAsync(
         string userId,
@@ -718,7 +738,8 @@ public class AgentBackgroundService : BackgroundService
         List<ArbitrageOpportunityDto> opportunities,
         List<PositionDto> positions,
         AgentExecutionResult executionResult,
-        ISignalRStreamingService signalR)
+        ISignalRStreamingService signalR,
+        ArbitrageDbContext context)
     {
         try
         {
@@ -729,11 +750,33 @@ public class AgentBackgroundService : BackgroundService
                 return;
             }
 
+            // Get active session ID
+            var session = await context.AgentSessions
+                .Where(s => s.UserId == userId && s.Status == AgentStatus.Running)
+                .OrderByDescending(s => s.StartedAt)
+                .FirstOrDefaultAsync();
+
+            if (session == null)
+            {
+                _logger.LogWarning("No active session found for user {UserId}, cannot store decision", userId);
+                return;
+            }
+
+            // Get symbol - for EXIT decisions, try to get from positions if not in prediction
+            var symbol = prediction.OpportunitySymbol;
+            if (prediction.Action == "EXIT" && string.IsNullOrEmpty(symbol) && positions.Any())
+            {
+                symbol = positions.First().Symbol;
+            }
+
+            var timestamp = DateTime.UtcNow;
+            var executionStatus = executionResult.Success ? "success" : "failed";
+
             var decision = new
             {
                 action = prediction.Action,
-                timestamp = DateTime.UtcNow,
-                symbol = prediction.OpportunitySymbol,
+                timestamp,
+                symbol,
                 confidence = prediction.Confidence,
                 enterProbability = prediction.EnterProbability,
                 reasoning = $"State value: {prediction.StateValue:F4}",
@@ -741,7 +784,7 @@ public class AgentBackgroundService : BackgroundService
                 numPositions = positions.Count,
 
                 // Execution results
-                executionStatus = executionResult.Success ? "success" : "failed",
+                executionStatus,
                 errorMessage = executionResult.ErrorMessage,
 
                 // ENTER specific fields
@@ -754,9 +797,36 @@ public class AgentBackgroundService : BackgroundService
                 durationHours = executionResult.DurationHours
             };
 
+            // Broadcast via SignalR
             await signalR.BroadcastAgentDecisionAsync(userId, decision);
             _logger.LogInformation("Broadcast agent decision: {Action} {Symbol} (Status: {Status})",
-                prediction.Action, prediction.OpportunitySymbol, decision.executionStatus);
+                prediction.Action, symbol, executionStatus);
+
+            // Store in repository
+            var decisionRecord = new AgentDecisionRecord
+            {
+                SessionId = session.Id,
+                UserId = userId,
+                Timestamp = timestamp,
+                Action = prediction.Action,
+                Symbol = symbol,
+                Confidence = prediction.Confidence,
+                EnterProbability = prediction.EnterProbability,
+                Reasoning = $"State value: {prediction.StateValue:F4}",
+                NumOpportunities = opportunities.Count,
+                NumPositions = positions.Count,
+                ExecutionStatus = executionStatus,
+                ErrorMessage = executionResult.ErrorMessage,
+                AmountUsd = executionResult.AmountUsd,
+                ExecutionId = executionResult.ExecutionId?.ToString(),
+                ProfitUsd = executionResult.ProfitUsd,
+                ProfitPct = executionResult.ProfitPct,
+                DurationHours = executionResult.DurationHours,
+                IsReconciled = false
+            };
+
+            _decisionRepository.AddOrUpdate(decisionRecord);
+            _logger.LogDebug("Stored decision {DecisionId} for session {SessionId}", decisionRecord.Id, session.Id);
         }
         catch (Exception ex)
         {
@@ -786,10 +856,13 @@ public class AgentBackgroundService : BackgroundService
                 // Broadcast status update
                 await signalR.BroadcastAgentStatusAsync(userId, "running", durationSeconds, true, null);
 
-                // Calculate stats from session data
+                // Calculate stats from decision repository (real-time, accurate)
+                var (pnlUsd, pnlPct, winningTrades, losingTrades) = _decisionRepository.GetSessionMetrics(session.Id);
+                var totalTrades = winningTrades + losingTrades;
+                var winRate = totalTrades > 0 ? (decimal)winningTrades / totalTrades : 0m;
+
+                // Use database fields for decision counts (updated by UpdateAgentStatsAsync)
                 var totalDecisions = session.HoldDecisions + session.EnterDecisions + session.ExitDecisions;
-                var totalTrades = session.WinningTrades + session.LosingTrades;
-                var winRate = totalTrades > 0 ? (decimal)session.WinningTrades / totalTrades : 0m;
 
                 var statsData = new
                 {
@@ -798,13 +871,13 @@ public class AgentBackgroundService : BackgroundService
                     enterDecisions = session.EnterDecisions,
                     exitDecisions = session.ExitDecisions,
                     totalTrades = totalTrades,
-                    winningTrades = session.WinningTrades,
-                    losingTrades = session.LosingTrades,
+                    winningTrades = winningTrades,
+                    losingTrades = losingTrades,
                     winRate = winRate,
-                    totalPnLUsd = session.SessionPnLUsd,
-                    totalPnLPct = session.SessionPnLPct,
-                    todayPnLUsd = session.SessionPnLUsd,
-                    todayPnLPct = session.SessionPnLPct,
+                    totalPnLUsd = pnlUsd,
+                    totalPnLPct = pnlPct,
+                    todayPnLUsd = pnlUsd,  // Same as total for now (no multi-day sessions)
+                    todayPnLPct = pnlPct,
                     activePositions = session.ActivePositions
                 };
 

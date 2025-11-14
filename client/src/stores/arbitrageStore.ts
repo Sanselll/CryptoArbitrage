@@ -50,6 +50,7 @@ interface ArbitrageState {
   setAgentStatus: (status: string, durationSeconds?: number, errorMessage?: string) => void;
   setAgentStats: (stats: AgentStats) => void;
   addAgentDecision: (decision: AgentDecision) => void;
+  setAgentDecisions: (decisions: AgentDecision[]) => void;
   setAgentConfig: (config: AgentConfig) => void;
   setAgentError: (error: string) => void;
 }
@@ -148,6 +149,13 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
     agent: {
       ...state.agent,
       decisions: [decision, ...state.agent.decisions].slice(0, 100), // Keep last 100 decisions
+    }
+  })),
+
+  setAgentDecisions: (decisions) => set((state) => ({
+    agent: {
+      ...state.agent,
+      decisions: decisions.slice(0, 100), // Keep last 100 decisions
     }
   })),
 

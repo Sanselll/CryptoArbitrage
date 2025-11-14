@@ -274,7 +274,8 @@
       "Bash(if [ -f /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/production_features.log ])",
       "Bash(if [ -f data/production/2025-11-13/11-10.json ])",
       "Bash(then cat data/production/2025-11-13/11-10.json)",
-      "Bash(else echo \"No snapshot yet\")"
+      "Bash(else echo \"No snapshot yet\")",
+      "Bash(for dir in /Users/sansel/Projects/CryptoArbitrage/src/CryptoArbitrage.API/data/production/*/)"
     ],
     "deny": [],
     "ask": []

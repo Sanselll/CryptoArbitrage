@@ -1,8 +1,12 @@
 """
-Fit and save a StandardScaler for opportunity features.
+Fit and save a StandardScaler for opportunity features (V3 Refactoring).
 
-This script loads the training data, extracts the 19 opportunity features (full mode),
-fits a StandardScaler, and saves it to disk for use during training and inference.
+V3 Changes: 19→11 features
+- Removed: raw funding rates/intervals, market quality features (9 features)
+- Added: apr_velocity (1 feature)
+- Kept: all profit projections (6) + all spread metrics (4)
+
+Assumption: Market quality pre-filtering happens upstream
 """
 
 import pandas as pd
@@ -13,34 +17,26 @@ from pathlib import Path
 
 
 def extract_opportunity_features(row):
-    """Extract the 19 features from a single opportunity (matches full mode, no net_funding_rate)."""
+    """
+    Extract the 11 features from a single opportunity (V3 refactoring).
+
+    V3: Removed market quality features (assume pre-filtered upstream)
+    """
     features = [
-        # Funding rates (raw)
-        row.get('long_funding_rate', 0),
-        row.get('short_funding_rate', 0),
-        # Funding intervals (normalized)
-        row.get('long_funding_interval_hours', 8) / 8,
-        row.get('short_funding_interval_hours', 8) / 8,
-        # Funding profit projections (raw)
+        # Profit projections (6 features)
         row.get('fund_profit_8h', 0),
         row.get('fundProfit8h24hProj', 0),
         row.get('fundProfit8h3dProj', 0),
-        # APR projections (raw)
         row.get('fund_apr', 0),
         row.get('fundApr24hProj', 0),
         row.get('fundApr3dProj', 0),
-        # Spread statistics (raw)
+        # Spread statistics (4 features)
         row.get('spread30SampleAvg', 0),
         row.get('priceSpread24hAvg', 0),
         row.get('priceSpread3dAvg', 0),
         row.get('spread_volatility_stddev', 0),
-
-        # Critical additions for opportunity quality (5 features)
-        np.log10(max(float(row.get('volume_24h', 1e6) or 1e6), 1e5)),
-        float(row.get('bidAskSpreadPercent', 0) or 0),
-        np.log10(max(float(row.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
-        float(row.get('estimatedProfitPercentage', 0) or 0),
-        float(row.get('positionCostPercent', 0.2) or 0.2),
+        # Velocity (1 feature - NEW in V3)
+        row.get('fund_profit_8h', 0) - row.get('fundProfit8h24hProj', 0),  # apr_velocity
     ]
 
     # Convert to float and handle NaN/inf
@@ -50,12 +46,12 @@ def extract_opportunity_features(row):
 
 def main():
     print("="*80)
-    print("FITTING FEATURE SCALER FOR RL ENVIRONMENT")
+    print("FITTING FEATURE SCALER FOR RL ENVIRONMENT (V3)")
     print("="*80)
 
     # Paths
     train_data_path = "data/rl_train.csv"
-    scaler_output_path = "trained_models/rl/feature_scaler.pkl"
+    scaler_output_path = "trained_models/rl/feature_scaler_v2.pkl"  # V3: Save as v2
 
     # Create output directory
     Path(scaler_output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -66,7 +62,7 @@ def main():
     print(f"   Loaded {len(df):,} opportunities")
 
     # Extract all features
-    print("\nExtracting 19 features from each opportunity (full mode, no net_funding_rate)...")
+    print("\nExtracting 11 features from each opportunity (V3 refactoring: 19→11)...")
     all_features = []
     for idx, row in df.iterrows():
         features = extract_opportunity_features(row)
@@ -77,21 +73,18 @@ def main():
 
     # Convert to numpy array
     X = np.array(all_features, dtype=np.float32)
-    print(f"\nFeature matrix shape: {X.shape}")
+    print(f"\nFeature matrix shape: {X.shape} (expected: [N, 11])")
 
     # Display feature statistics before scaling
     print("\n" + "-"*80)
     print("FEATURE STATISTICS (BEFORE SCALING)")
     print("-"*80)
     feature_names = [
-        'long_funding_rate', 'short_funding_rate',
-        'long_funding_interval_norm', 'short_funding_interval_norm',
         'fund_profit_8h', 'fundProfit8h24hProj', 'fundProfit8h3dProj',
         'fund_apr', 'fundApr24hProj', 'fundApr3dProj',
         'spread30SampleAvg', 'priceSpread24hAvg', 'priceSpread3dAvg',
         'spread_volatility_stddev',
-        'volume_24h_log', 'bidAskSpreadPercent', 'orderbookDepthUsd_log',
-        'estimatedProfitPercentage', 'positionCostPercent',
+        'apr_velocity',  # NEW in V3
     ]
 
     for i, name in enumerate(feature_names):
@@ -132,9 +125,11 @@ def main():
 
     print("✅ Scaler saved successfully")
     print("="*80)
-    print("\nUsage in environment:")
-    print("   1. Load scaler: scaler = pickle.load(open('trained_models/rl/feature_scaler.pkl', 'rb'))")
-    print("   2. Transform features: X_scaled = scaler.transform(X)")
+    print("\nV3 SCALER USAGE:")
+    print(f"   1. Load scaler: scaler = pickle.load(open('{scaler_output_path}', 'rb'))")
+    print("   2. Transform features: X_scaled = scaler.transform(X)  # X must be shape [N, 11]")
+    print("\nNOTE: This is V3 scaler (11 features). Old V1 scaler had 19 features.")
+    print("      Use --feature-scaler-path trained_models/rl/feature_scaler_v2.pkl in training scripts")
     print("="*80)
 
 

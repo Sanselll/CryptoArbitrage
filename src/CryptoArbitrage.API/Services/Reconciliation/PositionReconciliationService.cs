@@ -16,15 +16,18 @@ public class PositionReconciliationService
     private readonly ILogger<PositionReconciliationService> _logger;
     private readonly PositionReconciliationConfiguration _config;
     private readonly IDataRepository<List<TransactionDto>> _transactionRepository;
+    private readonly Agent.AgentDecisionRepository _decisionRepository;
 
     public PositionReconciliationService(
         ILogger<PositionReconciliationService> logger,
         PositionReconciliationConfiguration config,
-        IDataRepository<List<TransactionDto>> transactionRepository)
+        IDataRepository<List<TransactionDto>> transactionRepository,
+        Agent.AgentDecisionRepository decisionRepository)
     {
         _logger = logger;
         _config = config;
         _transactionRepository = transactionRepository;
+        _decisionRepository = decisionRepository;
     }
 
     /// <summary>
@@ -400,6 +403,33 @@ public class PositionReconciliationService
             "FundingEarned=${Funding:F4}, TradingFees=${Fees:F4}, PricePnL=${PricePnL:F4}, " +
             "RealizedPnL=${RealizedPnL:F4} ({RealizedPct:F2}%)",
             position.Id, fundingEarnedUsd, tradingFeesUsd, pricePnLUsd, realizedPnLUsd, realizedPnLPct);
+
+        // Update agent decision profit if this execution was made by the agent
+        if (position.ExecutionId > 0)
+        {
+            var decision = _decisionRepository.GetByExecutionId(position.ExecutionId.ToString());
+            if (decision != null && decision.Action == "EXIT")
+            {
+                // Calculate total profit for this execution (sum all positions)
+                var executionPositions = dbContext.Positions
+                    .Where(p => p.ExecutionId == position.ExecutionId && p.Status == PositionStatus.Closed)
+                    .ToList();
+
+                if (executionPositions.Any())
+                {
+                    var totalPnlUsd = executionPositions.Sum(p => p.RealizedPnLUsd);
+                    var totalInitialMargin = executionPositions.Sum(p => p.InitialMargin);
+                    var totalPnlPct = totalInitialMargin > 0 ? (totalPnlUsd / totalInitialMargin) * 100 : 0;
+
+                    // Update decision with reconciled profit
+                    _decisionRepository.UpdateProfit(decision.Id, totalPnlUsd, totalPnlPct, isReconciled: true);
+
+                    _logger.LogInformation(
+                        "Updated agent decision {DecisionId} profit after reconciliation: ${ProfitUsd:F2} ({ProfitPct:F2}%)",
+                        decision.Id, totalPnlUsd, totalPnlPct);
+                }
+            }
+        }
     }
 
     /// <summary>

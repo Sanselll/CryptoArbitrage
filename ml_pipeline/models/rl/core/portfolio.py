@@ -46,8 +46,9 @@ class Position:
 
     # Leverage and fees (with defaults)
     leverage: float = 1.0      # Leverage multiplier (1-10x)
-    maker_fee: float = 0.0001  # 0.01% maker fee (reduced from 0.02%)
-    taker_fee: float = 0.0002  # 0.02% taker fee (reduced from 0.05%)
+    maker_fee: float = 0.0002  # 0.02% maker fee (realistic rate)
+    taker_fee: float = 0.00055  # 0.055% taker fee (realistic rate)
+    slippage_pct: float = -0.001  # -0.1% slippage (realistic, applied only on exit)
     entry_fee_pct: float = field(init=False)  # Calculated from maker/taker
     exit_fee_pct: float = field(init=False)
 
@@ -83,6 +84,11 @@ class Position:
     peak_pnl_time: Optional[pd.Timestamp] = None  # When peak occurred
     pnl_history: List[float] = field(default_factory=list)  # Last 6 hours of P&L % for velocity
     entry_apr: float = 0.0  # Annualized profit rate from opportunity (fund_apr)
+
+    # V3: Velocity tracking for new features (RL-v3 refactoring)
+    prev_estimated_pnl_pct: float = 0.0  # Previous estimated P&L (price only, no fees)
+    prev_estimated_funding_8h_pct: float = 0.0  # Previous 8h funding estimate
+    prev_spread_pct: float = 0.0  # Previous spread percentage
 
     def to_trade_record(self) -> dict:
         """Convert position to trade record for CSV logging."""
@@ -191,16 +197,22 @@ class Position:
         # Update time held
         self.hours_held = (current_time - self.entry_time).total_seconds() / 3600
 
-        # === LONG POSITION P&L ===
+        # === LONG POSITION P&L (with slippage) ===
+        # Slippage: applied ONLY on exit (receive less when selling)
         # Price change on long (profit if price goes up)
-        long_price_change_pct = ((current_long_price - self.entry_long_price) /
-                                 self.entry_long_price)
+        effective_entry_long = self.entry_long_price  # No slippage on entry
+        effective_current_long = current_long_price * (1 + self.slippage_pct)  # Receive less at exit
+        long_price_change_pct = ((effective_current_long - effective_entry_long) /
+                                 effective_entry_long)
         long_price_pnl_usd = self.position_size_usd * long_price_change_pct
 
-        # === SHORT POSITION P&L ===
+        # === SHORT POSITION P&L (with slippage) ===
+        # Slippage: applied ONLY on exit (pay more when buying back)
         # Price change on short (profit if price goes down)
-        short_price_change_pct = ((self.entry_short_price - current_short_price) /
-                                  self.entry_short_price)
+        effective_entry_short = self.entry_short_price  # No slippage on entry
+        effective_current_short = current_short_price * (1 - self.slippage_pct)  # Pay more at exit
+        short_price_change_pct = ((effective_entry_short - effective_current_short) /
+                                  effective_entry_short)
         short_price_pnl_usd = self.position_size_usd * short_price_change_pct
 
         # === FUNDING PAYMENTS ===
@@ -508,6 +520,33 @@ class Position:
 
         return annual_rate * 100  # Convert to percentage
 
+    def calculate_estimated_funding_8h_pct(self) -> float:
+        """
+        Calculate expected net funding profit in next 8 hours (V3 feature).
+
+        Matches Position._process_long_funding and _process_short_funding logic.
+        See RL_FEATURE_REFACTORING_PLAN.txt Appendix A for detailed explanation.
+
+        Returns:
+            float: Percentage profit expected in 8h (e.g., 0.5 means 0.5% profit in 8h)
+        """
+        # Calculate number of funding payments in 8 hours
+        long_payments_8h = 8.0 / self.long_funding_interval_hours
+        short_payments_8h = 8.0 / self.short_funding_interval_hours
+
+        # Long: negative rate = receive, positive rate = pay (portfolio.py line 269)
+        # From _process_long_funding: net_funding_usd = -funding_payment_usd
+        long_funding_8h = -self.long_funding_rate * long_payments_8h
+
+        # Short: positive rate = receive, negative rate = pay (portfolio.py line 296)
+        # From _process_short_funding: net_funding_usd = position_size * rate (direct, no negation)
+        short_funding_8h = self.short_funding_rate * short_payments_8h
+
+        # Net funding as decimal, convert to percentage
+        estimated_funding_8h_pct = (long_funding_8h + short_funding_8h) * 100
+
+        return estimated_funding_8h_pct
+
 
 class Portfolio:
     """
@@ -665,7 +704,14 @@ class Portfolio:
                            best_available_apr: float = 0.0,
                            current_opportunities: Optional[List[Dict]] = None) -> np.ndarray:
         """
-        Get state features for a single execution slot (20 dimensions - Phase 2: APR comparison features).
+        Get state features for a single execution slot (17 dimensions - V3 refactoring).
+
+        V3 Changes (301→203 total dims):
+        - Removed: net_funding_ratio, net_funding_rate, funding_efficiency, entry_spread_pct,
+                   long/short_pnl_pct, old pnl_velocity, peak_drawdown, is_old_loser
+        - Added: estimated_pnl_pct, estimated_pnl_velocity, estimated_funding_8h_pct,
+                 funding_velocity, spread_velocity, pnl_imbalance
+        - Updated: hours_held (log norm), APR (clip ±5000%)
 
         Args:
             exec_idx: Execution index (0-4)
@@ -674,11 +720,11 @@ class Portfolio:
             current_opportunities: List of current market opportunities to look up APR by symbol
 
         Returns:
-            20-dimensional array of execution features
+            17-dimensional array of execution features
         """
         if exec_idx >= len(self.positions):
             # No position in this slot - return zeros
-            return np.zeros(20, dtype=np.float32)
+            return np.zeros(17, dtype=np.float32)
 
         pos = self.positions[exec_idx]
 
@@ -692,107 +738,112 @@ class Portfolio:
             current_long_price = pos.entry_long_price
             current_short_price = pos.entry_short_price
 
-        # Calculate features
+        # Calculate base metrics
         total_capital = pos.position_size_usd * 2
+
+        # ==================================================================
+        # V3 FEATURES (17 dimensions)
+        # ==================================================================
 
         # 1. is_active
         is_active = 1.0
 
-        # 2. net_pnl_pct
+        # 2. net_pnl_pct = (price P&L + funding - fees) / capital
         net_pnl_pct = pos.unrealized_pnl_pct / 100
 
-        # 3. hours_held_norm
-        hours_held_norm = pos.hours_held / 72.0
+        # 3. hours_held_norm = log(hours + 1) / log(73)
+        # V3: Changed from linear /72 to log normalization
+        hours_held_norm = np.log(pos.hours_held + 1) / np.log(73)
 
-        # 4. net_funding_ratio
-        net_funding_ratio = (pos.long_net_funding_usd + pos.short_net_funding_usd) / total_capital if total_capital > 0 else 0.0
+        # 4. estimated_pnl_pct = price P&L only (no fees, no funding, WITH slippage)
+        # V3: NEW FEATURE - isolates price risk from funding profit
+        # Apply slippage ONLY on exit (not entry)
+        effective_entry_long = pos.entry_long_price  # No slippage on entry
+        effective_current_long = current_long_price * (1 + pos.slippage_pct)  # Slippage on exit
+        long_price_pnl = pos.position_size_usd * ((effective_current_long - effective_entry_long) / effective_entry_long)
 
-        # 5. net_funding_rate
-        net_funding_rate = pos.short_funding_rate - pos.long_funding_rate
+        effective_entry_short = pos.entry_short_price  # No slippage on entry
+        effective_current_short = current_short_price * (1 - pos.slippage_pct)  # Slippage on exit
+        short_price_pnl = pos.position_size_usd * ((effective_entry_short - effective_current_short) / effective_entry_short)
 
-        # 6. current_spread_pct
+        estimated_pnl_pct = ((long_price_pnl + short_price_pnl) / total_capital) / 100 if total_capital > 0 else 0.0
+
+        # 5. estimated_pnl_velocity = change in estimated P&L
+        # V3: NEW FEATURE - trend signal for price movement
+        estimated_pnl_velocity = (estimated_pnl_pct - pos.prev_estimated_pnl_pct) / 100
+
+        # 6. estimated_funding_8h_pct = expected funding profit in next 8h
+        # V3: NEW FEATURE - replaces confusing net_funding_rate
+        estimated_funding_8h_pct = pos.calculate_estimated_funding_8h_pct() / 100
+
+        # 7. funding_velocity = change in 8h funding estimate
+        # V3: NEW FEATURE - detects funding rate trends
+        funding_velocity = (estimated_funding_8h_pct - pos.prev_estimated_funding_8h_pct) / 100
+
+        # 8. spread_pct = current price spread
+        # V3: Renamed from current_spread_pct for clarity
         avg_price = (current_long_price + current_short_price) / 2
-        current_spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
+        spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
 
-        # 7. entry_spread_pct
-        avg_entry_price = (pos.entry_long_price + pos.entry_short_price) / 2
-        entry_spread_pct = abs(pos.entry_long_price - pos.entry_short_price) / avg_entry_price if avg_entry_price > 0 else 0.0
+        # 9. spread_velocity = change in spread
+        # V3: NEW FEATURE - detects converging/diverging spreads
+        spread_velocity = spread_pct - pos.prev_spread_pct
 
-        # 8. value_to_capital_ratio
-        value_to_capital_ratio = total_capital / self.total_capital if self.total_capital > 0 else 0.0
-
-        # 9. funding_efficiency
-        total_fees = pos.entry_fees_paid_usd + (pos.position_size_usd * 2 * pos.taker_fee)
-        net_funding_usd = pos.long_net_funding_usd + pos.short_net_funding_usd
-        funding_efficiency = net_funding_usd / total_fees if total_fees > 0 else 0.0
-
-        # 10. long_pnl_pct
-        long_pnl_pct = pos.long_pnl_pct / 100
-
-        # 11. short_pnl_pct
-        short_pnl_pct = pos.short_pnl_pct / 100
-
-        # 12. liquidation_distance_pct
+        # 10. liquidation_distance_pct
         liquidation_distance_pct = pos.get_liquidation_distance(current_long_price, current_short_price)
 
-        # NEW: Phase 2 - APR Comparison Features (18-20)
-        # These help agent understand if better opportunities exist (fixes "hold forever" bias)
-        # CALCULATED FIRST because apr_ratio (feature #15) needs current_position_apr_value
-
-        # 18. current_position_apr (APR of this position from current market)
-        # Look up the current APR for this symbol from current opportunities
+        # 11. apr_ratio = current_apr / entry_apr (funding rate deterioration)
+        # Look up current APR for this symbol
         current_position_apr_value = 0.0
         if current_opportunities:
             for opp in current_opportunities:
                 if opp['symbol'] == pos.symbol:
                     current_position_apr_value = opp.get('fund_apr', 0.0)
                     break
-        current_position_apr = current_position_apr_value / 100.0  # Normalize to 0-1 range (50% APR → 0.5)
+        apr_ratio_raw = pos.get_apr_ratio(current_position_apr_value)
+        apr_ratio = np.clip(apr_ratio_raw, 0, 3) / 3  # Clip [0, 3] → [0, 1]
 
-        # NEW: Phase 1 - Exit Timing Features (13-17)
-        # 13. pnl_velocity (hourly P&L change rate)
-        pnl_velocity = pos.get_pnl_velocity() / 100  # Normalize to same scale as net_pnl_pct
+        # 12. current_position_apr
+        # V3: Changed from /100 to /5000 (APR can reach ±5000%)
+        current_position_apr = np.clip(current_position_apr_value, -5000, 5000) / 5000
 
-        # 14. peak_drawdown (decline from peak P&L)
-        peak_drawdown = pos.get_peak_drawdown()
+        # 13. best_available_apr
+        # V3: Changed from /100 to /5000
+        best_available_apr_norm = np.clip(best_available_apr, -5000, 5000) / 5000
 
-        # 15. apr_ratio (current APR / entry APR)
-        apr_ratio = pos.get_apr_ratio(current_position_apr_value)
+        # 14. apr_advantage = current - best (negative = better opportunities exist)
+        apr_advantage = current_position_apr - best_available_apr_norm
 
-        # 16. return_efficiency (P&L per hour held)
-        return_efficiency = pos.get_return_efficiency() / 100  # Normalize to same scale
+        # 15. return_efficiency = P&L per hour held (age-adjusted performance)
+        # V3: Added clipping to prevent outliers from very short holds
+        return_efficiency_raw = pos.get_return_efficiency()
+        return_efficiency = np.clip(return_efficiency_raw, -50, 50) / 50
 
-        # 17. is_old_loser (binary: position is old AND losing)
-        is_old_loser = 1.0 if pos.is_old_loser(age_threshold_hours=48.0) else 0.0
+        # 16. value_to_capital_ratio = capital allocated to this position
+        value_to_capital_ratio = total_capital / self.total_capital if self.total_capital > 0 else 0.0
 
-        # 19. best_available_apr (max APR among market opportunities)
-        best_available_apr_norm = best_available_apr / 100.0  # Normalize to 0-1 range
-
-        # 20. apr_advantage (current - best, negative = better opportunities exist)
-        # Scaled to [-1, 1] range: -1 = much worse, 0 = equal, +1 = much better
-        apr_advantage = (current_position_apr - best_available_apr_norm)
+        # 17. pnl_imbalance = (long_pnl - short_pnl) / 200
+        # V3: NEW FEATURE - detects directional exposure (arbitrage breaking down)
+        pnl_imbalance = (pos.long_pnl_pct - pos.short_pnl_pct) / 200
 
         return np.array([
-            is_active,
-            net_pnl_pct,
-            hours_held_norm,
-            net_funding_ratio,
-            net_funding_rate,
-            current_spread_pct,
-            entry_spread_pct,
-            value_to_capital_ratio,
-            funding_efficiency,
-            long_pnl_pct,
-            short_pnl_pct,
-            liquidation_distance_pct,
-            pnl_velocity,
-            peak_drawdown,
-            apr_ratio,
-            return_efficiency,
-            is_old_loser,
-            current_position_apr,
-            best_available_apr_norm,
-            apr_advantage
+            is_active,                  # 1
+            net_pnl_pct,                # 2
+            hours_held_norm,            # 3
+            estimated_pnl_pct,          # 4 (NEW)
+            estimated_pnl_velocity,     # 5 (NEW)
+            estimated_funding_8h_pct,   # 6 (NEW)
+            funding_velocity,           # 7 (NEW)
+            spread_pct,                 # 8
+            spread_velocity,            # 9 (NEW)
+            liquidation_distance_pct,   # 10
+            apr_ratio,                  # 11
+            current_position_apr,       # 12
+            best_available_apr_norm,    # 13
+            apr_advantage,              # 14
+            return_efficiency,          # 15
+            value_to_capital_ratio,     # 16
+            pnl_imbalance,              # 17 (NEW)
         ], dtype=np.float32)
 
     def get_all_execution_states(self, price_data: Dict[str, Dict[str, float]],
@@ -800,7 +851,9 @@ class Portfolio:
                                 best_available_apr: float = 0.0,
                                 current_opportunities: Optional[List[Dict]] = None) -> np.ndarray:
         """
-        Get execution state features for all 5 slots (100 dimensions total - Phase 2: APR comparison features).
+        Get execution state features for all 5 slots (85 dimensions total - V3 refactoring).
+
+        V3: Changed from 100 dims (5×20) to 85 dims (5×17 features)
 
         Args:
             price_data: Current price data for all symbols
@@ -809,7 +862,7 @@ class Portfolio:
             current_opportunities: List of current market opportunities to look up APR by symbol
 
         Returns:
-            100-dimensional array (5 slots × 20 features)
+            85-dimensional array (5 slots × 17 features)
         """
         all_features = []
         for i in range(max_positions):
@@ -817,6 +870,47 @@ class Portfolio:
             all_features.extend(exec_features)
 
         return np.array(all_features, dtype=np.float32)
+
+    def update_velocity_tracking(self, price_data: Dict[str, Dict[str, float]]):
+        """
+        Update velocity tracking for all open positions (V3 feature).
+
+        Call this at the END of each timestep to store current values
+        as "previous" for velocity calculations in the next timestep.
+
+        Args:
+            price_data: Current price data for all symbols
+        """
+        for pos in self.positions:
+            # Get current prices
+            if pos.symbol in price_data:
+                prices = price_data[pos.symbol]
+                current_long_price = prices['long_price']
+                current_short_price = prices['short_price']
+            else:
+                current_long_price = pos.entry_long_price
+                current_short_price = pos.entry_short_price
+
+            # Calculate and store current values as "previous" for next step
+            total_capital = pos.position_size_usd * 2
+
+            # estimated_pnl_pct (price P&L only, no fees/funding, WITH slippage on exit only)
+            effective_entry_long = pos.entry_long_price  # No slippage on entry
+            effective_current_long = current_long_price * (1 + pos.slippage_pct)  # Slippage on exit
+            long_price_pnl = pos.position_size_usd * ((effective_current_long - effective_entry_long) / effective_entry_long)
+
+            effective_entry_short = pos.entry_short_price  # No slippage on entry
+            effective_current_short = current_short_price * (1 - pos.slippage_pct)  # Slippage on exit
+            short_price_pnl = pos.position_size_usd * ((effective_entry_short - effective_current_short) / effective_entry_short)
+
+            pos.prev_estimated_pnl_pct = ((long_price_pnl + short_price_pnl) / total_capital) / 100 if total_capital > 0 else 0.0
+
+            # estimated_funding_8h_pct
+            pos.prev_estimated_funding_8h_pct = pos.calculate_estimated_funding_8h_pct() / 100
+
+            # spread_pct
+            avg_price = (current_long_price + current_short_price) / 2
+            pos.prev_spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
 
     def can_open_position(self, size_per_side_usd: float, leverage: float = 1.0) -> bool:
         """

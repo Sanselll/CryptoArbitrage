@@ -289,6 +289,27 @@ export const apiService = {
     }
   },
 
+  async getAgentDecisions(limit: number = 100): Promise<AgentDecision[]> {
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${getApiBaseUrl()}/agent/decisions?limit=${limit}`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch agent decisions');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching agent decisions:', error);
+      throw error;
+    }
+  },
+
   // ============================================================================
   // EXISTING APIS
   // ============================================================================

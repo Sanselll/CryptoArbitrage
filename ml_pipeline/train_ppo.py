@@ -36,10 +36,10 @@ def parse_args():
                         help='Path to test opportunities CSV file (for evaluation)')
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
-    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler.pkl',
-                        help='Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler.pkl)')
+    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler_v2.pkl',
+                        help='Path to fitted StandardScaler pickle (V3: 11 features, was 19)')
 
-    # Environment
+    # Environment (V3: 301→203 dimensions)
     parser.add_argument('--initial-capital', type=float, default=10000.0,
                         help='Initial capital in USD')
     parser.add_argument('--episode-length-days', type=int, default=5,

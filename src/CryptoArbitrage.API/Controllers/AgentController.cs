@@ -23,18 +23,21 @@ public class AgentController : BaseController
     private readonly IAgentConfigurationService _configService;
     private readonly ICurrentUserService _currentUser;
     private readonly IConfiguration _configuration;
+    private readonly AgentDecisionRepository _decisionRepository;
 
     public AgentController(
         ArbitrageDbContext context,
         IAgentConfigurationService configService,
         ICurrentUserService currentUser,
         IConfiguration configuration,
+        AgentDecisionRepository decisionRepository,
         ILogger<AgentController> logger) : base(logger)
     {
         _context = context;
         _configService = configService;
         _currentUser = currentUser;
         _configuration = configuration;
+        _decisionRepository = decisionRepository;
     }
 
     /// <summary>
@@ -281,9 +284,13 @@ public class AgentController : BaseController
                 };
             }
 
+            // Calculate stats from decision repository (real-time, accurate)
+            var (pnlUsd, pnlPct, winningTrades, losingTrades) = _decisionRepository.GetSessionMetrics(session.Id);
+            var totalTrades = winningTrades + losingTrades;
+            var winRate = totalTrades > 0 ? (decimal)winningTrades / totalTrades : 0m;
+
+            // Use database fields for decision counts
             var totalDecisions = session.HoldDecisions + session.EnterDecisions + session.ExitDecisions;
-            var totalTrades = session.WinningTrades + session.LosingTrades;
-            var winRate = totalTrades > 0 ? (decimal)session.WinningTrades / totalTrades : 0m;
 
             return new AgentStatsDto
             {
@@ -292,67 +299,39 @@ public class AgentController : BaseController
                 EnterDecisions = session.EnterDecisions,
                 ExitDecisions = session.ExitDecisions,
                 TotalTrades = totalTrades,
-                WinningTrades = session.WinningTrades,
-                LosingTrades = session.LosingTrades,
+                WinningTrades = winningTrades,
+                LosingTrades = losingTrades,
                 WinRate = winRate,
-                TotalPnLUsd = session.SessionPnLUsd,
-                TotalPnLPct = session.SessionPnLPct,
-                TodayPnLUsd = session.SessionPnLUsd, // Session stats = today's stats
-                TodayPnLPct = session.SessionPnLPct,
+                TotalPnLUsd = pnlUsd,
+                TotalPnLPct = pnlPct,
+                TodayPnLUsd = pnlUsd,  // Same as total for now (no multi-day sessions)
+                TodayPnLPct = pnlPct,
                 ActivePositions = session.ActivePositions
             };
         }, "get-agent-stats");
     }
 
     /// <summary>
-    /// Get agent decisions from ML API for current user.
+    /// Get agent decisions from in-memory repository for current user.
     /// </summary>
     /// <param name="limit">Maximum number of decisions to return (default: 100)</param>
     [HttpGet("decisions")]
-    public async Task<ActionResult<List<Dictionary<string, object>>>> GetDecisions([FromQuery] int limit = 100)
+    public async Task<ActionResult<List<AgentDecisionRecord>>> GetDecisions([FromQuery] int limit = 100)
     {
         return await ExecuteAsync(async () =>
         {
             var userId = _currentUser.UserId!;
 
-            // Call ML API to get decisions
-            var mlApiUrl = _configuration["MLApi:Host"] ?? "localhost";
-            var mlApiPort = _configuration["MLApi:Port"] ?? "5250";
-            var baseUrl = $"http://{mlApiUrl}:{mlApiPort}";
+            // Get decisions from in-memory repository
+            var decisions = _decisionRepository.GetByUserId(userId);
 
-            using var httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
-            var response = await httpClient.GetAsync($"/agent/decisions?user_id={userId}&limit={limit}");
-
-            if (!response.IsSuccessStatusCode)
+            // The repository already limits to 100, but respect the requested limit
+            if (limit > 0 && limit < 100)
             {
-                Logger.LogWarning("Failed to fetch decisions from ML API: {StatusCode}", response.StatusCode);
-                return new List<Dictionary<string, object>>();
+                decisions = decisions.Take(limit).ToList();
             }
 
-            var responseJson = await response.Content.ReadAsStringAsync();
-            var jsonDoc = JsonDocument.Parse(responseJson);
-            var decisions = jsonDoc.RootElement.GetProperty("decisions");
-
-            var result = new List<Dictionary<string, object>>();
-            foreach (var decision in decisions.EnumerateArray())
-            {
-                var dict = new Dictionary<string, object>();
-                foreach (var property in decision.EnumerateObject())
-                {
-                    dict[property.Name] = property.Value.ValueKind switch
-                    {
-                        JsonValueKind.String => property.Value.GetString() ?? string.Empty,
-                        JsonValueKind.Number => property.Value.GetDecimal(),
-                        JsonValueKind.True => true,
-                        JsonValueKind.False => false,
-                        JsonValueKind.Null => null!,
-                        _ => property.Value.ToString()
-                    };
-                }
-                result.Add(dict);
-            }
-
-            return result;
+            return decisions;
         }, "get-agent-decisions");
     }
 
@@ -380,10 +359,13 @@ public class AgentController : BaseController
             ? (int)(DateTime.UtcNow - session.StartedAt.Value).TotalSeconds
             : 0;
 
-        // Calculate stats from session data
+        // Calculate stats from decision repository (real-time, accurate)
+        var (pnlUsd, pnlPct, winningTrades, losingTrades) = _decisionRepository.GetSessionMetrics(session.Id);
+        var totalTrades = winningTrades + losingTrades;
+        var winRate = totalTrades > 0 ? (decimal)winningTrades / totalTrades : 0m;
+
+        // Use database fields for decision counts
         var totalDecisions = session.HoldDecisions + session.EnterDecisions + session.ExitDecisions;
-        var totalTrades = session.WinningTrades + session.LosingTrades;
-        var winRate = totalTrades > 0 ? (decimal)session.WinningTrades / totalTrades : 0m;
 
         return new AgentStatusDto
         {
@@ -407,13 +389,13 @@ public class AgentController : BaseController
                 EnterDecisions = session.EnterDecisions,
                 ExitDecisions = session.ExitDecisions,
                 TotalTrades = totalTrades,
-                WinningTrades = session.WinningTrades,
-                LosingTrades = session.LosingTrades,
+                WinningTrades = winningTrades,
+                LosingTrades = losingTrades,
                 WinRate = winRate,
-                TotalPnLUsd = session.SessionPnLUsd,
-                TotalPnLPct = session.SessionPnLPct,
-                TodayPnLUsd = session.SessionPnLUsd,
-                TodayPnLPct = session.SessionPnLPct,
+                TotalPnLUsd = pnlUsd,
+                TotalPnLPct = pnlPct,
+                TodayPnLUsd = pnlUsd,  // Same as total for now (no multi-day sessions)
+                TodayPnLPct = pnlPct,
                 ActivePositions = session.ActivePositions
             }
         };

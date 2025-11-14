@@ -11,7 +11,7 @@ export function AgentControlPanel() {
   const setAgentStatus = useArbitrageStore((state) => state.setAgentStatus);
   const setAgentStats = useArbitrageStore((state) => state.setAgentStats);
   const setAgentConfig = useArbitrageStore((state) => state.setAgentConfig);
-  const addAgentDecision = useArbitrageStore((state) => state.addAgentDecision);
+  const setAgentDecisions = useArbitrageStore((state) => state.setAgentDecisions);
   const [isLoading, setIsLoading] = useState(false);
   const [realtimeDuration, setRealtimeDuration] = useState(0);
   const [config, setConfig] = useState({
@@ -21,13 +21,14 @@ export function AgentControlPanel() {
     predictionIntervalSeconds: 3600, // 1 hour to match training environment
   });
 
-  // Fetch agent config and status on mount
+  // Fetch agent config, status, and decisions on mount
   useEffect(() => {
     const fetchAgentData = async () => {
       try {
-        const [configData, statusData] = await Promise.all([
+        const [configData, statusData, decisionsData] = await Promise.all([
           apiService.getAgentConfig(),
           apiService.getAgentStatus(),
+          apiService.getAgentDecisions(100),
         ]);
         setConfig({
           maxLeverage: configData.maxLeverage,
@@ -44,47 +45,37 @@ export function AgentControlPanel() {
         if (statusData.config) {
           setAgentConfig(statusData.config);
         }
+
+        // Load existing decisions from repository
+        setAgentDecisions(decisionsData);
       } catch (error) {
         console.error('Error fetching agent data:', error);
       }
     };
 
     fetchAgentData();
-  }, [setAgentStatus, setAgentStats, setAgentConfig]);
+  }, [setAgentStatus, setAgentStats, setAgentConfig, setAgentDecisions]);
 
-  // Subscribe to agent decision broadcasts
+  // Note: Agent decisions are already subscribed in arbitrageStore.ts
+  // No need for duplicate subscription here
+
+  // Calculate duration based on actual time difference (works even when tab is in background)
   useEffect(() => {
-    console.log('[AgentControlPanel] Setting up onAgentDecision listener');
-    const unsubscribe = signalRService.onAgentDecision((decision) => {
-      console.log('[AgentControlPanel] Received agent decision:', decision);
-      addAgentDecision(decision);
-    });
-
-    return () => {
-      console.log('[AgentControlPanel] Cleaning up onAgentDecision listener');
-      unsubscribe();
-    };
-  }, [addAgentDecision]);
-
-  // Sync realtime duration with backend updates
-  useEffect(() => {
-    if (agent.durationSeconds !== undefined) {
-      setRealtimeDuration(agent.durationSeconds);
-    }
-  }, [agent.durationSeconds]);
-
-  // Realtime timer - increment duration every second when agent is running
-  useEffect(() => {
-    if (agent.status !== 'running') {
+    if (agent.status !== 'running' || agent.durationSeconds === undefined) {
+      setRealtimeDuration(agent.durationSeconds || 0);
       return;
     }
 
+    // Calculate start time based on backend duration
+    const startTime = Date.now() - (agent.durationSeconds * 1000);
+
     const interval = setInterval(() => {
-      setRealtimeDuration((prev) => prev + 1);
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      setRealtimeDuration(elapsed);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [agent.status]);
+  }, [agent.status, agent.durationSeconds]);
 
   const handleStart = async () => {
     setIsLoading(true);
@@ -193,21 +184,21 @@ export function AgentControlPanel() {
 
   return (
     <Card className="h-full flex flex-col">
-      <CardHeader>
-        <CardTitle>AI Trading Agent</CardTitle>
+      <CardHeader className="p-2">
+        <CardTitle className="text-base">AI Trading Agent</CardTitle>
       </CardHeader>
 
       <Tabs defaultValue="control" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="px-4">
-          <TabsTrigger value="control">Control</TabsTrigger>
-          <TabsTrigger value="decisions">Decisions</TabsTrigger>
+        <TabsList className="px-2">
+          <TabsTrigger value="control" className="text-sm">Control</TabsTrigger>
+          <TabsTrigger value="decisions" className="text-sm">Decisions</TabsTrigger>
         </TabsList>
 
         {/* Control Tab */}
         <TabsContent value="control" className="flex-1 overflow-y-auto">
-          <CardContent className="space-y-4">
+          <CardContent className="p-2 space-y-2">
             {/* Status Display */}
-            <div className="bg-binance-bg rounded-lg p-3 space-y-2">
+            <div className="bg-binance-bg rounded-lg p-2 space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-binance-text-secondary">Status:</span>
                 <span className={`text-sm font-semibold uppercase ${getStatusColor(agent.status)}`}>
@@ -415,88 +406,75 @@ export function AgentControlPanel() {
                   const isFailed = decision.executionStatus === 'failed';
 
                   return (
-                    <div key={index} className="p-3 hover:bg-binance-bg-hover">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`text-sm font-semibold uppercase ${
-                              decision.action === 'ENTER'
-                                ? 'text-binance-green'
-                                : decision.action === 'EXIT'
-                                ? 'text-binance-red'
-                                : 'text-binance-text-secondary'
-                            }`}
-                          >
-                            {decision.action}
-                          </span>
-                          {symbol && (
-                            <span className="text-sm font-medium text-binance-text">
-                              {symbol}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-xs text-binance-text-secondary">
+                    <div key={index} className="p-2 hover:bg-binance-bg-hover relative">
+                      {/* Status badge in top-right corner */}
+                      <div className="absolute top-1 right-1">
+                        {isSuccess && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-binance-green" title="Executed" />
+                        )}
+                        {isFailed && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-binance-red" title="Failed" />
+                        )}
+                      </div>
+
+                      {/* Compact header: action + symbol */}
+                      <div className="flex items-baseline gap-1.5 mb-1">
+                        <span
+                          className={`text-[10px] font-bold uppercase leading-none ${
+                            decision.action === 'ENTER'
+                              ? 'text-binance-green'
+                              : decision.action === 'EXIT'
+                              ? 'text-binance-red'
+                              : 'text-binance-text-secondary'
+                          }`}
+                        >
+                          {decision.action}
+                        </span>
+                        <span className="text-[11px] font-medium text-binance-text leading-none">
+                          {symbol || 'N/A'}
+                        </span>
+                        <span className="text-[9px] text-binance-text-secondary ml-auto leading-none">
                           {new Date(decision.timestamp).toLocaleTimeString()}
                         </span>
                       </div>
 
-                      {/* ENTER specific fields */}
-                      {decision.action === 'ENTER' && (
-                        <>
-                          {decision.amountUsd !== undefined && (
-                            <div className="text-sm text-binance-text mb-1">
-                              Amount: <span className="font-medium">${decision.amountUsd.toFixed(2)}</span>
-                            </div>
-                          )}
-                          {decision.confidence && (
-                            <div className="text-xs text-binance-text-secondary">
-                              Confidence: {decision.confidence}
-                            </div>
-                          )}
-                        </>
-                      )}
-
-                      {/* EXIT specific fields */}
-                      {decision.action === 'EXIT' && (
-                        <>
-                          {decision.profitUsd !== undefined && (
-                            <div className={`text-sm mb-1 ${decision.profitUsd >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
-                              Profit: <span className="font-medium">
-                                {decision.profitUsd >= 0 ? '+' : ''}${decision.profitUsd.toFixed(2)}
+                      {/* Compact data row */}
+                      <div className="flex items-center gap-2 text-[10px]">
+                        {decision.action === 'ENTER' && decision.amountUsd !== undefined && (
+                          <span className="text-binance-text">
+                            ${decision.amountUsd.toFixed(2)}
+                          </span>
+                        )}
+                        {decision.action === 'EXIT' && decision.profitUsd !== undefined && (
+                          <>
+                            <span className={decision.profitUsd >= 0 ? 'text-binance-green' : 'text-binance-red'}>
+                              {decision.profitUsd >= 0 ? '+' : ''}${decision.profitUsd.toFixed(2)}
+                            </span>
+                            {decision.profitPct !== undefined && (
+                              <span className={decision.profitPct >= 0 ? 'text-binance-green' : 'text-binance-red'}>
+                                ({decision.profitPct >= 0 ? '+' : ''}{decision.profitPct.toFixed(1)}%)
                               </span>
-                              {decision.profitPct !== undefined && (
-                                <span className="ml-2">
-                                  ({decision.profitPct >= 0 ? '+' : ''}{decision.profitPct.toFixed(2)}%)
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {decision.durationHours !== undefined && (
-                            <div className="text-xs text-binance-text-secondary">
-                              Duration: {decision.durationHours.toFixed(1)}h
-                            </div>
-                          )}
-                        </>
-                      )}
-
-                      {/* Execution status indicator */}
-                      <div className="flex items-center gap-2 mt-2">
-                        {isSuccess && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-binance-green bg-opacity-20 text-binance-green">
-                            ✓ Executed
-                          </span>
+                            )}
+                            {decision.durationHours !== undefined && (
+                              <span className="text-binance-text-secondary">
+                                • {decision.durationHours.toFixed(1)}h
+                              </span>
+                            )}
+                          </>
                         )}
-                        {isFailed && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-binance-red bg-opacity-20 text-binance-red">
-                            ✗ Failed
-                          </span>
-                        )}
-                        {decision.errorMessage && (
-                          <span className="text-xs text-binance-red">
-                            {decision.errorMessage}
+                        {decision.confidence && (
+                          <span className="text-binance-text-secondary ml-auto">
+                            {(decision.confidence * 100).toFixed(0)}%
                           </span>
                         )}
                       </div>
+
+                      {/* Error message if any */}
+                      {decision.errorMessage && (
+                        <div className="text-[9px] text-binance-red mt-0.5 truncate" title={decision.errorMessage}>
+                          {decision.errorMessage}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

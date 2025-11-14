@@ -352,12 +352,20 @@ builder.Services.AddSingleton<RLPredictionService>();
 // Agent Configuration Service
 builder.Services.AddScoped<IAgentConfigurationService, AgentConfigurationService>();
 
+// Agent Decision Repository - in-memory storage for agent decisions
+builder.Services.AddSingleton<AgentDecisionRepository>();
+
 // Agent Background Service - continuous autonomous trading
 builder.Services.AddHostedService<AgentBackgroundService>();
 
 // Production Data Collection - ML training data collection
+// Stores JSON snapshots to Data/production directory
+// Checks ProductionDataCollection:Enabled from configuration
 builder.Services.AddSingleton<ProductionDataPersister>();
-builder.Services.AddHostedService<ProductionDataCollectionService>();
+if (builder.Configuration.GetValue<bool>("ProductionDataCollection:Enabled", true))
+{
+    builder.Services.AddHostedService<ProductionDataCollectionService>();
+}
 
 // ============================================================================
 

@@ -149,16 +149,16 @@ class FundingArbitrageEnv(gym.Env):
         # 31-35 = EXIT_POS_0-4
         self.action_space = spaces.Discrete(36)
 
-        # Observation space dimensions (Phase 2: Added APR comparison features)
-        # Config: 5 dims
-        # Portfolio: 6 dims
-        # Executions: 5 slots × 20 features = 100 dims (was 85: +3 APR comparison features)
-        # Opportunities: 10 slots × 19 features = 190 dims
+        # Observation space dimensions (V3 Refactoring: 301→203 dims)
+        # Config: 5 dims (unchanged)
+        # Portfolio: 3 dims (was 6: removed 3 historical metrics)
+        # Executions: 5 slots × 17 features = 85 dims (was 100: removed 8, added 6)
+        # Opportunities: 10 slots × 11 features = 110 dims (was 190: removed 9 market quality, added 1)
         config_dim = 5
-        portfolio_dim = 6
-        executions_dim = 5 * 20  # 100 (was 85: +3 APR comparison features per position)
-        opportunities_dim = 10 * 19  # 190
-        total_dim = config_dim + portfolio_dim + executions_dim + opportunities_dim  # 301
+        portfolio_dim = 3  # V3: 6→3 (removed avg_position_pnl_pct, total_pnl_pct, max_drawdown_pct)
+        executions_dim = 5 * 17  # V3: 85 (was 100)
+        opportunities_dim = 10 * 11  # V3: 110 (was 190)
+        total_dim = config_dim + portfolio_dim + executions_dim + opportunities_dim  # 203
 
         self.observation_space = spaces.Box(
             low=-np.inf,
@@ -557,6 +557,10 @@ class FundingArbitrageEnv(gym.Env):
 
         # Get observation
         observation = self._get_observation()
+
+        # V3: Update velocity tracking for next step (MUST be called AFTER observation)
+        # This stores current values as "previous" for velocity calculations
+        self.portfolio.update_velocity_tracking(price_data)
 
         # Info
         info.update({
@@ -1012,8 +1016,13 @@ class FundingArbitrageEnv(gym.Env):
         """
         Get current observation (state).
 
-        301 dimensions (Phase 2: Added APR comparison features):
-          config (5) + portfolio (6) + executions (100) + opportunities (190)
+        203 dimensions (V3 Refactoring):
+          config (5) + portfolio (3) + executions (85) + opportunities (110)
+
+        V3 Changes:
+        - Portfolio: 6→3 (removed historical metrics)
+        - Executions: 100→85 (5×20→5×17)
+        - Opportunities: 190→110 (10×19→10×11)
 
         Returns:
             Flattened numpy array of state features
@@ -1024,15 +1033,12 @@ class FundingArbitrageEnv(gym.Env):
         config_features = self.current_config.to_array()
         all_features.extend(config_features)
 
-        # 2. Portfolio features (6 dims) - Removed 4 redundant features
+        # 2. Portfolio features (3 dims - V3: removed historical metrics)
         price_data = self._get_current_prices()
         min_liq_distance = self.portfolio.get_min_liquidation_distance(price_data)
 
         portfolio_features = [
             len(self.portfolio.positions) / self.current_config.max_positions,  # num_positions_ratio
-            self.portfolio.get_execution_avg_pnl_pct() / 100 if len(self.portfolio.closed_positions) > 0 else 0.0,  # avg_position_pnl_pct
-            0.0 if self.force_zero_total_pnl_pct else (self.portfolio.total_pnl_pct / 100),  # portfolio_total_pnl_pct (FORCED TO 0 IF FLAG SET)
-            self.portfolio.max_drawdown_pct / 100,  # max_drawdown_pct
             min_liq_distance,  # min_liquidation_distance
             self.portfolio.capital_utilization / 100,  # capital_utilization
         ]
@@ -1043,7 +1049,7 @@ class FundingArbitrageEnv(gym.Env):
         if len(self.current_opportunities) > 0:
             best_available_apr = max(opp.get('fund_apr', 0.0) for opp in self.current_opportunities)
 
-        # 4. Execution features (100 dims: 5 slots × 20 features) - Phase 2: +3 APR comparison features
+        # 4. Execution features (85 dims: 5 slots × 17 features - V3 refactoring)
         exec_features = self.portfolio.get_all_execution_states(
             price_data,
             max_positions=5,
@@ -1052,38 +1058,34 @@ class FundingArbitrageEnv(gym.Env):
         )
         all_features.extend(exec_features)
 
-        # At this point: 5 + 6 + 100 = 111 dims
+        # At this point: 5 + 3 + 85 = 93 dims
 
-        # 5. Opportunity features (190 dims: 10 opportunities × 19 features each)
+        # 5. Opportunity features (110 dims: 10 opportunities × 11 features each - V3 refactoring)
         opportunity_features = []
         n_opps = 10
-        n_features_per_opp = 19
+        n_features_per_opp = 11  # V3: 19→11 (removed market quality + raw rates/intervals, added apr_velocity)
 
         for i in range(n_opps):
             if i < len(self.current_opportunities):
                 opp = self.current_opportunities[i]
 
-                # 19 features (standardized) - Removed duplicate net_funding_rate
+                # 11 features (V3: removed 9 market quality, added 1 velocity)
+                # Assumes market quality pre-filtering upstream
                 opp_feats = [
-                    opp.get('long_funding_rate', 0),
-                    opp.get('short_funding_rate', 0),
-                    opp.get('long_funding_interval_hours', 8) / 8,
-                    opp.get('short_funding_interval_hours', 8) / 8,
+                    # Profit projections (6 features)
                     opp.get('fund_profit_8h', 0),
                     opp.get('fundProfit8h24hProj', 0),
                     opp.get('fundProfit8h3dProj', 0),
                     opp.get('fund_apr', 0),
                     opp.get('fundApr24hProj', 0),
                     opp.get('fundApr3dProj', 0),
+                    # Spread metrics (4 features)
                     opp.get('spread30SampleAvg', 0),
                     opp.get('priceSpread24hAvg', 0),
                     opp.get('priceSpread3dAvg', 0),
                     opp.get('spread_volatility_stddev', 0),
-                    np.log10(max(float(opp.get('volume_24h', 1e6) or 1e6), 1e5)),
-                    float(opp.get('bidAskSpreadPercent', 0) or 0),
-                    np.log10(max(float(opp.get('orderbookDepthUsd', 1e4) or 1e4), 1e3)),
-                    float(opp.get('estimatedProfitPercentage', 0) or 0),
-                    float(opp.get('positionCostPercent', 0.2) or 0.2),
+                    # Velocity (1 feature - NEW in V3)
+                    opp.get('fund_profit_8h', 0) - opp.get('fundProfit8h24hProj', 0),  # apr_velocity
                 ]
 
                 # Convert to float32 and ensure no NaN/inf
@@ -1098,22 +1100,22 @@ class FundingArbitrageEnv(gym.Env):
 
         if self.feature_scaler is not None:
             # Apply scaler to normalize features (critical for training stability)
-            # 10 opportunities × 19 features each = 190 features
-            # Scaler expects 19 features per opportunity
+            # V3: 10 opportunities × 11 features each = 110 features
+            # Scaler expects 11 features per opportunity
             scaled_features = []
             for i in range(10):
-                opp_19_feats = opportunity_features_array[i*19:(i+1)*19]
-                # Scale using the scaler (expects 19 features)
-                opp_scaled = self.feature_scaler.transform(opp_19_feats.reshape(1, 19))
+                opp_11_feats = opportunity_features_array[i*11:(i+1)*11]
+                # Scale using the scaler (expects 11 features)
+                opp_scaled = self.feature_scaler.transform(opp_11_feats.reshape(1, 11))
                 scaled_features.extend(opp_scaled.flatten())
             opportunity_features_array = np.array(scaled_features, dtype=np.float32)
 
         # Concatenate all features
-        # all_features already contains config+portfolio+executions (111)
-        # Add opportunity features (190) for total of 301
+        # all_features already contains config+portfolio+executions (93)
+        # Add opportunity features (110) for total of 203
         observation = np.concatenate([
-            all_features,  # Contains config+portfolio+executions = 111
-            opportunity_features_array  # 190
+            all_features,  # Contains config+portfolio+executions = 93
+            opportunity_features_array  # 110
         ]).astype(np.float32)
 
         return observation
