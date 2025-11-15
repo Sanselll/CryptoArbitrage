@@ -275,7 +275,16 @@
       "Bash(if [ -f data/production/2025-11-13/11-10.json ])",
       "Bash(then cat data/production/2025-11-13/11-10.json)",
       "Bash(else echo \"No snapshot yet\")",
-      "Bash(for dir in /Users/sansel/Projects/CryptoArbitrage/src/CryptoArbitrage.API/data/production/*/)"
+      "Bash(for dir in /Users/sansel/Projects/CryptoArbitrage/src/CryptoArbitrage.API/data/production/*/)",
+      "Bash(src/CryptoArbitrage.API/Data/Entities/Position.cs )",
+      "Bash(src/CryptoArbitrage.API/Migrations/20251114151010_AddLastKnownAprToPosition.Designer.cs )",
+      "Bash(src/CryptoArbitrage.API/Migrations/20251114151010_AddLastKnownAprToPosition.cs )",
+      "Bash(src/CryptoArbitrage.API/Migrations/ArbitrageDbContextModelSnapshot.cs )",
+      "Bash(src/CryptoArbitrage.API/Models/PositionDto.cs )",
+      "Bash(src/CryptoArbitrage.API/Services/ML/RLPredictionService.cs)",
+      "Bash(git rev-parse:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
