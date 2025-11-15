@@ -164,6 +164,10 @@ public class OpportunityDetectionService : IOpportunityDetectionService
         if (positionKeys != null && positionKeys.Any())
         {
             await EnsurePositionOpportunitiesAsync(opportunities, positionKeys, snapshot);
+
+            // === FILTER OUT OPPOSITE EXCHANGE CONFIGURATIONS ===
+            // Remove opportunities where symbol matches but exchanges are swapped
+            FilterOppositeExchangeConfigurations(opportunities, positionKeys);
         }
 
         return await Task.FromResult(opportunities);
@@ -332,6 +336,52 @@ public class OpportunityDetectionService : IOpportunityDetectionService
             symbol, longExchange, shortExchange, opportunity.FundApr);
 
         return opportunity;
+    }
+
+    /// <summary>
+    /// Filters out opportunities with opposite exchange configurations when positions exist.
+    /// If we have a position for LSKUSDT (Binance Long, Bybit Short), this removes
+    /// LSKUSDT (Bybit Long, Binance Short) from the opportunities list.
+    /// Keeps only the opportunity that matches the active position's exchange configuration.
+    /// </summary>
+    private void FilterOppositeExchangeConfigurations(
+        List<ArbitrageOpportunityDto> opportunities,
+        HashSet<string> positionKeys)
+    {
+        // Build a set of exact position configurations
+        var positionConfigs = positionKeys
+            .Select(k => k.Split('|'))
+            .Where(parts => parts.Length == 3)
+            .Select(parts => (Symbol: parts[0], LongExchange: parts[1], ShortExchange: parts[2]))
+            .ToHashSet();
+
+        // Find opportunities to remove (opposite configurations)
+        var toRemove = new List<ArbitrageOpportunityDto>();
+
+        foreach (var config in positionConfigs)
+        {
+            // Find the opposite configuration (swapped exchanges)
+            var oppositeOpps = opportunities.Where(o =>
+                o.Symbol == config.Symbol &&
+                o.LongExchange == config.ShortExchange &&
+                o.ShortExchange == config.LongExchange)
+                .ToList();
+
+            toRemove.AddRange(oppositeOpps);
+        }
+
+        // Remove opposite configurations
+        if (toRemove.Any())
+        {
+            foreach (var opp in toRemove)
+            {
+                opportunities.Remove(opp);
+            }
+
+            _logger.LogInformation(
+                "Filtered out {Count} opposite-exchange opportunities for active positions",
+                toRemove.Count);
+        }
     }
 
     /// <summary>
