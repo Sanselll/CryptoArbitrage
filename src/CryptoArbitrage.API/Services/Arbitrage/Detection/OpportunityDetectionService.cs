@@ -118,7 +118,9 @@ public class OpportunityDetectionService : IOpportunityDetectionService
     /// Detect all types of arbitrage opportunities from the provided market data
     /// NEW ARCHITECTURE: Calculate all combinations once, then filter by strategy
     /// </summary>
-    public async Task<List<ArbitrageOpportunityDto>> DetectOpportunitiesAsync(MarketDataSnapshot snapshot)
+    public async Task<List<ArbitrageOpportunityDto>> DetectOpportunitiesAsync(
+        MarketDataSnapshot snapshot,
+        HashSet<string>? positionKeys = null)
     {
         var opportunities = new List<ArbitrageOpportunityDto>();
 
@@ -158,7 +160,178 @@ public class OpportunityDetectionService : IOpportunityDetectionService
 
         _logger.LogInformation("Total {Count} opportunities detected from market snapshot", opportunities.Count);
 
+        // === ENSURE OPPORTUNITIES FOR ACTIVE POSITIONS ===
+        if (positionKeys != null && positionKeys.Any())
+        {
+            await EnsurePositionOpportunitiesAsync(opportunities, positionKeys, snapshot);
+        }
+
         return await Task.FromResult(opportunities);
+    }
+
+    /// <summary>
+    /// Ensures that opportunities exist for all active positions.
+    /// If a position's configuration is not already in the detected opportunities,
+    /// creates it using current market data.
+    /// </summary>
+    private async Task EnsurePositionOpportunitiesAsync(
+        List<ArbitrageOpportunityDto> opportunities,
+        HashSet<string> positionKeys,
+        MarketDataSnapshot snapshot)
+    {
+        int addedCount = 0;
+
+        foreach (var positionKey in positionKeys)
+        {
+            var parts = positionKey.Split('|');
+            if (parts.Length != 3) continue;
+
+            var symbol = parts[0];
+            var longExchange = parts[1];
+            var shortExchange = parts[2];
+
+            // Check if opportunity already exists for this exact configuration
+            var existingOpp = opportunities.FirstOrDefault(o =>
+                o.Symbol == symbol &&
+                o.LongExchange == longExchange &&
+                o.ShortExchange == shortExchange);
+
+            if (existingOpp != null)
+            {
+                // Already detected, skip
+                continue;
+            }
+
+            // Create opportunity for this position using current market data
+            try
+            {
+                var newOpp = await CreateOpportunityForPositionAsync(
+                    symbol, longExchange, shortExchange, snapshot);
+
+                if (newOpp != null)
+                {
+                    opportunities.Add(newOpp);
+                    addedCount++;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to create opportunity for position {Symbol} ({LongEx}/{ShortEx})",
+                    symbol, longExchange, shortExchange);
+            }
+        }
+
+        if (addedCount > 0)
+        {
+            _logger.LogInformation(
+                "Added {Count} opportunities for active positions that were not detected",
+                addedCount);
+        }
+    }
+
+    /// <summary>
+    /// Creates an opportunity for an active position using current market data
+    /// </summary>
+    private async Task<ArbitrageOpportunityDto?> CreateOpportunityForPositionAsync(
+        string symbol,
+        string longExchange,
+        string shortExchange,
+        MarketDataSnapshot snapshot)
+    {
+        // Get funding rates for both exchanges
+        if (!snapshot.FundingRates.ContainsKey(longExchange) ||
+            !snapshot.FundingRates.ContainsKey(shortExchange))
+        {
+            _logger.LogWarning(
+                "Missing funding rate data for position {Symbol} ({LongEx}/{ShortEx})",
+                symbol, longExchange, shortExchange);
+            return null;
+        }
+
+        var longFundingData = snapshot.FundingRates[longExchange]
+            .FirstOrDefault(r => r.Symbol == symbol);
+        var shortFundingData = snapshot.FundingRates[shortExchange]
+            .FirstOrDefault(r => r.Symbol == symbol);
+
+        if (longFundingData == null || shortFundingData == null)
+        {
+            _logger.LogWarning(
+                "Missing funding rate for symbol {Symbol} on {LongEx} or {ShortEx}",
+                symbol, longExchange, shortExchange);
+            return null;
+        }
+
+        // Get prices
+        decimal longPrice = 0;
+        decimal shortPrice = 0;
+        decimal? longVolume = null;
+        decimal? shortVolume = null;
+
+        if (snapshot.PerpPrices.ContainsKey(longExchange) &&
+            snapshot.PerpPrices[longExchange].ContainsKey(symbol))
+        {
+            longPrice = snapshot.PerpPrices[longExchange][symbol].Price;
+            longVolume = snapshot.PerpPrices[longExchange][symbol].Volume24h;
+        }
+
+        if (snapshot.PerpPrices.ContainsKey(shortExchange) &&
+            snapshot.PerpPrices[shortExchange].ContainsKey(symbol))
+        {
+            shortPrice = snapshot.PerpPrices[shortExchange][symbol].Price;
+            shortVolume = snapshot.PerpPrices[shortExchange][symbol].Volume24h;
+        }
+
+        if (longPrice <= 0 || shortPrice <= 0)
+        {
+            _logger.LogWarning(
+                "Missing price data for position {Symbol} ({LongEx}/{ShortEx})",
+                symbol, longExchange, shortExchange);
+            return null;
+        }
+
+        // Calculate position cost
+        var positionCostPercent = await CalculatePositionCostPercentAsync(
+            true, longExchange, shortExchange);
+
+        // Create opportunity
+        var opportunity = new ArbitrageOpportunityDto
+        {
+            Strategy = ArbitrageStrategy.CrossExchange,
+            SubType = StrategySubType.CrossExchangeFuturesFutures,
+            Symbol = symbol,
+            LongExchange = longExchange,
+            ShortExchange = shortExchange,
+            LongFundingRate = longFundingData.Rate,
+            ShortFundingRate = shortFundingData.Rate,
+            LongFundingIntervalHours = longFundingData.FundingIntervalHours,
+            ShortFundingIntervalHours = shortFundingData.FundingIntervalHours,
+            LongNextFundingTime = longFundingData.NextFundingTime,
+            ShortNextFundingTime = shortFundingData.NextFundingTime,
+            LongExchangePrice = longPrice,
+            ShortExchangePrice = shortPrice,
+            CurrentPriceSpreadPercent = ((shortPrice - longPrice) / longPrice) * 100m,
+            SpotPrice = longPrice,
+            PerpetualPrice = shortPrice,
+            LongVolume24h = longVolume,
+            ShortVolume24h = shortVolume,
+            Volume24h = longVolume.HasValue && shortVolume.HasValue
+                ? Math.Min(longVolume.Value, shortVolume.Value)
+                : (longVolume ?? shortVolume ?? 0),
+            PositionCostPercent = positionCostPercent,
+            Status = OpportunityStatus.Detected,
+            DetectedAt = DateTime.UtcNow,
+            IsExistingPosition = true  // Mark as existing position
+        };
+
+        // Calculate metrics
+        CalculateOpportunityMetrics(opportunity, longFundingData, shortFundingData, positionCostPercent);
+
+        _logger.LogInformation(
+            "Created opportunity for position {Symbol} ({LongEx}/{ShortEx}): APR={APR:F2}%",
+            symbol, longExchange, shortExchange, opportunity.FundApr);
+
+        return opportunity;
     }
 
     /// <summary>

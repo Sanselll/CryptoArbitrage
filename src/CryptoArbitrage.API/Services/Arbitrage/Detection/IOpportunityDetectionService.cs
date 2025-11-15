@@ -11,5 +11,10 @@ public interface IOpportunityDetectionService
     /// <summary>
     /// Detect all types of arbitrage opportunities from the provided market data
     /// </summary>
-    Task<List<ArbitrageOpportunityDto>> DetectOpportunitiesAsync(MarketDataSnapshot snapshot);
+    /// <param name="snapshot">Market data snapshot</param>
+    /// <param name="positionKeys">Optional: Active position keys (format: "SYMBOL|LongExchange|ShortExchange").
+    /// If provided, opportunities for these positions will always be included.</param>
+    Task<List<ArbitrageOpportunityDto>> DetectOpportunitiesAsync(
+        MarketDataSnapshot snapshot,
+        HashSet<string>? positionKeys = null);
 }

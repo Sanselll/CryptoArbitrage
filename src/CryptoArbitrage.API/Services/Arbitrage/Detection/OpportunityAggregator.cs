@@ -177,12 +177,13 @@ public class OpportunityAggregator : IHostedService
             // Build complete MarketDataSnapshot
             var aggregatedSnapshot = BuildMarketSnapshot(fundingRatesDict, marketSnapshotsDict);
 
-
-            // Detect opportunities
-            var detectedOpportunities = await _opportunityDetectionService.DetectOpportunitiesAsync(aggregatedSnapshot);
-
             // Get open position keys
             var openPositionKeys = await GetOpenPositionKeysAsync();
+
+            // Detect opportunities (detection service will ensure position opportunities are always included)
+            var detectedOpportunities = await _opportunityDetectionService.DetectOpportunitiesAsync(
+                aggregatedSnapshot,
+                openPositionKeys);
 
             // Mark opportunities that have existing positions
             MarkExistingPositions(detectedOpportunities, openPositionKeys);
