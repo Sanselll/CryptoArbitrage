@@ -46,6 +46,7 @@ public class Position
     public string? PnlHistoryJson { get; set; }      // JSON array of last 6 P&L % snapshots (updated every collection cycle)
     public decimal PeakPnlPct { get; set; } = 0m;  // Maximum P&L % reached during position lifetime
     public decimal EntryApr { get; set; } = 0m;     // Funding APR at position entry time
+    public decimal LastKnownApr { get; set; } = 0m;  // Last successfully looked up current APR (fallback when symbol not in top opportunities)
     public DateTime? LastPnlSnapshotTime { get; set; }  // Last time P&L was snapshotted
 
     // Funding interval metadata (needed for accurate APR calculations)

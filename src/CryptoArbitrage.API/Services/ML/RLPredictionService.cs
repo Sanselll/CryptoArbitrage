@@ -986,13 +986,13 @@ public class RLPredictionService : IDisposable
 
                 // Feature 18: Current Position APR (direct from opportunities, matching test_inference)
                 // Use raw opportunity APR without smoothing to match test behavior
-                CurrentPositionApr = GetPositionAprFromOpportunities(longPos.Symbol, opportunities),
+                CurrentPositionApr = GetPositionAprFromOpportunities(longPos.Symbol, opportunities, longPos),
 
                 // Feature 19: Best Available APR (max APR among current opportunities)
                 BestAvailableApr = bestAvailableApr,
 
                 // Feature 20: APR Advantage (current - best, negative = better opportunities exist)
-                AprAdvantage = GetPositionAprFromOpportunities(longPos.Symbol, opportunities) - bestAvailableApr,
+                AprAdvantage = GetPositionAprFromOpportunities(longPos.Symbol, opportunities, longPos) - bestAvailableApr,
 
                 // ===== DEPRECATED FIELDS (kept for backward compatibility) =====
                 IsActive = true,
@@ -1407,26 +1407,37 @@ public class RLPredictionService : IDisposable
         return apr;
     }
 
-    private float GetPositionAprFromOpportunities(string symbol, List<ArbitrageOpportunityDto> opportunities)
+    private float GetPositionAprFromOpportunities(string symbol, List<ArbitrageOpportunityDto> opportunities, Position position)
     {
         // Lookup the matching opportunity for this position's symbol
         // The opportunity APR is calculated correctly (converts each funding rate to daily independently)
         var matchingOpp = opportunities.FirstOrDefault(o => o.Symbol == symbol);
         if (matchingOpp != null)
         {
-            return (float)matchingOpp.FundApr;
+            var apr = (float)matchingOpp.FundApr;
+            // Cache the successfully looked up APR for future fallback
+            position.LastKnownApr = (decimal)apr;
+            return apr;
         }
 
-        // Fallback: If no matching opportunity found, return 0
-        // This can happen if the opportunity expired but position still exists
-        _logger.LogWarning("No matching opportunity found for position symbol {Symbol}, using APR=0", symbol);
+        // Fallback 1: Use cached value if lookup failed and we have a cached value
+        if (position.LastKnownApr != 0m)
+        {
+            _logger.LogDebug("No matching opportunity found for position symbol {Symbol}, using cached APR={Apr:F2}%",
+                symbol, position.LastKnownApr);
+            return (float)position.LastKnownApr;
+        }
+
+        // Fallback 2: If no matching opportunity and no cache, return 0
+        // This can happen on first lookup if the opportunity expired immediately
+        _logger.LogWarning("No matching opportunity found for position symbol {Symbol} and no cached APR, using APR=0", symbol);
         return 0f;
     }
 
-    private float GetSmoothedPositionApr(string symbol, decimal entryApr, List<ArbitrageOpportunityDto> opportunities)
+    private float GetSmoothedPositionApr(string symbol, decimal entryApr, List<ArbitrageOpportunityDto> opportunities, Position position)
     {
         // Get current market APR for this symbol
-        var currentMarketApr = GetPositionAprFromOpportunities(symbol, opportunities);
+        var currentMarketApr = GetPositionAprFromOpportunities(symbol, opportunities, position);
 
         // If no market APR available or very close to entry, use entry APR
         // This prevents sudden drops when opportunity disappears temporarily
