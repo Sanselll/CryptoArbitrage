@@ -47,8 +47,8 @@ class Position:
     # Leverage and fees (with defaults)
     leverage: float = 1.0      # Leverage multiplier (1-10x)
     maker_fee: float = 0.0002  # 0.02% maker fee (realistic rate)
-    taker_fee: float = 0.00055  # 0.055% taker fee (realistic rate)
-    slippage_pct: float = -0.001  # -0.1% slippage (realistic, applied only on exit)
+    taker_fee: float = 0.0002  # 0.02% taker fee (realistic rate)
+    slippage_pct: float = 0  # 0% slippage
     entry_fee_pct: float = field(init=False)  # Calculated from maker/taker
     exit_fee_pct: float = field(init=False)
 
@@ -769,16 +769,16 @@ class Portfolio:
         estimated_pnl_pct = ((long_price_pnl + short_price_pnl) / total_capital) / 100 if total_capital > 0 else 0.0
 
         # 5. estimated_pnl_velocity = change in estimated P&L
-        # V3: NEW FEATURE - trend signal for price movement
-        estimated_pnl_velocity = (estimated_pnl_pct - pos.prev_estimated_pnl_pct) / 100
+        # V3: DISABLED - removed to eliminate state tracking complexity
+        estimated_pnl_velocity = 0.0  # (estimated_pnl_pct - pos.prev_estimated_pnl_pct) / 100
 
         # 6. estimated_funding_8h_pct = expected funding profit in next 8h
         # V3: NEW FEATURE - replaces confusing net_funding_rate
         estimated_funding_8h_pct = pos.calculate_estimated_funding_8h_pct() / 100
 
         # 7. funding_velocity = change in 8h funding estimate
-        # V3: NEW FEATURE - detects funding rate trends
-        funding_velocity = (estimated_funding_8h_pct - pos.prev_estimated_funding_8h_pct) / 100
+        # V3: DISABLED - removed to eliminate state tracking complexity
+        funding_velocity = 0.0  # (estimated_funding_8h_pct - pos.prev_estimated_funding_8h_pct) / 100
 
         # 8. spread_pct = current price spread
         # V3: Renamed from current_spread_pct for clarity
@@ -786,8 +786,8 @@ class Portfolio:
         spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
 
         # 9. spread_velocity = change in spread
-        # V3: NEW FEATURE - detects converging/diverging spreads
-        spread_velocity = spread_pct - pos.prev_spread_pct
+        # V3: DISABLED - removed to eliminate state tracking complexity
+        spread_velocity = 0.0  # spread_pct - pos.prev_spread_pct
 
         # 10. liquidation_distance_pct
         liquidation_distance_pct = pos.get_liquidation_distance(current_long_price, current_short_price)

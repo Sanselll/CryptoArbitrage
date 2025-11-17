@@ -583,9 +583,9 @@ class FundingArbitrageEnv(gym.Env):
         # Get observation
         observation = self._get_observation()
 
-        # V3: Update velocity tracking for next step (MUST be called AFTER observation)
+        # V3: Update velocity tracking for next step (DISABLED - velocity features set to 0)
         # This stores current values as "previous" for velocity calculations
-        self.portfolio.update_velocity_tracking(price_data)
+        # self.portfolio.update_velocity_tracking(price_data)
 
         # Info
         info.update({
@@ -809,9 +809,12 @@ class FundingArbitrageEnv(gym.Env):
         - Holding losers reduces P&L → agent naturally learns to exit losers
 
         Returns:
-            0.0 (no exit bonus, let agent learn from P&L outcomes)
+            Reward for exiting (includes bonus for exiting negative funding positions)
         """
         position = self.portfolio.positions[position_idx]
+
+        # Calculate estimated funding BEFORE closing
+        estimated_funding_8h_pct = position.calculate_estimated_funding_8h_pct()
 
         # Get current prices for exit
         prices = self._get_current_prices()
@@ -827,8 +830,16 @@ class FundingArbitrageEnv(gym.Env):
                 symbol_prices['short_price']
             )
 
-            # NO exit reward - agent learns from P&L outcomes only
-            return 0.0
+            # Negative funding exit reward: Bonus for exiting positions losing money via funding
+            # When estimated_funding_8h_pct < 0, position is paying funding (bad!)
+            # Reward agent for recognizing and exiting these positions
+            exit_reward = 0.0
+            if estimated_funding_8h_pct < 0:
+                # Positive reward for exiting negative funding position
+                # Scale by magnitude of negative funding and config scale
+                exit_reward = abs(estimated_funding_8h_pct) * self.reward_config.negative_funding_exit_reward_scale
+
+            return exit_reward
         else:
             # No price data available (shouldn't happen)
             return 0.0

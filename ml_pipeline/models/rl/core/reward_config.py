@@ -67,6 +67,14 @@ class RewardConfig:
     # Set to 0.0 to disable (recommended), 0.03-0.10 for experimentation only
     opportunity_cost_scale: float = 0.0
 
+    # Negative funding exit reward: Bonus for exiting positions with negative estimated funding
+    # When estimated_funding_8h_pct < 0, the position is paying funding (losing money)
+    # Reward agent for recognizing and exiting these losing positions quickly
+    # Scale: reward = abs(estimated_funding_8h_pct) * scale (applied on EXIT action)
+    # Recommended: 1.0-5.0 (1.0 = neutral, 5.0 = strong incentive)
+    # Set to 0.0 to disable
+    negative_funding_exit_reward_scale: float = 0.0
+
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary for serialization."""
         return {
@@ -74,6 +82,7 @@ class RewardConfig:
             'price_reward_scale': self.price_reward_scale,
             'liquidation_penalty_scale': self.liquidation_penalty_scale,
             'opportunity_cost_scale': self.opportunity_cost_scale,
+            'negative_funding_exit_reward_scale': self.negative_funding_exit_reward_scale,
         }
 
     @classmethod
@@ -86,7 +95,8 @@ class RewardConfig:
                       funding_range=(0.5, 2.0),
                       price_range=(0.5, 2.0),
                       liquidation_range=(5.0, 20.0),
-                      opportunity_cost_range=(0.0, 0.15)) -> 'RewardConfig':
+                      opportunity_cost_range=(0.0, 0.15),
+                      negative_funding_exit_range=(0.0, 5.0)) -> 'RewardConfig':
         """
         Sample random reward configuration for PBT exploration.
 
@@ -95,6 +105,7 @@ class RewardConfig:
             price_range: Range for price_reward_scale
             liquidation_range: Range for liquidation_penalty_scale
             opportunity_cost_range: Range for opportunity_cost_scale
+            negative_funding_exit_range: Range for negative_funding_exit_reward_scale
 
         Returns:
             RewardConfig with randomly sampled parameters
@@ -104,6 +115,7 @@ class RewardConfig:
             price_reward_scale=np.random.uniform(*price_range),
             liquidation_penalty_scale=np.random.uniform(*liquidation_range),
             opportunity_cost_scale=np.random.uniform(*opportunity_cost_range),
+            negative_funding_exit_reward_scale=np.random.uniform(*negative_funding_exit_range),
         )
 
     def perturb(self, factor: float = 0.2) -> 'RewardConfig':
@@ -123,6 +135,7 @@ class RewardConfig:
             price_reward_scale=self.price_reward_scale * multiplier,
             liquidation_penalty_scale=self.liquidation_penalty_scale * multiplier,
             opportunity_cost_scale=max(0.0, self.opportunity_cost_scale * multiplier),  # Keep >= 0
+            negative_funding_exit_reward_scale=max(0.0, self.negative_funding_exit_reward_scale * multiplier),  # Keep >= 0
         )
 
     def __repr__(self) -> str:
@@ -130,7 +143,8 @@ class RewardConfig:
             f"RewardConfig(funding={self.funding_reward_scale:.2f}, "
             f"price={self.price_reward_scale:.2f}, "
             f"liq={self.liquidation_penalty_scale:.0f}, "
-            f"opp_cost={self.opportunity_cost_scale:.2f})"
+            f"opp_cost={self.opportunity_cost_scale:.2f}, "
+            f"neg_fund_exit={self.negative_funding_exit_reward_scale:.2f})"
         )
 
 
@@ -143,6 +157,7 @@ CONSERVATIVE_CONFIG = RewardConfig(
     price_reward_scale=0.5,        # Balanced with funding
     liquidation_penalty_scale=20.0,  # Stronger safety
     opportunity_cost_scale=0.0,     # Disabled (see docstring above)
+    negative_funding_exit_reward_scale=0.0,  # Disabled by default
 )
 
 AGGRESSIVE_CONFIG = RewardConfig(
@@ -150,4 +165,5 @@ AGGRESSIVE_CONFIG = RewardConfig(
     price_reward_scale=2.0,        # Balanced with funding
     liquidation_penalty_scale=5.0,   # Weaker safety (explore more)
     opportunity_cost_scale=0.0,     # Disabled (see docstring above)
+    negative_funding_exit_reward_scale=0.0,  # Disabled by default
 )

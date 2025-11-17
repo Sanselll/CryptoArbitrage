@@ -118,6 +118,10 @@ public class RLPositionState
     public float ShortFundingRate { get; set; }  // Short exchange rate (line 244)
     public float LongFundingRate { get; set; }  // Long exchange rate (line 245)
 
+    // Funding intervals (CRITICAL for accurate 8h funding calculation)
+    public int LongFundingIntervalHours { get; set; }  // Long exchange interval (1h or 8h)
+    public int ShortFundingIntervalHours { get; set; }  // Short exchange interval (1h or 8h)
+
     // Price data (raw prices for both legs)
     public float CurrentLongPrice { get; set; }  // Current long price (line 248)
     public float CurrentShortPrice { get; set; }  // Current short price (line 249)

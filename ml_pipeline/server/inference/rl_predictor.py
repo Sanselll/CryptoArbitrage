@@ -112,6 +112,14 @@ class ModularRLPredictor:
         # Set to evaluation mode
         self.network.eval()
 
+        # Compile network for faster inference (PyTorch 2.0+)
+        # Using 'default' mode for balanced compilation
+        try:
+            self.network = torch.compile(self.network, mode='default')
+            print("✅ Model compiled with torch.compile for faster inference")
+        except Exception as e:
+            print(f"⚠️  torch.compile not available (requires PyTorch 2.0+): {e}")
+
         # Get model info
         total_params = sum(p.numel() for p in self.network.parameters())
         print(f"   Network parameters: {total_params:,}")
@@ -263,9 +271,8 @@ class ModularRLPredictor:
                 estimated_pnl_pct = ((long_price_pnl + short_price_pnl) / total_capital_used) / 100 if total_capital_used > 0 else 0.0
 
                 # 5. estimated_pnl_velocity = change in estimated P&L
-                # V3: NEW FEATURE - trend signal for price movement
-                prev_estimated_pnl_pct = pos.get('prev_estimated_pnl_pct', 0.0)
-                estimated_pnl_velocity = (estimated_pnl_pct - prev_estimated_pnl_pct) / 100
+                # V3: DISABLED - removed to eliminate state tracking complexity
+                estimated_pnl_velocity = 0.0  # (estimated_pnl_pct - prev_estimated_pnl_pct) / 100
 
                 # 6. estimated_funding_8h_pct = expected funding profit in next 8h
                 # V3: NEW FEATURE - replaces confusing net_funding_rate
@@ -279,12 +286,11 @@ class ModularRLPredictor:
                 short_payments_8h = 8.0 / short_interval if short_interval > 0 else 1.0
                 long_funding_8h = -long_rate * long_payments_8h
                 short_funding_8h = short_rate * short_payments_8h
-                estimated_funding_8h_pct = ((long_funding_8h + short_funding_8h) * 100) / 100
+                estimated_funding_8h_pct = (long_funding_8h + short_funding_8h) * 100
 
                 # 7. funding_velocity = change in 8h funding estimate
-                # V3: NEW FEATURE - detects funding rate trends
-                prev_funding_8h_pct = pos.get('prev_estimated_funding_8h_pct', 0.0)
-                funding_velocity = (estimated_funding_8h_pct - prev_funding_8h_pct) / 100
+                # V3: DISABLED - removed to eliminate state tracking complexity
+                funding_velocity = 0.0  # (estimated_funding_8h_pct - prev_funding_8h_pct) / 100
 
                 # 8. spread_pct = current price spread
                 # V3: Renamed from current_spread_pct for clarity
@@ -292,9 +298,8 @@ class ModularRLPredictor:
                 spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
 
                 # 9. spread_velocity = change in spread
-                # V3: NEW FEATURE - detects converging/diverging spreads
-                prev_spread_pct = pos.get('prev_spread_pct', 0.0)
-                spread_velocity = spread_pct - prev_spread_pct
+                # V3: DISABLED - removed to eliminate state tracking complexity
+                spread_velocity = 0.0  # spread_pct - prev_spread_pct
 
                 # 10. liquidation_distance_pct
                 liquidation_distance_pct = pos.get('liquidation_distance', 1.0)

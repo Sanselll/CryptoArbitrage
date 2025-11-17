@@ -949,6 +949,10 @@ public class RLPredictionService : IDisposable
                 ShortFundingRate = (float)shortFR,
                 LongFundingRate = (float)longFR,
 
+                // Funding intervals (CRITICAL for accurate 8h funding calculation)
+                LongFundingIntervalHours = (int)longPos.LongFundingIntervalHours,
+                ShortFundingIntervalHours = (int)shortPos.ShortFundingIntervalHours,
+
                 // Raw prices
                 CurrentLongPrice = (float)longPrice,
                 CurrentShortPrice = (float)shortPrice,

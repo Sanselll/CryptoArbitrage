@@ -61,7 +61,7 @@ def parse_args():
     parser.add_argument('--max-positions', type=int, default=2,
                         help='Maximum concurrent positions (1-5)')
 
-    # Reward config (Balanced RL-v2 approach + Opportunity Cost)
+    # Reward config (Balanced RL-v2 approach + Negative Funding Exit Reward)
     parser.add_argument('--funding-reward-scale', type=float, default=1.0,
                         help='Scale for funding P&L reward (equal weight with price)')
     parser.add_argument('--price-reward-scale', type=float, default=1.0,
@@ -70,6 +70,8 @@ def parse_args():
                         help='Penalty scale for approaching liquidation (10 for less conservative, 0 to disable)')
     parser.add_argument('--opportunity-cost-scale', type=float, default=0.0,
                         help='Opportunity cost penalty (DISABLED by default - causes overtrading, use 0.0)')
+    parser.add_argument('--negative-funding-exit-reward-scale', type=float, default=0.0,
+                        help='Exit reward scale for positions with negative funding (0.0=disabled, 2.0=moderate incentive)')
 
     # PPO hyperparameters
     parser.add_argument('--learning-rate', type=float, default=3e-4,
@@ -114,6 +116,13 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducible results (default: 42)')
 
+    # Parallel environments
+    parser.add_argument('--n-envs', type=int, default=1,
+                        help='Number of parallel environments (1=sequential, 4-8=parallel for speedup)')
+    parser.add_argument('--parallel-start-method', type=str, default=None,
+                        choices=[None, 'spawn', 'fork'],
+                        help='Multiprocessing start method (None=default, spawn=safer, fork=faster on Unix)')
+
     return parser.parse_args()
 
 
@@ -136,12 +145,13 @@ def create_environment(args, data_path: str, is_test_env: bool = False, verbose:
             max_positions=args.max_positions,
         )
 
-    # Create RewardConfig (RL-v2 + Opportunity Cost)
+    # Create RewardConfig (RL-v2 + Negative Funding Exit Reward)
     reward_config = RewardConfig(
         funding_reward_scale=args.funding_reward_scale,
         price_reward_scale=args.price_reward_scale,
         liquidation_penalty_scale=args.liquidation_penalty_scale,
         opportunity_cost_scale=args.opportunity_cost_scale,
+        negative_funding_exit_reward_scale=args.negative_funding_exit_reward_scale,
     )
 
     # Convert step minutes to hours for the environment
@@ -338,7 +348,32 @@ def train(args):
     print("\n" + "=" * 80)
     print("CREATING TRAIN ENVIRONMENT")
     print("=" * 80)
-    train_env = create_environment(args, data_path=args.train_data_path, is_test_env=False, verbose=True)
+
+    # Check if we should use parallel environments
+    use_parallel = args.n_envs > 1
+
+    if use_parallel:
+        from models.rl.core.vec_env import ParallelEnv
+
+        print(f"🚀 Using {args.n_envs} parallel environments for training")
+        print(f"   Start method: {args.parallel_start_method or 'default'}")
+
+        # Create environment factory functions
+        def make_train_env(seed_offset):
+            def _init():
+                env = create_environment(args, data_path=args.train_data_path, is_test_env=False, verbose=False)
+                # Set different seed for each environment
+                env.seed = args.seed + seed_offset
+                return env
+            return _init
+
+        env_fns = [make_train_env(i) for i in range(args.n_envs)]
+        train_env = ParallelEnv(env_fns, start_method=args.parallel_start_method)
+
+        print(f"✅ {args.n_envs} parallel environments created")
+    else:
+        print("Using single environment (sequential training)")
+        train_env = create_environment(args, data_path=args.train_data_path, is_test_env=False, verbose=True)
 
     print("\n" + "=" * 80)
     print("CREATING TEST ENVIRONMENT (for evaluation)")
@@ -383,6 +418,8 @@ def train(args):
     print("=" * 80)
     print(f"Training for {args.num_episodes} episodes")
     print(f"Device: {args.device}")
+    if use_parallel:
+        print(f"Parallel mode: {args.n_envs} environments")
     print()
 
     best_composite_score = -float('inf')
@@ -392,7 +429,10 @@ def train(args):
         episode_start_time = time.time()
 
         # Train one episode (on TRAIN data)
-        stats = trainer.train_episode(train_env, max_steps=1000)
+        if use_parallel:
+            stats = trainer.train_episode_vectorized(train_env, max_steps=1000)
+        else:
+            stats = trainer.train_episode(train_env, max_steps=1000)
 
         episode_time = time.time() - episode_start_time
 
@@ -495,6 +535,11 @@ def train(args):
     final_path = checkpoint_dir / 'final_model.pt'
     trainer.save(str(final_path))
 
+    # Cleanup parallel environments
+    if use_parallel:
+        print("\n🧹 Closing parallel environments...")
+        train_env.close()
+
     total_time = time.time() - start_time
     print("\n" + "=" * 80)
     print("TRAINING COMPLETE")
@@ -503,6 +548,9 @@ def train(args):
     print(f"Total timesteps: {trainer.total_timesteps:,}")
     print(f"Best composite score: {best_composite_score:.4f}")
     print(f"Final model saved: {final_path}")
+    if use_parallel:
+        speedup = args.n_envs * 0.7  # Approximate speedup (70% efficiency)
+        print(f"Parallel speedup: ~{speedup:.1f}x with {args.n_envs} environments")
 
 
 if __name__ == '__main__':

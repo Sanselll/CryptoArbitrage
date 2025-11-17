@@ -592,7 +592,13 @@ public class AgentBackgroundService : BackgroundService
                         if (execPositions.Any())
                         {
                             // Calculate total P&L from both long and short positions
-                            var totalPnl = execPositions.Sum(p => p.UnrealizedPnL);
+                            // CRITICAL FIX: Include ALL P&L components (price + funding - fees)
+                            // Formula matches PositionReconciliationService: RealizedPnL = FundingEarned + PricePnL - TradingFees
+                            var totalPnl = execPositions.Sum(p =>
+                                p.UnrealizedPnL +          // Price P&L (current price vs entry)
+                                p.FundingEarnedUsd -       // Funding fees earned/paid (positive or negative)
+                                p.TradingFeesUsd           // Trading fees paid (already negative in DB)
+                            );
                             var totalInitialMargin = execPositions.Sum(p => p.InitialMargin);
 
                             result.ProfitUsd = totalPnl;
@@ -722,7 +728,15 @@ public class AgentBackgroundService : BackgroundService
             else if (action == "ENTER")
                 session.EnterDecisions++;
             else if (action == "EXIT")
+            {
                 session.ExitDecisions++;
+
+                // CRITICAL FIX: Update session P&L after EXIT actions
+                // Calculate cumulative P&L from all successful EXIT decisions in this session
+                var (pnlUsd, pnlPct, _, _) = _decisionRepository.GetSessionMetrics(session.Id);
+                session.SessionPnLUsd = pnlUsd;
+                session.SessionPnLPct = pnlPct;
+            }
 
             session.UpdatedAt = DateTime.UtcNow;
             await context.SaveChangesAsync();

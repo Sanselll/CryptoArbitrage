@@ -107,6 +107,15 @@ class PPOTrainer:
             device: Device to use ('cpu' or 'cuda')
         """
         self.network = network.to(device)
+
+        # Compile network for faster training (PyTorch 2.0+)
+        # Using 'reduce-overhead' mode for smaller models with frequent forward passes
+        try:
+            self.network = torch.compile(self.network, mode='reduce-overhead')
+            print("✅ Model compiled with torch.compile for faster training")
+        except Exception as e:
+            print(f"⚠️  torch.compile not available (requires PyTorch 2.0+): {e}")
+
         self.device = device
 
         # Hyperparameters
@@ -388,6 +397,130 @@ class PPOTrainer:
             'episode_length': episode_length,
             'mean_reward_100': np.mean(self.episode_rewards) if self.episode_rewards else 0.0,
             'mean_length_100': np.mean(self.episode_lengths) if self.episode_lengths else 0.0,
+            **update_stats
+        }
+
+    def train_episode_vectorized(self, vec_env, max_steps: int = 1000) -> Dict[str, float]:
+        """
+        Collect rollouts from multiple parallel environments and update the policy.
+
+        This is significantly faster than train_episode() as it collects data from
+        multiple environments simultaneously.
+
+        Args:
+            vec_env: ParallelEnv instance (multiple environments in parallel)
+            max_steps: Maximum steps per episode (applied to each environment)
+
+        Returns:
+            Dictionary of episode statistics (averaged across all environments)
+        """
+        from models.rl.core.vec_env import ParallelEnv
+
+        n_envs = len(vec_env)
+        buffer = RolloutBuffer()
+
+        # Reset all environments
+        obs, infos = vec_env.reset()  # (n_envs, obs_dim)
+
+        # Track per-environment episode stats
+        episode_rewards = np.zeros(n_envs)
+        episode_lengths = np.zeros(n_envs)
+        completed_episodes = []
+
+        for step in range(max_steps):
+            # Get action masks from all environments
+            action_masks = vec_env.get_action_masks()  # (n_envs, n_actions) or None
+
+            # Select actions for all environments (batch inference)
+            actions = []
+            values = []
+            log_probs = []
+
+            with torch.no_grad():
+                obs_tensor = torch.FloatTensor(obs).to(self.device)  # (n_envs, obs_dim)
+
+                if action_masks is not None:
+                    mask_tensor = torch.BoolTensor(action_masks).to(self.device)
+                else:
+                    mask_tensor = None
+
+                # Batch forward pass
+                for i in range(n_envs):
+                    obs_i = obs_tensor[i:i+1]  # (1, obs_dim)
+                    mask_i = mask_tensor[i:i+1] if mask_tensor is not None else None
+
+                    action, value, log_prob = self.select_action(obs_i[0].cpu().numpy(),
+                                                                 mask_i[0].cpu().numpy() if mask_i is not None else None)
+                    actions.append(action)
+                    values.append(value)
+                    log_probs.append(log_prob)
+
+            actions = np.array(actions)
+
+            # Step all environments
+            next_obs, rewards, terminated, truncated, infos = vec_env.step(actions)
+            dones = terminated | truncated
+
+            # Store transitions for all environments
+            for i in range(n_envs):
+                mask_i = action_masks[i] if action_masks is not None else None
+                buffer.add(obs[i], actions[i], rewards[i], values[i], log_probs[i], dones[i], mask_i)
+
+                episode_rewards[i] += rewards[i]
+                episode_lengths[i] += 1
+                self.total_timesteps += 1
+
+                # Track completed episodes
+                if infos[i].get('episode_ended', False):
+                    completed_episodes.append({
+                        'reward': episode_rewards[i],
+                        'length': episode_lengths[i]
+                    })
+                    episode_rewards[i] = 0.0
+                    episode_lengths[i] = 0.0
+
+            # Update observations
+            obs = next_obs
+
+            # Early stopping if all environments done (unlikely in practice)
+            if np.all(dones):
+                break
+
+        # Get last values for bootstrapping (for all environments)
+        with torch.no_grad():
+            obs_tensor = torch.FloatTensor(obs).to(self.device)
+            # For simplicity, compute average last value across environments
+            # In practice, each env may need its own bootstrap value
+            last_values = []
+            for i in range(n_envs):
+                _, last_value_tensor = self.network(obs_tensor[i:i+1], None)
+                last_values.append(last_value_tensor.item())
+            last_value = np.mean(last_values)
+
+        # Update policy with collected rollouts
+        update_stats = self.update(buffer, last_value)
+
+        # Calculate episode statistics (from completed episodes)
+        if completed_episodes:
+            mean_reward = np.mean([ep['reward'] for ep in completed_episodes])
+            mean_length = np.mean([ep['length'] for ep in completed_episodes])
+
+            # Track for rolling average
+            for ep in completed_episodes:
+                self.episode_rewards.append(ep['reward'])
+                self.episode_lengths.append(ep['length'])
+        else:
+            # Use current (incomplete) episode stats
+            mean_reward = np.mean(episode_rewards)
+            mean_length = np.mean(episode_lengths)
+
+        return {
+            'episode_reward': mean_reward,
+            'episode_length': mean_length,
+            'mean_reward_100': np.mean(self.episode_rewards) if self.episode_rewards else 0.0,
+            'mean_length_100': np.mean(self.episode_lengths) if self.episode_lengths else 0.0,
+            'n_completed_episodes': len(completed_episodes),
+            'n_envs': n_envs,
             **update_stats
         }
 
