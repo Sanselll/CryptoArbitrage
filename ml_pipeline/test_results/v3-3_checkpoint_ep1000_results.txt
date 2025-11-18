@@ -1,0 +1,84 @@
+================================================================================
+TESTING MODEL INFERENCE ON TEST SET
+================================================================================
+
+🎲 Random seed: 42
+
+1. Creating test environment...
+   Pre-converting 22,726 opportunities to dict format...
+   ✓ Pre-conversion complete (22,726 records)
+✅ Test environment created
+   Data: data/production/rl_opportunities.csv
+   🌐 FULL TEST MODE: Testing on ENTIRE test dataset
+   Episode length: 2.9 days (2025-11-13 11:40:00.011682+00:00 to 2025-11-16 09:54:59.990073+00:00)
+   Total steps: ~842 steps at 5-minute intervals
+   Step interval: 5 minute(s) (0.0833 hours)
+   Initial capital: $10,000.00
+   Leverage: 2.0x
+   Utilization: 80%
+   Max Positions: 2
+   Price History: data/production/symbol_data (dynamic funding updates enabled)
+
+2. Creating network...
+✅ Network created (791,349 parameters)
+
+3. Creating trainer...
+✅ Model compiled with torch.compile for faster training
+✅ Trainer created
+
+4. Loading trained model...
+✅ Model loaded from checkpoints/v3-3/checkpoint_ep1000.pt
+
+5. Running inference on 1 episode...
+   Episode 1: Reward=   0.43, P&L=$  41.37 (0.41%), Trades= 4, Length=843 steps
+
+✅ Inference test complete!
+
+================================================================================
+DETAILED EVALUATION METRICS (TEST SET)
+================================================================================
+
+📊 Episode Metrics:
+  Mean Reward:         0.43 ± 0.00
+  Mean Length:        843.0 steps (5 min/step)
+
+💰 P&L Metrics:
+  Mean P&L (USD):  $   41.37
+  Mean P&L (%):        0.41%
+  Total P&L:       $   41.37
+
+📈 Trading Metrics:
+  Total Trades:           4
+  Winning Trades:         3
+  Losing Trades:          1
+  Win Rate:            75.0%
+  Avg Duration:        35.0 hours
+
+🎯 Opportunity Metrics:
+  Opportunities/Ep:    7140
+  Trades/Episode:       4.0
+  Execution Rate:   0.1%
+
+⚠️  Risk Metrics:
+  Max Drawdown:        0.00%
+
+📊 Profitability Metrics:
+  Profit Factor:     173.33
+
+⚙️  Configuration Used:
+  Leverage:        2.0x
+  Utilization:     80%
+  Max Positions:   2
+
+🎯 Composite Score: 0.5413
+   (P&L: 0.083 | ProfitFactor: 1.000 | Drawdown: 1.000)
+
+💾 Trade Records:
+   Total trades: 4
+   Closed trades: 4
+   Open positions: 0
+   Saved to: trades_inference.csv
+
+================================================================================
+✅ ALL INFERENCE TESTS PASSED
+================================================================================

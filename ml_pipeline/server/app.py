@@ -15,9 +15,10 @@ from datetime import datetime
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from server.inference.rl_predictor import ModularRLPredictor
 from server.agent_manager import AgentManager, AgentConfig, AgentStatus
 from server.decision_logger import DecisionLogger
+from common.features.schemas import RLRawDataRequest, RLPredictionResponse
+from server.inference.rl_predictor import ModularRLPredictor
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for C# API calls
@@ -64,21 +65,29 @@ def initialize_predictor():
     # Set random seed for reproducible predictions
     np.random.seed(42)
     torch.manual_seed(42)
-    print("🎲 Random seed: 42 (reproducible predictions)")
+
+    # Enable deterministic algorithms for 100% reproducibility
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    print("🎲 Random seed: 42 (deterministic mode enabled)")
+    print("   torch.use_deterministic_algorithms(True)")
+    print("   cudnn.deterministic=True, cudnn.benchmark=False")
 
     global rl_predictor
     if rl_predictor is None:
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='checkpoints/v3_production/best_model.pt',
+                model_path='checkpoints/v3-4/checkpoint_ep1250.pt',
                 device='cpu'
             )
-            print("✅ Modular RL predictor initialized successfully (V3)")
-            print("   Model: ModularPPONetwork (203 dims = 5 config + 3 portfolio + 85 executions + 110 opportunities)")
-            print("   Path: checkpoints/v3_production/best_model.pt (V3 Best Model)")
+            print("✅ RL predictor initialized successfully")
+            print("   Architecture: Unified Feature Builder (203 dims)")
+            print("   Model: checkpoints/v3-4/checkpoint_ep1250.pt")
             print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
-            print("   V3 Features: Streamlined (301→203), added velocities, removed historical metrics")
+            print("   Features: 5 config + 3 portfolio + 85 executions + 110 opportunities")
         except Exception as e:
             print(f"⚠️  Warning: Could not initialize RL predictor: {e}")
             print("   RL endpoints will be unavailable")
@@ -521,21 +530,34 @@ def update_agent_decision():
 
 
 # ============================================================================
-# RL PREDICTION ENDPOINTS (Existing)
+# RL PREDICTION ENDPOINT
 # ============================================================================
 
-@app.route('/rl/predict/opportunities', methods=['POST'])
-def predict_opportunities():
+@app.route('/rl/predict', methods=['POST'])
+def predict():
     """
-    Predict best action for opportunities using Modular RL model.
+    RL Prediction API - Uses UnifiedFeatureBuilder architecture.
 
-    Modular Mode: Evaluates up to 10 opportunities simultaneously and returns a single recommended action.
+    This endpoint uses the refactored architecture with:
+    - Pydantic schema validation for raw data
+    - UnifiedFeatureBuilder for feature preparation
+    - Single source of truth for all feature engineering
 
     Expects JSON body:
     {
-        "opportunities": [...],   # List of up to 10 opportunity dicts
-        "portfolio": {...},       # Current portfolio state
-        "trading_config": {...}   # Optional: trading configuration
+        "trading_config": {
+            "max_leverage": 2.0,
+            "target_utilization": 0.8,
+            "max_positions": 3,
+            "stop_loss_threshold": -0.02,
+            "liquidation_buffer": 0.15
+        },
+        "portfolio": {
+            "total_capital": 10000.0,
+            "capital_utilization": 0.5,
+            "positions": [...]
+        },
+        "opportunities": [...]
     }
 
     Returns:
@@ -561,26 +583,54 @@ def predict_opportunities():
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        opportunities = data.get('opportunities', [])
-        portfolio = data.get('portfolio', {})
-        trading_config = data.get('trading_config', None)
+        # LOG RAW REQUEST DATA BEFORE VALIDATION FOR DEBUGGING
+        try:
+            log_entry = {
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'data': data
+            }
+            with open('/tmp/ml_api_requests_raw.jsonl', 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
+        except Exception as e:
+            print(f"Warning: Failed to log raw request data: {e}")
+
+        # Validate input with Pydantic
+        try:
+            validated_request = RLRawDataRequest(**data)
+        except Exception as validation_error:
+            return jsonify({
+                'error': 'Validation failed',
+                'details': str(validation_error)
+            }), 400
+
+        # Convert to dict for predictor
+        raw_data_dict = validated_request.dict()
+
+        # LOG VALIDATED REQUEST DATA FOR DEBUGGING
+        try:
+            log_entry = {
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'data': raw_data_dict
+            }
+            with open('/tmp/ml_api_requests_validated.jsonl', 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
+        except Exception as e:
+            print(f"Warning: Failed to log validated request data: {e}")
 
         # LOG REQUEST DATA
         print(f"\n========== ML API REQUEST ==========")
-        print(f"Num Opportunities: {len(opportunities)}")
-        print(f"Portfolio num_positions: {portfolio.get('num_positions', 'N/A')}")
-        print(f"Portfolio positions: {portfolio.get('positions', [])}")
-        print(f"Trading config: {trading_config}")
+        print(f"Num Opportunities: {len(raw_data_dict['opportunities'])}")
+        print(f"Portfolio positions: {len(raw_data_dict['portfolio'].get('positions', []))}")
+        print(f"Trading config: max_leverage={raw_data_dict['trading_config'].get('max_leverage')}, "
+              f"max_positions={raw_data_dict['trading_config'].get('max_positions')}")
         print(f"====================================\n")
 
-        if not opportunities:
-            return jsonify({'error': 'No opportunities provided'}), 400
-
-        if not portfolio:
-            return jsonify({'error': 'No portfolio state provided'}), 400
-
-        # Predict best action (processes all opportunities simultaneously)
-        prediction = rl_predictor.predict_opportunities(opportunities, portfolio, trading_config)
+        # Make prediction
+        prediction = rl_predictor.predict_opportunities(
+            opportunities=raw_data_dict['opportunities'],
+            portfolio=raw_data_dict['portfolio'],
+            trading_config=raw_data_dict['trading_config']
+        )
 
         # LOG RESPONSE DATA
         print(f"\n========== ML API RESPONSE ==========")
@@ -593,91 +643,19 @@ def predict_opportunities():
 
         # Get model info
         model_info = rl_predictor.get_model_info()
-
-        # Add model info to response
         prediction['model_info'] = model_info
 
         # Log raw input/output for analysis
         log_raw_decision(
-            request_data={
-                'opportunities': opportunities,
-                'portfolio': portfolio,
-                'trading_config': trading_config
-            },
+            request_data=raw_data_dict,
             response_data=prediction,
-            user_id=portfolio.get('user_id')  # Extract user_id from portfolio if available
+            user_id=raw_data_dict['portfolio'].get('user_id')
         )
 
         return jsonify(prediction)
 
     except Exception as e:
-        print(f"Error in /rl/predict/opportunities: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/rl/predict/positions', methods=['POST'])
-def predict_positions():
-    """
-    Evaluate EXIT probability for open position using RL model (Simple Mode).
-
-    Simple Mode: Only evaluates first position (1 position only).
-
-    Expects JSON body:
-    {
-        "positions": [...],       # List of position dicts (only first is evaluated)
-        "portfolio": {...},       # Current portfolio state
-        "opportunity": {...}      # Optional: current opportunity for full observation
-    }
-
-    Returns:
-    {
-        "predictions": [
-            {
-                "position_index": 0,
-                "symbol": "BTCUSDT",
-                "exit_probability": 0.65,
-                "confidence": "MEDIUM",
-                "hold_probability": 0.20,
-                "state_value": 150.5
-            }
-        ],
-        "model_version": "pbt_20251103_092148"
-    }
-    """
-    try:
-        if rl_predictor is None:
-            return jsonify({'error': 'RL predictor not initialized'}), 503
-
-        data = request.get_json()
-
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-
-        positions = data.get('positions', [])
-        portfolio = data.get('portfolio', {})
-        opportunity = data.get('opportunity', None)  # Single opportunity (simple mode)
-
-        if not positions:
-            return jsonify({'error': 'No positions provided'}), 400
-
-        if not portfolio:
-            return jsonify({'error': 'No portfolio state provided'}), 400
-
-        # Evaluate positions (simple mode: only first position)
-        predictions = rl_predictor.evaluate_positions(positions, portfolio, opportunity)
-
-        # Get model info
-        model_info = rl_predictor.get_model_info()
-
-        return jsonify({
-            'predictions': predictions,
-            'model_version': model_info['model_version']
-        })
-
-    except Exception as e:
-        print(f"Error in /rl/predict/positions: {e}")
+        print(f"Error in /rl/predict: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -689,7 +667,7 @@ if __name__ == '__main__':
 
     # Run Flask server
     print("\n" + "="*80)
-    print("ML API Server - RL with Autonomous Agent Support")
+    print("ML API Server - RL with Unified Feature Builder")
     print("="*80)
     print(f"Starting server on http://localhost:5250")
     print(f"\nEndpoints:")
@@ -703,8 +681,7 @@ if __name__ == '__main__':
     print(f"  PUT  /agent/config                 - Update agent configuration")
     print(f"  GET  /agent/decisions?user_id=X    - Get recent decisions")
     print(f"\nRL Predictions:")
-    print(f"  POST /rl/predict/opportunities     - RL opportunity evaluation (Modular Mode)")
-    print(f"  POST /rl/predict/positions         - RL position evaluation (Legacy - deprecated)")
+    print(f"  POST /rl/predict                   - RL prediction (Unified Feature Builder)")
     print("="*80 + "\n")
 
     app.run(host='0.0.0.0', port=5250, debug=False)

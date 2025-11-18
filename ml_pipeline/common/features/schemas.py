@@ -1,0 +1,152 @@
+"""
+Pydantic schemas for raw data validation.
+
+Defines the expected structure of raw data sent from the backend to the ML API.
+These schemas ensure type safety and data validation at runtime.
+"""
+
+from typing import List, Optional
+from pydantic import BaseModel, Field, validator
+
+
+class TradingConfigRaw(BaseModel):
+    """Trading configuration raw data."""
+    max_leverage: float = Field(default=1.0, ge=1.0, le=10.0)
+    target_utilization: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_positions: int = Field(default=3, ge=1, le=10)
+    stop_loss_threshold: float = Field(default=-0.02, ge=-1.0, le=0.0)
+    liquidation_buffer: float = Field(default=0.15, ge=0.0, le=1.0)
+
+
+class PositionRawData(BaseModel):
+    """Raw position data from backend."""
+    # Identity
+    is_active: bool = False
+    position_is_active: Optional[float] = Field(default=None, ge=0.0, le=1.0)  # Legacy field - defaults to None
+    symbol: Optional[str] = None
+
+    # Position basics
+    position_size_usd: float = Field(default=0.0, ge=0.0)
+    position_age_hours: Optional[float] = Field(default=None, ge=0.0)
+    hours_held: Optional[float] = Field(default=None, ge=0.0)  # Legacy field - defaults to None
+    leverage: float = Field(default=1.0, ge=1.0, le=10.0)
+
+    # Prices
+    entry_long_price: float = Field(default=0.0, ge=0.0)
+    entry_short_price: float = Field(default=0.0, ge=0.0)
+    current_long_price: float = Field(default=0.0, ge=0.0)
+    current_short_price: float = Field(default=0.0, ge=0.0)
+    entry_price: Optional[float] = Field(default=None, ge=0.0)  # Legacy field - defaults to None
+    current_price: Optional[float] = Field(default=None, ge=0.0)  # Legacy field - defaults to None
+
+    # P&L
+    unrealized_pnl_pct: float = Field(default=0.0)
+    long_pnl_pct: float = Field(default=0.0)
+    short_pnl_pct: float = Field(default=0.0)
+
+    # Funding rates
+    long_funding_rate: float = Field(default=0.0)
+    short_funding_rate: float = Field(default=0.0)
+    long_funding_interval_hours: float = Field(default=8.0, gt=0.0)
+    short_funding_interval_hours: float = Field(default=8.0, gt=0.0)
+
+    # APR
+    entry_apr: float = Field(default=0.0)
+    current_position_apr: float = Field(default=0.0)
+
+    # Risk
+    liquidation_distance: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+    class Config:
+        extra = "allow"  # Allow additional fields from backend
+
+
+class OpportunityRawData(BaseModel):
+    """Raw opportunity data from backend."""
+    # Identity
+    symbol: str
+    long_exchange: str
+    short_exchange: str
+
+    # Funding profit projections
+    fund_profit_8h: float = Field(default=0.0)
+    fundProfit8h24hProj: float = Field(default=0.0)
+    fundProfit8h3dProj: float = Field(default=0.0)
+    fund_apr: float = Field(default=0.0)
+    fundApr24hProj: float = Field(default=0.0)
+    fundApr3dProj: float = Field(default=0.0)
+
+    # Spread metrics (can be negative when short exchange price < long exchange price)
+    spread30SampleAvg: float = Field(default=0.0)
+    priceSpread24hAvg: float = Field(default=0.0)
+    priceSpread3dAvg: float = Field(default=0.0)
+    spread_volatility_stddev: float = Field(default=0.0, ge=0.0)  # Standard deviation is always >= 0
+
+    # Position tracking
+    has_existing_position: bool = Field(default=False)
+
+    class Config:
+        extra = "allow"  # Allow additional fields from backend
+
+
+class PortfolioRawData(BaseModel):
+    """Raw portfolio data from backend."""
+    positions: List[PositionRawData] = Field(default_factory=list, max_items=5)
+    total_capital: float = Field(default=10000.0, gt=0.0)
+    capital: Optional[float] = Field(default=None, gt=0.0)  # Legacy field
+    capital_utilization: float = Field(default=0.0, ge=0.0, le=100.0)
+
+    @validator('positions')
+    def validate_positions(cls, v):
+        """Ensure max 5 positions."""
+        if len(v) > 5:
+            raise ValueError(f"Maximum 5 positions allowed, got {len(v)}")
+        return v
+
+    class Config:
+        extra = "allow"
+
+
+class RLRawDataRequest(BaseModel):
+    """Complete raw data request from backend to ML API."""
+    trading_config: Optional[TradingConfigRaw] = None
+    portfolio: PortfolioRawData
+    opportunities: List[OpportunityRawData] = Field(default_factory=list, max_items=10)
+
+    @validator('opportunities')
+    def validate_opportunities(cls, v):
+        """Ensure max 10 opportunities."""
+        if len(v) > 10:
+            raise ValueError(f"Maximum 10 opportunities allowed, got {len(v)}")
+        return v
+
+    class Config:
+        extra = "allow"
+
+
+class RLPredictionResponse(BaseModel):
+    """Response from ML API with prediction results."""
+    action: int = Field(ge=0, le=35)
+    action_name: str
+    action_type: str  # "HOLD", "ENTER", "EXIT"
+    confidence: float = Field(ge=0.0, le=1.0)
+    action_probabilities: List[float] = Field(min_items=36, max_items=36)
+
+    # Action details
+    opportunity_index: Optional[int] = Field(default=None, ge=0, le=9)
+    position_index: Optional[int] = Field(default=None, ge=0, le=4)
+    size: Optional[str] = None  # "SMALL", "MEDIUM", "LARGE"
+    size_multiplier: Optional[float] = None
+
+    # Selected opportunity/position info
+    selected_symbol: Optional[str] = None
+    selected_long_exchange: Optional[str] = None
+    selected_short_exchange: Optional[str] = None
+    selected_fund_apr: Optional[float] = None
+
+    # Mask info
+    valid_actions: int = Field(ge=1, le=36)
+    masked_actions: int = Field(ge=0, le=35)
+
+    class Config:
+        extra = "allow"

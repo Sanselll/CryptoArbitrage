@@ -342,7 +342,7 @@ builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
     ["MLApi:Port"] = mlApiUri.Port.ToString()
 });
 
-// ML Services - Using HTTP API to call Python Flask server
+// ML Services - Using HTTP API to call Python Flask server with UnifiedFeatureBuilder
 builder.Services.AddSingleton<RLPredictionService>();
 
 // ============================================================================

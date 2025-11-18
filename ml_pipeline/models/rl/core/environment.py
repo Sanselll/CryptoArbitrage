@@ -1042,9 +1042,87 @@ class FundingArbitrageEnv(gym.Env):
 
         return funding_rates
 
+    def get_raw_state_for_ml_api(self) -> dict:
+        """
+        Get the EXACT raw state the environment used for the last observation.
+
+        CRITICAL: This returns the CACHED raw data dict that was built during
+        the most recent _get_observation() call. This ensures 100% consistency
+        between direct mode and ML API mode - both use the exact same data.
+
+        Returns:
+            Dict with trading_config, portfolio, opportunities (cached from last observation)
+        """
+        # Return cached raw data from the last _get_observation() call
+        # This ensures we use the EXACT same data that was used to build the observation
+        if hasattr(self, '_cached_raw_data'):
+            return self._cached_raw_data
+
+        # Fallback: if no cache exists (e.g., before first step), build it now
+        # This should only happen in edge cases
+        price_data = self._get_current_prices()
+
+        # Build trading config
+        config_array = self.current_config.to_array()
+        trading_config = {
+            'max_leverage': float(config_array[0]),
+            'target_utilization': float(config_array[1]),
+            'max_positions': int(config_array[2]),
+            'stop_loss_threshold': float(config_array[3]),
+            'liquidation_buffer': float(config_array[4]),
+        }
+
+        # Build positions list
+        positions = []
+        for pos in self.portfolio.positions:
+            symbol_prices = price_data.get(pos.symbol, {})
+            current_long_price = symbol_prices.get('long_price', pos.entry_long_price)
+            current_short_price = symbol_prices.get('short_price', pos.entry_short_price)
+
+            current_position_apr = 0.0
+            for opp in self.current_opportunities:
+                if opp['symbol'] == pos.symbol:
+                    current_position_apr = opp.get('fund_apr', 0.0)
+                    break
+
+            positions.append({
+                'is_active': True,
+                'symbol': pos.symbol,
+                'position_size_usd': float(pos.position_size_usd),
+                'position_age_hours': float(pos.hours_held),
+                'leverage': float(pos.leverage),
+                'entry_long_price': float(pos.entry_long_price),
+                'entry_short_price': float(pos.entry_short_price),
+                'current_long_price': float(current_long_price),
+                'current_short_price': float(current_short_price),
+                'unrealized_pnl_pct': float(pos.unrealized_pnl_pct),
+                'long_pnl_pct': float(pos.long_pnl_pct),
+                'short_pnl_pct': float(pos.short_pnl_pct),
+                'long_funding_rate': float(pos.long_funding_rate),
+                'short_funding_rate': float(pos.short_funding_rate),
+                'long_funding_interval_hours': int(pos.long_funding_interval_hours),
+                'short_funding_interval_hours': int(pos.short_funding_interval_hours),
+                'entry_apr': float(pos.entry_apr),
+                'current_position_apr': float(current_position_apr),
+                'liquidation_distance': float(pos.get_liquidation_distance(current_long_price, current_short_price)),
+                'slippage_pct': float(pos.slippage_pct),
+            })
+
+        portfolio = {
+            'positions': positions,
+            'total_capital': float(self.portfolio.total_capital),
+            'capital_utilization': float(self.portfolio.capital_utilization),
+        }
+
+        return {
+            'trading_config': trading_config,
+            'portfolio': portfolio,
+            'opportunities': self.current_opportunities,
+        }
+
     def _get_observation(self) -> np.ndarray:
         """
-        Get current observation (state).
+        Get current observation (state) using UnifiedFeatureBuilder.
 
         203 dimensions (V3 Refactoring):
           config (5) + portfolio (3) + executions (85) + opportunities (110)
@@ -1057,92 +1135,93 @@ class FundingArbitrageEnv(gym.Env):
         Returns:
             Flattened numpy array of state features
         """
-        all_features = []
+        # Import UnifiedFeatureBuilder
+        from common.features import UnifiedFeatureBuilder
 
-        # 1. Config features (5 dims)
-        config_features = self.current_config.to_array()
-        all_features.extend(config_features)
+        # Initialize if not already done
+        if not hasattr(self, 'feature_builder'):
+            self.feature_builder = UnifiedFeatureBuilder(feature_scaler_path=None)
+            self.feature_builder.feature_scaler = self.feature_scaler
 
-        # 2. Portfolio features (3 dims - V3: removed historical metrics)
+        # Get current prices
         price_data = self._get_current_prices()
-        min_liq_distance = self.portfolio.get_min_liquidation_distance(price_data)
 
-        portfolio_features = [
-            len(self.portfolio.positions) / self.current_config.max_positions,  # num_positions_ratio
-            min_liq_distance,  # min_liquidation_distance
-            self.portfolio.capital_utilization / 100,  # capital_utilization
-        ]
-        all_features.extend(portfolio_features)
+        # Build trading config
+        config_array = self.current_config.to_array()
+        trading_config = {
+            'max_leverage': float(config_array[0]),
+            'target_utilization': float(config_array[1]),
+            'max_positions': int(config_array[2]),
+            'stop_loss_threshold': float(config_array[3]),
+            'liquidation_buffer': float(config_array[4]),
+        }
 
-        # 3. Calculate best available APR from current opportunities (for APR comparison features)
+        # Build positions list - convert Position objects to dicts with ALL needed attributes
+        positions = []
+        for pos in self.portfolio.positions:
+            # Get current prices
+            symbol_prices = price_data.get(pos.symbol, {})
+            current_long_price = symbol_prices.get('long_price', pos.entry_long_price)
+            current_short_price = symbol_prices.get('short_price', pos.entry_short_price)
+
+            # Find current APR for this symbol
+            current_position_apr = 0.0
+            for opp in self.current_opportunities:
+                if opp['symbol'] == pos.symbol:
+                    current_position_apr = opp.get('fund_apr', 0.0)
+                    break
+
+            positions.append({
+                'is_active': True,
+                'symbol': pos.symbol,
+                'position_size_usd': float(pos.position_size_usd),
+                'position_age_hours': float(pos.hours_held),
+                'leverage': float(pos.leverage),
+                'entry_long_price': float(pos.entry_long_price),
+                'entry_short_price': float(pos.entry_short_price),
+                'current_long_price': float(current_long_price),
+                'current_short_price': float(current_short_price),
+                'unrealized_pnl_pct': float(pos.unrealized_pnl_pct),
+                'long_pnl_pct': float(pos.long_pnl_pct),  # Direct from Position object
+                'short_pnl_pct': float(pos.short_pnl_pct),  # Direct from Position object
+                'long_funding_rate': float(pos.long_funding_rate),  # CRITICAL for estimated_funding_8h_pct
+                'short_funding_rate': float(pos.short_funding_rate),  # CRITICAL for estimated_funding_8h_pct
+                'long_funding_interval_hours': int(pos.long_funding_interval_hours),
+                'short_funding_interval_hours': int(pos.short_funding_interval_hours),
+                'entry_apr': float(pos.entry_apr),
+                'current_position_apr': float(current_position_apr),
+                'liquidation_distance': float(pos.get_liquidation_distance(current_long_price, current_short_price)),
+                'slippage_pct': float(pos.slippage_pct),
+            })
+
+        # Build portfolio state
+        portfolio_dict = {
+            'positions': positions,
+            'total_capital': float(self.portfolio.total_capital),
+            'capital_utilization': float(self.portfolio.capital_utilization),
+        }
+
+        # Calculate best available APR
         best_available_apr = 0.0
         if len(self.current_opportunities) > 0:
             best_available_apr = max(opp.get('fund_apr', 0.0) for opp in self.current_opportunities)
 
-        # 4. Execution features (85 dims: 5 slots × 17 features - V3 refactoring)
-        exec_features = self.portfolio.get_all_execution_states(
-            price_data,
-            max_positions=5,
-            best_available_apr=best_available_apr,
-            current_opportunities=self.current_opportunities
-        )
-        all_features.extend(exec_features)
+        # Build raw data dict
+        raw_data = {
+            'trading_config': trading_config,
+            'portfolio': portfolio_dict,
+            'opportunities': self.current_opportunities
+        }
 
-        # At this point: 5 + 3 + 85 = 93 dims
+        # CRITICAL: Cache raw_data for ML API mode (deep copy to avoid mutation)
+        # This ensures get_raw_state_for_ml_api() returns the EXACT same data
+        # that was used to build this observation, even if opportunities list changes
+        import copy
+        self._cached_raw_data = copy.deepcopy(raw_data)
 
-        # 5. Opportunity features (110 dims: 10 opportunities × 11 features each - V3 refactoring)
-        opportunity_features = []
-        n_opps = 10
-        n_features_per_opp = 11  # V3: 19→11 (removed market quality + raw rates/intervals, added apr_velocity)
-
-        for i in range(n_opps):
-            if i < len(self.current_opportunities):
-                opp = self.current_opportunities[i]
-
-                # 11 features (V3: removed 9 market quality, added 1 velocity)
-                # Assumes market quality pre-filtering upstream
-                opp_feats = [
-                    # Profit projections (6 features)
-                    opp.get('fund_profit_8h', 0),
-                    opp.get('fundProfit8h24hProj', 0),
-                    opp.get('fundProfit8h3dProj', 0),
-                    opp.get('fund_apr', 0),
-                    opp.get('fundApr24hProj', 0),
-                    opp.get('fundApr3dProj', 0),
-                    # Spread metrics (4 features)
-                    opp.get('spread30SampleAvg', 0),
-                    opp.get('priceSpread24hAvg', 0),
-                    opp.get('priceSpread3dAvg', 0),
-                    opp.get('spread_volatility_stddev', 0),
-                    # Velocity (1 feature - NEW in V3)
-                    opp.get('fund_profit_8h', 0) - opp.get('fundProfit8h24hProj', 0),  # apr_velocity
-                ]
-
-                # Convert to float32 and ensure no NaN/inf
-                opp_feats = [float(np.nan_to_num(x, nan=0.0, posinf=100.0, neginf=-100.0)) for x in opp_feats]
-                opportunity_features.extend(opp_feats)
-            else:
-                # No opportunity at this index - pad with zeros
-                opportunity_features.extend([0.0] * n_features_per_opp)
-
-        # Apply StandardScaler to opportunity features if available
-        opportunity_features_array = np.array(opportunity_features, dtype=np.float32)
-
-        if self.feature_scaler is not None:
-            # Apply scaler to normalize features (critical for training stability)
-            # V3: 10 opportunities × 11 features each = 110 features
-            # PERFORMANCE: Vectorized scaling - transform all 10 opportunities at once
-            # Reshape to (10, 11) for batch transform, then flatten back
-            opportunity_features_array = opportunity_features_array.reshape(10, 11)
-            opportunity_features_array = self.feature_scaler.transform(opportunity_features_array).flatten().astype(np.float32)
-
-        # Concatenate all features
-        # all_features already contains config+portfolio+executions (93)
-        # Add opportunity features (110) for total of 203
-        observation = np.concatenate([
-            all_features,  # Contains config+portfolio+executions = 93
-            opportunity_features_array  # 110
-        ]).astype(np.float32)
+        # Use UnifiedFeatureBuilder (with optional logging)
+        log_file = getattr(self, 'feature_log_file', None)
+        observation = self.feature_builder.build_observation_from_raw_data(raw_data, log_file=log_file)
 
         return observation
 

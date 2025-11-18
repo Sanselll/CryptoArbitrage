@@ -40,4 +40,8 @@ public class PositionDto
     public decimal LastKnownApr { get; set; }  // Last successfully looked up current APR (fallback when symbol not in top opportunities)
     public decimal PeakPnlPct { get; set; }  // Peak P&L percentage (for drawdown feature)
     public string? PnlHistoryJson { get; set; }  // Hourly P&L snapshots (for velocity feature)
+
+    // Funding interval metadata (for accurate APR calculations)
+    public decimal LongFundingIntervalHours { get; set; } = 8m;  // Funding interval for long side exchange
+    public decimal ShortFundingIntervalHours { get; set; } = 8m;  // Funding interval for short side exchange
 }

@@ -491,8 +491,13 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
 
                         // ML features (Phase 1 exit timing) - copy from database
                         EntryApr = dbPos.EntryApr,
+                        LastKnownApr = dbPos.LastKnownApr,
                         PeakPnlPct = dbPos.PeakPnlPct,
-                        PnlHistoryJson = dbPos.PnlHistoryJson
+                        PnlHistoryJson = dbPos.PnlHistoryJson,
+
+                        // Funding interval metadata - copy from database
+                        LongFundingIntervalHours = dbPos.LongFundingIntervalHours,
+                        ShortFundingIntervalHours = dbPos.ShortFundingIntervalHours
                     };
 
                     positionDtos.Add(dto);

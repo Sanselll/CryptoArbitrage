@@ -284,7 +284,22 @@
       "Bash(src/CryptoArbitrage.API/Services/ML/RLPredictionService.cs)",
       "Bash(git rev-parse:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(bash -c:*)",
+      "Bash(then echo \"✅ ML API server is running on port 5250\")",
+      "Bash(else echo \"❌ ML API server failed to start\")",
+      "Bash(/Users/sansel/Projects/CryptoArbitrage/src/CryptoArbitrage.API/Services/Streaming/SignalRBroadcaster.cs)",
+      "Bash(gtimeout 30 python:*)",
+      "Bash(timeout 180 python test_inference.py:*)",
+      "Bash(gtimeout 180 python:*)",
+      "Bash(if [ -f /tmp/ml_api_request.json ])",
+      "Bash(then cat /tmp/ml_api_request.json)",
+      "Bash(else echo \"No ML API request log found\")",
+      "Bash(if [ -f /tmp/direct_mode_features.log ])",
+      "Bash([ -f /tmp/ml_api_features.log ])",
+      "Bash(if [ -f /tmp/ml_api_server_updated.log ])",
+      "Bash(then echo \"=== Checking ML API action responses ===\" grep -i \"action_id\\|\"\"action\"\":\" /tmp/ml_api_server_updated.log)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []

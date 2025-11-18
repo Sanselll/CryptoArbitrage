@@ -12,7 +12,7 @@ using CryptoArbitrage.API.Services.Streaming;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Services.ML;
 using Microsoft.EntityFrameworkCore;
-using AgentPrediction = CryptoArbitrage.API.Services.ML.RLPredictionService.AgentPrediction;
+using AgentPrediction = CryptoArbitrage.API.Services.ML.AgentPrediction;
 
 namespace CryptoArbitrage.API.Services.Agent;
 
@@ -213,77 +213,22 @@ public class AgentBackgroundService : BackgroundService
         // 1. Get current opportunities from cache (already detected by OpportunityAggregator)
         var opportunitiesDict = await opportunityRepository.GetByPatternAsync("opportunity:*");
 
-        // Smart opportunity selection for ML API (up to 10 total)
-        // Strategy:
-        // - Filter by SubType: Only CrossExchangeFuturesFutures (CFFF)
-        // - Always include opportunities with existing positions (for EXIT decisions)
-        // - From new opportunities (Good or Medium liquidity):
-        //   * Top 7 by highest FundApr
-        //   * Top 3 by lowest spread
-        //   * Remove duplicates
+        // Opportunity selection for ML API (matches test_inference.py exactly)
+        // Strategy from environment.py:_select_top_opportunities() (lines 239-265):
+        // - Sort by fund_apr (descending - highest APR first)
+        // - Take top 10 opportunities
+        // This ensures training and production see the same opportunity distribution
 
         var allOpportunities = opportunitiesDict.Values.ToList();
 
-        // FILTER: Only send CrossExchangeFuturesFutures (CFFF) opportunities to ML
-        // This is the primary funding arbitrage strategy (long perp on one exchange + short perp on another)
-        var cfffOpportunities = allOpportunities
-            .Where(o => o.SubType == StrategySubType.CrossExchangeFuturesFutures)
-            .ToList();
-
-        _logger.LogInformation("Filtered opportunities by strategy: {Total} total → {CFFF} CrossExchangeFuturesFutures",
-            allOpportunities.Count, cfffOpportunities.Count);
-
-        // Separate existing positions from new opportunities
-        var existingPositionOpps = cfffOpportunities
-            .Where(o => o.IsExistingPosition)
-            .ToList();
-
-        var newOpportunities = cfffOpportunities
-            .Where(o => !o.IsExistingPosition &&
-                       (o.LiquidityStatus == LiquidityStatus.Good || o.LiquidityStatus == LiquidityStatus.Medium))
-            .ToList();
-
-        var liquidityCounts = newOpportunities
-            .Where(o => o.LiquidityStatus.HasValue)
-            .GroupBy(o => o.LiquidityStatus!.Value)
-            .ToDictionary(g => g.Key, g => g.Count());
-
-        _logger.LogDebug("Opportunity pool (CFFF only): {Total} total, {Existing} with positions, {New} new (Good: {Good}, Medium: {Medium})",
-            cfffOpportunities.Count,
-            existingPositionOpps.Count,
-            newOpportunities.Count,
-            liquidityCounts.GetValueOrDefault(LiquidityStatus.Good, 0),
-            liquidityCounts.GetValueOrDefault(LiquidityStatus.Medium, 0));
-
-        // Select top 7 by highest APR
-        var topByApr = newOpportunities
+        // Simple selection: Sort by raw APR, take top 10 (matches training exactly)
+        var userOpportunities = allOpportunities
             .OrderByDescending(o => o.FundApr)
-            .Take(7)
-            .ToList();
-
-        // Select top 3 by lowest 30-sample spread average (better stability)
-        var topBySpread = newOpportunities
-            .Where(o => o.Spread30SampleAvg.HasValue)
-            .OrderBy(o => o.Spread30SampleAvg!.Value)
-            .Take(3)
-            .ToList();
-
-        // Combine APR and spread selections, removing duplicates
-        var selectedNew = topByApr
-            .Union(topBySpread, new OpportunityComparer())
-            .ToList();
-
-        _logger.LogDebug("Selected {Apr} by APR, {Spread} by spread, {Unique} unique new opportunities",
-            topByApr.Count, topBySpread.Count, selectedNew.Count);
-
-        // Combine existing positions with selected new opportunities (up to 10 total)
-        var userOpportunities = existingPositionOpps
-            .Concat(selectedNew)
             .Take(10)
             .ToList();
 
-        _logger.LogInformation("Sending {Total} CFFF opportunities to ML: {Existing} existing positions + {New} new opportunities",
-            userOpportunities.Count, existingPositionOpps.Count, Math.Min(selectedNew.Count, 10 - existingPositionOpps.Count));
+        _logger.LogInformation("Selected top 10 opportunities by FundApr (matches test_inference.py): {Total} total → {Selected} selected",
+            allOpportunities.Count, userOpportunities.Count);
 
         if (userOpportunities.Count == 0)
         {

@@ -33,7 +33,10 @@ import argparse
 import torch
 import numpy as np
 import pandas as pd
+import requests
+import json
 from pathlib import Path
+from typing import Dict, List, Any, Optional
 
 from models.rl.core.environment import FundingArbitrageEnv
 from models.rl.core.config import TradingConfig
@@ -44,6 +47,14 @@ from models.rl.algorithms.ppo_trainer import PPOTrainer
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Test model inference')
+
+    # Inference mode
+    parser.add_argument('--api-mode', action='store_true',
+                        help='Use HTTP API for inference instead of direct model loading')
+    parser.add_argument('--api-url', type=str, default='http://localhost:5250',
+                        help='ML API base URL (default: http://localhost:5250)')
+    parser.add_argument('--api-endpoint', type=str, default='/rl/predict',
+                        help='API endpoint path (default: /rl/predict)')
 
     # Trading configuration
     parser.add_argument('--leverage', type=float, default=2.0,
@@ -88,16 +99,256 @@ def parse_args():
     return parser.parse_args()
 
 
+class MLAPIClient:
+    """HTTP client for ML API inference."""
+
+    def __init__(self, base_url: str, endpoint: str):
+        """
+        Initialize ML API client.
+
+        Args:
+            base_url: Base URL (e.g., http://localhost:5250)
+            endpoint: Endpoint path (e.g., /rl/v2/predict)
+        """
+        self.base_url = base_url.rstrip('/')
+        self.endpoint = endpoint
+        self.full_url = f"{self.base_url}{self.endpoint}"
+        self.session = requests.Session()
+        self.session.headers.update({'Content-Type': 'application/json'})
+
+        print(f"   ML API Client initialized")
+        print(f"   URL: {self.full_url}")
+
+    def sanitize_for_json(self, obj):
+        """
+        Recursively sanitize data structure for JSON serialization.
+        Replaces inf, -inf, NaN, and Timestamp objects with JSON-safe values.
+
+        Args:
+            obj: Object to sanitize (dict, list, or primitive)
+
+        Returns:
+            Sanitized object
+        """
+        import math
+        import pandas as pd
+        import numpy as np
+
+        if isinstance(obj, dict):
+            return {k: self.sanitize_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self.sanitize_for_json(item) for item in obj]
+        elif isinstance(obj, (pd.Timestamp, np.datetime64)):
+            # Convert pandas Timestamp or numpy datetime64 to ISO string
+            return str(pd.Timestamp(obj))
+        elif isinstance(obj, float):
+            if math.isnan(obj):
+                return 0.0
+            elif math.isinf(obj):
+                return 1e9 if obj > 0 else -1e9
+            else:
+                return obj
+        elif isinstance(obj, np.integer):
+            # Convert numpy integers to Python int
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            # Convert numpy floats to Python float (and check for inf/nan)
+            val = float(obj)
+            if math.isnan(val):
+                return 0.0
+            elif math.isinf(val):
+                return 1e9 if val > 0 else -1e9
+            else:
+                return val
+        else:
+            return obj
+
+    def build_raw_data_from_env(self, env: FundingArbitrageEnv) -> Dict[str, Any]:
+        """
+        Build raw data dictionary from environment state.
+
+        Args:
+            env: FundingArbitrageEnv instance
+
+        Returns:
+            Dict with trading_config, portfolio, opportunities
+        """
+        # Get current prices
+        price_data = env._get_current_prices()
+        funding_rates = env._get_current_funding_rates()
+
+        # Build trading config
+        config_array = env.current_config.to_array()
+        trading_config = {
+            'max_leverage': float(config_array[0]),
+            'target_utilization': float(config_array[1]),
+            'max_positions': int(config_array[2]),
+            'stop_loss_threshold': float(config_array[3]),
+            'liquidation_buffer': float(config_array[4]),
+        }
+
+        # Build positions list
+        positions = []
+        for pos in env.portfolio.positions:
+            # Get current prices for this position
+            long_price_info = price_data.get(pos.symbol, {}).get(pos.long_exchange, {'price': pos.entry_long_price})
+            short_price_info = price_data.get(pos.symbol, {}).get(pos.short_exchange, {'price': pos.entry_short_price})
+
+            current_long_price = long_price_info.get('price', pos.entry_long_price)
+            current_short_price = short_price_info.get('price', pos.entry_short_price)
+
+            # Get funding rates from position object (these are stored at entry and updated)
+            # DO NOT use funding_rates dict - it may not have current position data
+            long_funding_rate = pos.long_funding_rate
+            short_funding_rate = pos.short_funding_rate
+
+            # Calculate current APR for this position
+            current_position_apr = 0.0
+            for opp in env.current_opportunities:
+                if opp['symbol'] == pos.symbol:
+                    current_position_apr = opp.get('fund_apr', 0.0)
+                    break
+
+            # Get position breakdown
+            breakdown = pos.get_breakdown()
+
+            positions.append({
+                'is_active': True,
+                'symbol': pos.symbol,
+                'position_size_usd': float(pos.position_size_usd),
+                'position_age_hours': float(pos.hours_held),
+                'leverage': float(pos.leverage),
+                'entry_long_price': float(pos.entry_long_price),
+                'entry_short_price': float(pos.entry_short_price),
+                'current_long_price': float(current_long_price),
+                'current_short_price': float(current_short_price),
+                'unrealized_pnl_pct': float(breakdown['unrealized_pnl_pct']),
+                'long_pnl_pct': float(breakdown['long_price_pnl_pct']),
+                'short_pnl_pct': float(breakdown['short_price_pnl_pct']),
+                'long_funding_rate': float(long_funding_rate),
+                'short_funding_rate': float(short_funding_rate),
+                'long_funding_interval_hours': int(pos.long_funding_interval_hours),
+                'short_funding_interval_hours': int(pos.short_funding_interval_hours),
+                'entry_apr': float(pos.entry_apr),
+                'current_position_apr': float(current_position_apr),
+                'liquidation_distance': float(pos.get_liquidation_distance(current_long_price, current_short_price)),
+            })
+
+        # Build portfolio
+        portfolio = {
+            'positions': positions,
+            'total_capital': float(env.portfolio.total_capital),
+            'capital_utilization': float(env.portfolio.capital_utilization),
+        }
+
+        # Build opportunities list (only include schema fields to avoid confusion)
+        opportunities = []
+        for opp in env.current_opportunities:
+            opportunities.append({
+                'symbol': opp['symbol'],
+                'long_exchange': opp['long_exchange'],
+                'short_exchange': opp['short_exchange'],
+                'fund_profit_8h': opp.get('fund_profit_8h', 0.0),
+                'fundProfit8h24hProj': opp.get('fundProfit8h24hProj', 0.0),
+                'fundProfit8h3dProj': opp.get('fundProfit8h3dProj', 0.0),
+                'fund_apr': opp.get('fund_apr', 0.0),
+                'fundApr24hProj': opp.get('fundApr24hProj', 0.0),
+                'fundApr3dProj': opp.get('fundApr3dProj', 0.0),
+                'spread30SampleAvg': opp.get('spread30SampleAvg', 0.0),
+                'priceSpread24hAvg': opp.get('priceSpread24hAvg', 0.0),
+                'priceSpread3dAvg': opp.get('priceSpread3dAvg', 0.0),
+                'spread_volatility_stddev': opp.get('spread_volatility_stddev', 0.0),
+                'has_existing_position': opp.get('has_existing_position', False),
+            })
+
+        return {
+            'trading_config': trading_config,
+            'portfolio': portfolio,
+            'opportunities': opportunities
+        }
+
+    def predict(self, env: FundingArbitrageEnv) -> Dict[str, Any]:
+        """
+        Get prediction from ML API.
+
+        Args:
+            env: FundingArbitrageEnv instance
+
+        Returns:
+            Dict with action, confidence, etc.
+
+        Raises:
+            requests.RequestException: If API call fails
+        """
+        # Get raw data from environment (CRITICAL: use env's exact internal state)
+        raw_data = env.get_raw_state_for_ml_api()
+
+        # Sanitize data for JSON serialization (replace inf/nan with safe values)
+        raw_data = self.sanitize_for_json(raw_data)
+
+        # Make request
+        try:
+            response = self.session.post(
+                self.full_url,
+                json=raw_data,
+                timeout=10.0
+            )
+            response.raise_for_status()
+
+            result = response.json()
+            return result
+
+        except requests.exceptions.Timeout:
+            raise RuntimeError(f"ML API timeout after 10 seconds")
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(f"Failed to connect to ML API at {self.full_url}. Is the server running?")
+        except requests.exceptions.HTTPError as e:
+            raise RuntimeError(f"ML API error: {e.response.status_code} - {e.response.text}")
+        except Exception as e:
+            raise RuntimeError(f"ML API request failed: {e}")
+
+    def select_action(self, env: FundingArbitrageEnv, obs: np.ndarray, action_mask: np.ndarray) -> tuple:
+        """
+        Select action using ML API (compatible with trainer.select_action interface).
+
+        Args:
+            env: Environment instance
+            obs: Observation (not used in API mode, we use env state)
+            action_mask: Action mask (not used in API mode, server generates it)
+
+        Returns:
+            (action, value, log_prob) - value and log_prob are dummy values
+        """
+        result = self.predict(env)
+
+        action = result.get('action_id', 0)
+        value = result.get('state_value', 0.0)
+        log_prob = 0.0  # Dummy value
+
+        return action, value, log_prob
+
+
 def test_model_inference(args):
     """Test loading and using a trained model."""
     print("=" * 80)
-    print("TESTING MODEL INFERENCE ON TEST SET")
+    if args.api_mode:
+        print("TESTING MODEL INFERENCE VIA ML API (HTTP)")
+    else:
+        print("TESTING MODEL INFERENCE (DIRECT)")
     print("=" * 80)
 
     # Set random seed for reproducibility
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    print(f"\n🎲 Random seed: {args.seed}")
+
+    # Enable deterministic algorithms for 100% reproducibility
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    print(f"\n🎲 Random seed: {args.seed} (deterministic mode enabled)")
+    print("   torch.use_deterministic_algorithms(True)")
+    print("   cudnn.deterministic=True, cudnn.benchmark=False")
 
     # Filter test data by time range if specified
     test_data_path = args.test_data_path
@@ -166,6 +417,10 @@ def test_model_inference(args):
         verbose=False,
     )
 
+    # Enable feature logging for debugging (only if not in API mode)
+    if not args.api_mode:
+        env.feature_log_file = '/tmp/direct_mode_features.log'
+
     print("✅ Test environment created")
     print(f"   Data: {test_data_path}")
 
@@ -196,30 +451,41 @@ def test_model_inference(args):
     if args.force_zero_pnl:
         print(f"   ⚠️  FORCING total_pnl_pct = 0 in observations (production bug simulation)")
 
-    # Create network
-    print("\n2. Creating network...")
-    network = ModularPPONetwork()
-    print(f"✅ Network created ({sum(p.numel() for p in network.parameters()):,} parameters)")
+    # Initialize inference method based on mode
+    if args.api_mode:
+        print("\n2. Initializing ML API client...")
+        api_client = MLAPIClient(args.api_url, args.api_endpoint)
+        print("✅ ML API client ready")
+        print(f"   Mode: HTTP API inference")
 
-    # Create trainer
-    print("\n3. Creating trainer...")
-    trainer = PPOTrainer(
-        network=network,
-        learning_rate=3e-4,
-        device='cpu',
-    )
-    print("✅ Trainer created")
+        # Create dummy trainer object for compatibility
+        trainer = None
+        predictor = api_client
+    else:
+        print("\n2. Creating network...")
+        network = ModularPPONetwork()
+        print(f"✅ Network created ({sum(p.numel() for p in network.parameters()):,} parameters)")
 
-    # Load trained model
-    print("\n4. Loading trained model...")
-    try:
-        trainer.load(args.checkpoint)
-        # CRITICAL: Set network to eval mode for inference (disables dropout)
-        # This must match the server predictor which uses eval mode
-        trainer.network.eval()
-        print(f"✅ Model loaded from {args.checkpoint}")
-    except FileNotFoundError:
-        print(f"⚠️  No checkpoint found at {args.checkpoint} - using random weights")
+        print("\n3. Creating trainer...")
+        trainer = PPOTrainer(
+            network=network,
+            learning_rate=3e-4,
+            device='cpu',
+        )
+        print("✅ Trainer created")
+
+        print("\n4. Loading trained model...")
+        try:
+            trainer.load(args.checkpoint)
+            # CRITICAL: Set network to eval mode for inference (disables dropout)
+            # This must match the server predictor which uses eval mode
+            trainer.network.eval()
+            print(f"✅ Model loaded from {args.checkpoint}")
+            print(f"   Mode: Direct model inference")
+        except FileNotFoundError:
+            print(f"⚠️  No checkpoint found at {args.checkpoint} - using random weights")
+
+        predictor = trainer
 
     # Run inference with detailed metrics (match training evaluation)
     episode_text = "episode" if args.num_episodes == 1 else "episodes"
@@ -448,7 +714,12 @@ def test_model_inference(args):
                 action_mask = None
 
             # Select action (deterministic)
-            action, _, _ = trainer.select_action(obs, action_mask, deterministic=True)
+            if args.api_mode:
+                # Use API client (passes env, obs and mask are ignored by API)
+                action, _, _ = predictor.select_action(env, obs, action_mask)
+            else:
+                # Use direct model inference
+                action, _, _ = predictor.select_action(obs, action_mask, deterministic=True)
 
             # Step
             obs, reward, terminated, truncated, info = env.step(action)

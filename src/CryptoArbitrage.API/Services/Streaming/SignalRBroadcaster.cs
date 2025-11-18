@@ -21,7 +21,6 @@ public class SignalRBroadcaster : IHostedService
     private readonly ILogger<SignalRBroadcaster> _logger;
     private readonly IDataCollectionEventBus _eventBus;
     private readonly ISignalRStreamingService _signalRStreamingService;
-    private readonly RLPredictionService _rlPredictionService;
     private readonly IServiceScopeFactory _serviceScopeFactory;
 
     // Hash tracking for change detection
@@ -40,13 +39,11 @@ public class SignalRBroadcaster : IHostedService
         ILogger<SignalRBroadcaster> logger,
         IDataCollectionEventBus eventBus,
         ISignalRStreamingService signalRStreamingService,
-        RLPredictionService rlPredictionService,
         IServiceScopeFactory serviceScopeFactory)
     {
         _logger = logger;
         _eventBus = eventBus;
         _signalRStreamingService = signalRStreamingService;
-        _rlPredictionService = rlPredictionService;
         _serviceScopeFactory = serviceScopeFactory;
     }
 
@@ -243,55 +240,8 @@ public class SignalRBroadcaster : IHostedService
 
                     if (shouldBroadcastPositions)
                     {
-                        // Enrich open positions with RL predictions
-                        var openPositions = positions.Where(p => p.Status == PositionStatus.Open).ToList();
-
-                        if (openPositions.Any())
-                        {
-                            try
-                            {
-                                _logger.LogDebug("Enriching {Count} open positions with RL predictions for user {UserId}",
-                                    openPositions.Count, userId);
-
-                                // Fetch current opportunities from cache
-                                List<ArbitrageOpportunityDto>? currentOpportunities = null;
-                                try
-                                {
-                                    using var scope = _serviceScopeFactory.CreateScope();
-                                    var opportunityRepository = scope.ServiceProvider.GetRequiredService<IDataRepository<ArbitrageOpportunityDto>>();
-
-                                    var opportunitiesDict = await opportunityRepository.GetByPatternAsync("opportunity:*");
-                                    currentOpportunities = opportunitiesDict.Values.ToList();
-
-                                    _logger.LogDebug("Fetched {Count} current opportunities for RL prediction", currentOpportunities.Count);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "Failed to fetch opportunities for RL prediction, will proceed without them");
-                                }
-
-                                var portfolioState = await BuildPortfolioStateAsync(userId);
-
-                                var rlPredictions = await _rlPredictionService.EvaluatePositionsAsync(
-                                    openPositions,
-                                    portfolioState,
-                                    currentOpportunities
-                                );
-
-                                // RL prediction enrichment removed - fields no longer exist in PositionDto
-
-                                _logger.LogInformation("Successfully enriched {Count} positions with RL predictions for user {UserId}",
-                                    rlPredictions.Count, userId);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, "Failed to enrich positions with RL predictions for user {UserId}", userId);
-                            }
-                        }
-
                         // Broadcast positions to this specific user
                         await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positions);
-
                     }
                     else
                     {
@@ -547,73 +497,4 @@ public class SignalRBroadcaster : IHostedService
         }
     }
 
-    /// <summary>
-    /// Build portfolio state for RL prediction (for a specific user)
-    /// </summary>
-    private async Task<RLPortfolioState> BuildPortfolioStateAsync(string userId)
-    {
-        try
-        {
-            using var scope = _serviceScopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
-
-            var openPositions = await dbContext.Positions
-                .Include(p => p.Transactions)
-                .Where(p => p.UserId == userId && p.Status == PositionStatus.Open)
-                .ToListAsync();
-
-            var initialCapital = 10000m;  // TODO: Get from user settings
-            var currentCapital = initialCapital;  // TODO: Calculate actual current capital
-
-            return new RLPortfolioState
-            {
-                Capital = currentCapital,
-                InitialCapital = initialCapital,
-                NumPositions = openPositions.Count,
-                MarginUtilization = (float)(openPositions.Sum(p => p.InitialMargin) / currentCapital),
-                TotalPnlPct = (float)(openPositions.Sum(p => p.UnrealizedPnL) / initialCapital * 100),
-                Drawdown = 0.0f,  // TODO: Calculate drawdown
-                Positions = openPositions.Take(3).Select(p =>
-                {
-                    var hoursHeld = (DateTime.UtcNow - p.OpenedAt).TotalHours;
-
-                    // Calculate net funding fee from transactions
-                    var fundingReceived = p.Transactions
-                        .Where(t => t.TransactionType == TransactionType.FundingFee && t.Amount > 0)
-                        .Sum(t => t.Amount);
-                    var fundingPaid = p.Transactions
-                        .Where(t => t.TransactionType == TransactionType.FundingFee && t.Amount < 0)
-                        .Sum(t => Math.Abs(t.Amount));
-                    var netFunding = fundingReceived - fundingPaid;
-
-                    var fundingRate = hoursHeld > 0
-                        ? (float)(netFunding / p.InitialMargin / (decimal)hoursHeld * 8 * 100)
-                        : 0.0f;
-
-                    return new RLPositionState
-                    {
-                        PnlPct = (float)(p.UnrealizedPnL / p.InitialMargin * 100),
-                        HoursHeld = (float)hoursHeld,
-                        FundingRate = fundingRate
-                    };
-                }).ToList()
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to build portfolio state for RL predictions for user {UserId}", userId);
-
-            // Return default state if error
-            return new RLPortfolioState
-            {
-                Capital = 10000m,
-                InitialCapital = 10000m,
-                NumPositions = 0,
-                MarginUtilization = 0f,
-                TotalPnlPct = 0f,
-                Drawdown = 0f,
-                Positions = new List<RLPositionState>()
-            };
-        }
-    }
 }
