@@ -323,7 +323,9 @@
       "Bash(timeout 45 dotnet run:*)",
       "Bash(gtimeout 45 dotnet run:*)",
       "Bash(timeout 60 bash:*)",
-      "Bash(else echo \"No log file\")"
+      "Bash(else echo \"No log file\")",
+      "Bash(timeout 5 python:*)",
+      "Bash(gtimeout 5 python:*)"
     ],
     "deny": [],
     "ask": []

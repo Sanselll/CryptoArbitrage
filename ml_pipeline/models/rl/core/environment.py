@@ -814,7 +814,18 @@ class FundingArbitrageEnv(gym.Env):
         position = self.portfolio.positions[position_idx]
 
         # Calculate estimated funding BEFORE closing
-        estimated_funding_8h_pct = position.calculate_estimated_funding_8h_pct()
+        # Use estimated rates (with fallback chain) instead of actual rates
+        estimated_rates = self._get_current_funding_rates(for_pnl=False)
+        symbol_rates = estimated_rates.get(position.symbol, {})
+        estimated_long_rate = symbol_rates.get('long_rate', position.long_funding_rate)
+        estimated_short_rate = symbol_rates.get('short_rate', position.short_funding_rate)
+
+        # Calculate 8h funding using estimated rates
+        long_payments_8h = 8.0 / position.long_funding_interval_hours
+        short_payments_8h = 8.0 / position.short_funding_interval_hours
+        long_funding_8h = -estimated_long_rate * long_payments_8h
+        short_funding_8h = estimated_short_rate * short_payments_8h
+        estimated_funding_8h_pct = (long_funding_8h + short_funding_8h) * 100
 
         # Get current prices for exit
         prices = self._get_current_prices()
@@ -1033,12 +1044,13 @@ class FundingArbitrageEnv(gym.Env):
                 else:
                     # Feature estimation: Use fallback chain for better estimates
                     # parquet → opportunity CSV → last known position rate
-                    if long_rate is None or short_rate is None:
+                    # Check for None OR 0.0 (parquet returns 0.0 when no funding payment)
+                    if long_rate is None or long_rate == 0.0 or short_rate is None or short_rate == 0.0:
                         # Fallback to CSV rates from opportunities
                         csv_rates = self._get_funding_rates_from_opportunities(symbol)
-                        if long_rate is None:
+                        if long_rate is None or long_rate == 0.0:
                             long_rate = csv_rates.get('long_rate', position.long_funding_rate)
-                        if short_rate is None:
+                        if short_rate is None or short_rate == 0.0:
                             short_rate = csv_rates.get('short_rate', position.short_funding_rate)
 
                     funding_rates[symbol] = {

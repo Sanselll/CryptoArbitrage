@@ -511,6 +511,7 @@ def test_model_inference(args):
 
     # Trade tracking (for CSV export)
     all_trades = []
+    all_funding_details = []  # Detailed funding breakdown per position
 
     # Profit factor metrics
     all_winning_pnl = []
@@ -738,6 +739,11 @@ def test_model_inference(args):
             trade_record['episode'] = episode + 1
             all_trades.append(trade_record)
 
+            # Collect funding details for analysis
+            funding_summary = position.get_funding_summary()
+            funding_summary['episode'] = episode + 1
+            all_funding_details.append(funding_summary)
+
         # Also collect open positions (if any)
         for position in portfolio.positions:
             trade_record = position.to_trade_record()
@@ -904,6 +910,31 @@ def test_model_inference(args):
         print(f"   Saved to: {output_path}")
     else:
         print(f"\n⚠️  No trades executed during inference")
+
+    # Write funding details to CSV
+    if all_funding_details:
+        funding_df = pd.DataFrame(all_funding_details)
+
+        # Save to CSV (in same directory as trades)
+        funding_output_path = Path(args.trades_output).parent / 'test_inference_funding_details.csv'
+        funding_df.to_csv(funding_output_path, index=False)
+
+        # Print summary statistics
+        print(f"\n💰 Funding Details:")
+        print(f"   Total positions analyzed: {len(all_funding_details)}")
+        print(f"   Total funding earned: ${funding_df['net_funding_usd'].sum():.2f}")
+        print(f"   Avg funding per position: ${funding_df['net_funding_usd'].mean():.2f}")
+        print(f"   Total long payments: {funding_df['long_funding_payment_count'].sum():.0f}")
+        print(f"   Total short payments: {funding_df['short_funding_payment_count'].sum():.0f}")
+        print(f"   Saved to: {funding_output_path}")
+
+        # Show top 5 positions by funding earned
+        top_funding = funding_df.nlargest(5, 'net_funding_usd')[['symbol', 'hours_held', 'net_funding_usd', 'net_funding_pct', 'realized_pnl_usd']]
+        print(f"\n   Top 5 by Funding Earned:")
+        for idx, row in top_funding.iterrows():
+            print(f"     {row['symbol']:12s}: ${row['net_funding_usd']:6.2f} ({row['net_funding_pct']:.2f}%) over {row['hours_held']:.1f}h, Total P&L: ${row['realized_pnl_usd']:6.2f}")
+    else:
+        print(f"\n⚠️  No funding details collected (no closed positions)")
 
     return True
 

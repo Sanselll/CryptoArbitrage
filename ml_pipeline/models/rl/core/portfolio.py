@@ -63,6 +63,8 @@ class Position:
     short_pnl_pct: float = 0.0  # Price P&L on short side
     long_net_funding_usd: float = 0.0  # Cumulative net funding on long (positive = received, negative = paid)
     short_net_funding_usd: float = 0.0  # Cumulative net funding on short (positive = received, negative = paid)
+    long_funding_payment_count: int = 0  # Number of funding payments on long side
+    short_funding_payment_count: int = 0  # Number of funding payments on short side
     entry_fees_paid_usd: float = 0.0
     unrealized_pnl_usd: float = 0.0
     unrealized_pnl_pct: float = 0.0
@@ -282,6 +284,7 @@ class Position:
 
             funding_this_step += net_funding_usd
             self.long_net_funding_usd += net_funding_usd
+            self.long_funding_payment_count += 1
 
             # Update next funding time
             self.last_long_funding_time = self.long_next_funding_time
@@ -309,6 +312,7 @@ class Position:
 
             funding_this_step += net_funding_usd
             self.short_net_funding_usd += net_funding_usd
+            self.short_funding_payment_count += 1
 
             # Update next funding time
             self.last_short_funding_time = self.short_next_funding_time
@@ -546,6 +550,53 @@ class Position:
         estimated_funding_8h_pct = (long_funding_8h + short_funding_8h) * 100
 
         return estimated_funding_8h_pct
+
+    def get_funding_summary(self) -> dict:
+        """
+        Get detailed funding summary for this position.
+
+        Returns:
+            dict with funding details for logging/analysis
+        """
+        total_capital = self.position_size_usd * 2
+
+        return {
+            'symbol': self.symbol,
+            'entry_time': self.entry_time,
+            'exit_time': self.exit_time,
+            'hours_held': self.hours_held,
+            'entry_apr': self.entry_apr,
+
+            # Long side funding
+            'long_funding_total_usd': self.long_net_funding_usd,
+            'long_funding_payment_count': self.long_funding_payment_count,
+            'long_funding_interval_hours': self.long_funding_interval_hours,
+            'long_avg_payment_usd': self.long_net_funding_usd / self.long_funding_payment_count if self.long_funding_payment_count > 0 else 0.0,
+
+            # Short side funding
+            'short_funding_total_usd': self.short_net_funding_usd,
+            'short_funding_payment_count': self.short_funding_payment_count,
+            'short_funding_interval_hours': self.short_funding_interval_hours,
+            'short_avg_payment_usd': self.short_net_funding_usd / self.short_funding_payment_count if self.short_funding_payment_count > 0 else 0.0,
+
+            # Net funding
+            'net_funding_usd': self.long_net_funding_usd + self.short_net_funding_usd,
+            'net_funding_pct': ((self.long_net_funding_usd + self.short_net_funding_usd) / total_capital * 100) if total_capital > 0 else 0.0,
+
+            # Price P&L
+            'long_price_pnl_usd': self.position_size_usd * (self.long_pnl_pct / 100),
+            'short_price_pnl_usd': self.position_size_usd * (self.short_pnl_pct / 100),
+            'total_price_pnl_usd': self.position_size_usd * (self.long_pnl_pct + self.short_pnl_pct) / 100,
+
+            # Fees
+            'entry_fees_usd': self.entry_fees_paid_usd,
+            'exit_fees_usd': self.exit_fees_paid_usd,
+            'total_fees_usd': self.entry_fees_paid_usd + self.exit_fees_paid_usd,
+
+            # Total P&L
+            'realized_pnl_usd': self.realized_pnl_usd if self.realized_pnl_usd is not None else self.unrealized_pnl_usd,
+            'realized_pnl_pct': self.realized_pnl_pct if self.realized_pnl_pct is not None else self.unrealized_pnl_pct,
+        }
 
 
 class Portfolio:
