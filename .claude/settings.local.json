@@ -299,7 +299,13 @@
       "Bash([ -f /tmp/ml_api_features.log ])",
       "Bash(if [ -f /tmp/ml_api_server_updated.log ])",
       "Bash(then echo \"=== Checking ML API action responses ===\" grep -i \"action_id\\|\"\"action\"\":\" /tmp/ml_api_server_updated.log)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(./test_all_checkpoints.sh:*)",
+      "Bash(then echo \"=== LATEST ML DECISION WITH POSITIONS ===\" tail -1 /tmp/ml_decisions.log)",
+      "Bash(if lsof -ti:525)",
+      "Bash(then echo '✅ ML API server is running on port 5250')",
+      "Bash(else echo '❌ ML API server failed to start')",
+      "Bash(else echo '❌ No ML decisions log found yet')"
     ],
     "deny": [],
     "ask": []

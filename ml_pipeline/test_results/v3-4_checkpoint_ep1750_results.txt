@@ -1,17 +1,19 @@
 ================================================================================
-TESTING MODEL INFERENCE ON TEST SET
+TESTING MODEL INFERENCE (DIRECT)
 ================================================================================
 
-🎲 Random seed: 42
+🎲 Random seed: 42 (deterministic mode enabled)
+   torch.use_deterministic_algorithms(True)
+   cudnn.deterministic=True, cudnn.benchmark=False
 
 1. Creating test environment...
-   Pre-converting 22,726 opportunities to dict format...
-   ✓ Pre-conversion complete (22,726 records)
+   Pre-converting 34,668 opportunities to dict format...
+   ✓ Pre-conversion complete (34,668 records)
 ✅ Test environment created
    Data: data/production/rl_opportunities.csv
    🌐 FULL TEST MODE: Testing on ENTIRE test dataset
-   Episode length: 2.9 days (2025-11-13 11:40:00.011682+00:00 to 2025-11-16 09:54:59.990073+00:00)
-   Total steps: ~842 steps at 5-minute intervals
+   Episode length: 5.2 days (2025-11-13 11:40:00.011682+00:00 to 2025-11-18 15:20:00.002174+00:00)
+   Total steps: ~1,483 steps at 5-minute intervals
    Step interval: 5 minute(s) (0.0833 hours)
    Initial capital: $10,000.00
    Leverage: 2.0x
@@ -28,9 +30,11 @@ TESTING MODEL INFERENCE ON TEST SET
 
 4. Loading trained model...
 ✅ Model loaded from checkpoints/v3-4/checkpoint_ep1750.pt
+   Mode: Direct model inference
 
 5. Running inference on 1 episode...
-   Episode 1: Reward=   5.65, P&L=$ 563.82 (5.64%), Trades= 2, Length=843 steps
+✅ Feature scaler loaded from: /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/trained_models/rl/feature_scaler_v2.pkl
+   Episode 1: Reward=   9.98, P&L=$ 997.02 (9.97%), Trades= 2, Length=1484 steps
 
 ✅ Inference test complete!
 
@@ -39,23 +43,23 @@ DETAILED EVALUATION METRICS (TEST SET)
 ================================================================================
 
 📊 Episode Metrics:
-  Mean Reward:         5.65 ± 0.00
-  Mean Length:        843.0 steps (5 min/step)
+  Mean Reward:         9.98 ± 0.00
+  Mean Length:       1484.0 steps (5 min/step)
 
 💰 P&L Metrics:
-  Mean P&L (USD):  $  563.82
-  Mean P&L (%):        5.64%
-  Total P&L:       $  563.82
+  Mean P&L (USD):  $  997.02
+  Mean P&L (%):        9.97%
+  Total P&L:       $  997.02
 
 📈 Trading Metrics:
   Total Trades:           2
   Winning Trades:         2
   Losing Trades:          0
   Win Rate:           100.0%
-  Avg Duration:        70.0 hours
+  Avg Duration:       123.5 hours
 
 🎯 Opportunity Metrics:
-  Opportunities/Ep:    7140
+  Opportunities/Ep:   11050
   Trades/Episode:       2.0
   Execution Rate:   0.0%
 
@@ -63,15 +67,15 @@ DETAILED EVALUATION METRICS (TEST SET)
   Max Drawdown:        0.00%
 
 📊 Profitability Metrics:
-  Profit Factor:   563815.10
+  Profit Factor:   997016.15
 
 ⚙️  Configuration Used:
   Leverage:        2.0x
   Utilization:     80%
   Max Positions:   2
 
-🎯 Composite Score: 0.9051
-   (P&L: 0.810 | ProfitFactor: 1.000 | Drawdown: 1.000)
+🎯 Composite Score: 0.9818
+   (P&L: 0.964 | ProfitFactor: 1.000 | Drawdown: 1.000)
 
 💾 Trade Records:
    Total trades: 2

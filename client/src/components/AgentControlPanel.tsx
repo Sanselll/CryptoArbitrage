@@ -227,11 +227,11 @@ export function AgentControlPanel() {
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-binance-bg rounded-lg p-3">
                   <div className="text-xs text-binance-text-secondary">Session P&L</div>
-                  <div className={`text-lg font-bold ${(agent.stats.sessionPnLUsd ?? 0) >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
-                    ${(agent.stats.sessionPnLUsd ?? 0).toFixed(2)}
+                  <div className={`text-lg font-bold ${(agent.stats.totalPnLUsd ?? 0) >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
+                    ${(agent.stats.totalPnLUsd ?? 0).toFixed(2)}
                   </div>
-                  <div className={`text-xs ${(agent.stats.sessionPnLPct ?? 0) >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
-                    {(agent.stats.sessionPnLPct ?? 0) >= 0 ? '+' : ''}{(agent.stats.sessionPnLPct ?? 0).toFixed(2)}%
+                  <div className={`text-xs ${(agent.stats.totalPnLPct ?? 0) >= 0 ? 'text-binance-green' : 'text-binance-red'}`}>
+                    {(agent.stats.totalPnLPct ?? 0) >= 0 ? '+' : ''}{(agent.stats.totalPnLPct ?? 0).toFixed(2)}%
                   </div>
                 </div>
 

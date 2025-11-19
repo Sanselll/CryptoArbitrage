@@ -531,6 +531,7 @@ public class AgentBackgroundService : BackgroundService
                         // Use fresh database data, not stale UserDataSnapshot
                         var dbContext = scope.ServiceProvider.GetRequiredService<ArbitrageDbContext>();
                         var execPositions = await dbContext.Positions
+                            .Include(p => p.Transactions)  // Include transactions to calculate funding from PositionTransaction
                             .Where(p => p.ExecutionId == executionId)
                             .ToListAsync();
 
@@ -538,12 +539,26 @@ public class AgentBackgroundService : BackgroundService
                         {
                             // Calculate total P&L from both long and short positions
                             // CRITICAL FIX: Include ALL P&L components (price + funding - fees)
-                            // Formula matches PositionReconciliationService: RealizedPnL = FundingEarned + PricePnL - TradingFees
+                            // Get funding from PositionTransaction table (same source as frontend)
+                            // Formula: TotalPnL = UnrealizedPnL + NetFunding - TradingFees
                             var totalPnl = execPositions.Sum(p =>
-                                p.UnrealizedPnL +          // Price P&L (current price vs entry)
-                                p.FundingEarnedUsd -       // Funding fees earned/paid (positive or negative)
-                                p.TradingFeesUsd           // Trading fees paid (already negative in DB)
-                            );
+                            {
+                                // Calculate net funding from PositionTransaction (single source of truth)
+                                var fundingReceived = p.Transactions
+                                    .Where(t => t.TransactionType == TransactionType.FundingFee && (t.SignedFee ?? 0) > 0)
+                                    .Sum(t => t.SignedFee ?? 0m);
+                                var fundingPaid = p.Transactions
+                                    .Where(t => t.TransactionType == TransactionType.FundingFee && (t.SignedFee ?? 0) < 0)
+                                    .Sum(t => Math.Abs(t.SignedFee ?? 0m));
+                                var netFunding = fundingReceived - fundingPaid;
+
+                                // Calculate trading fees from PositionTransaction
+                                var tradingFees = p.Transactions
+                                    .Where(t => t.TransactionType == TransactionType.Commission || t.TransactionType == TransactionType.Trade)
+                                    .Sum(t => t.Fee);
+
+                                return p.UnrealizedPnL + netFunding - tradingFees;
+                            });
                             var totalInitialMargin = execPositions.Sum(p => p.InitialMargin);
 
                             result.ProfitUsd = totalPnl;

@@ -80,12 +80,12 @@ def initialize_predictor():
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='checkpoints/v3-4/checkpoint_ep1250.pt',
+                model_path='checkpoints/v3-5/checkpoint_ep1100.pt',
                 device='cpu'
             )
             print("✅ RL predictor initialized successfully")
             print("   Architecture: Unified Feature Builder (203 dims)")
-            print("   Model: checkpoints/v3-4/checkpoint_ep1250.pt")
+            print("   Model: checkpoints/v3-5/checkpoint_ep1100.pt (Best v3-5: 43.29% return, 80% WR)")
             print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
             print("   Features: 5 config + 3 portfolio + 85 executions + 110 opportunities")
         except Exception as e:

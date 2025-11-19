@@ -66,8 +66,8 @@ interface AgentStats {
   winningTrades: number;
   losingTrades: number;
   winRate: number;
-  sessionPnLUsd: number;
-  sessionPnLPct: number;
+  totalPnLUsd: number;
+  totalPnLPct: number;
   activePositions: number;
   maxActivePositions: number;
 }

@@ -74,10 +74,10 @@ public class RLPredictionService
                 Opportunities = opportunities
             };
 
-            // Serialize with snake_case naming
+            // Serialize using JsonPropertyName attributes (respects both snake_case and camelCase)
             var options = new JsonSerializerOptions
             {
-                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                PropertyNamingPolicy = null,  // Respect JsonPropertyName attributes
                 WriteIndented = false
             };
 
@@ -373,24 +373,6 @@ public class RLPredictionService
 
             var currentApr = currentOpp?.FundApr ?? (longPosition.LastKnownApr != 0 ? longPosition.LastKnownApr : longPosition.EntryApr);
 
-            // Calculate unrealized P&L percentage (with division-by-zero protection)
-            var unrealizedPnlPct = longPosition.InitialMargin != 0
-                ? SanitizeDecimal(longPosition.UnrealizedPnL / longPosition.InitialMargin * 100m)
-                : 0m;
-
-            // Calculate individual leg P&L (simplified - would need current prices for exact calculation)
-            var longPnlPct = longPosition.InitialMargin != 0
-                ? SanitizeDecimal(longPosition.UnrealizedPnL / 2 / longPosition.InitialMargin * 100m)
-                : 0m;
-            var shortPnlPct = shortPosition.InitialMargin != 0
-                ? SanitizeDecimal(shortPosition.UnrealizedPnL / 2 / shortPosition.InitialMargin * 100m)
-                : 0m;
-
-            // Calculate liquidation distance (simplified formula)
-            var longLiqDistance = CalculateLiquidationDistance(longPosition.Leverage);
-            var shortLiqDistance = CalculateLiquidationDistance(shortPosition.Leverage);
-            var minLiqDistance = Math.Min(longLiqDistance, shortLiqDistance);
-
             // Get funding interval hours from position data (stored when position was opened)
             var longFundingIntervalHours = (int)longPosition.LongFundingIntervalHours;
             var shortFundingIntervalHours = (int)shortPosition.ShortFundingIntervalHours;
@@ -418,6 +400,55 @@ public class RLPredictionService
                 shortPosition.Exchange,
                 shortPosition.Symbol,
                 cancellationToken) ?? 0m;
+
+            // === CALCULATE P&L EXACTLY LIKE PYTHON PORTFOLIO ===
+            // Matches: ml_pipeline/models/rl/core/portfolio.py lines 200-240
+
+            // Get position size (same for both legs in arbitrage)
+            decimal positionSizeUsd = longPosition.InitialMargin;
+
+            // 1. Calculate PRICE P&L for each leg (in USD)
+            decimal longPriceChangePct = longPosition.EntryPrice != 0
+                ? ((currentLongPrice - longPosition.EntryPrice) / longPosition.EntryPrice)
+                : 0m;
+            decimal longPricePnlUsd = positionSizeUsd * longPriceChangePct;
+
+            decimal shortPriceChangePct = shortPosition.EntryPrice != 0
+                ? ((shortPosition.EntryPrice - currentShortPrice) / shortPosition.EntryPrice)
+                : 0m;
+            decimal shortPricePnlUsd = positionSizeUsd * shortPriceChangePct;
+
+            // 2. Get NET FUNDING (from PositionTransaction - same source as frontend)
+            decimal netFundingUsd = (longPosition.NetFundingFee) + (shortPosition.NetFundingFee);
+
+            // 3. Get TOTAL TRADING FEES (from PositionTransaction)
+            decimal totalFeesUsd = (longPosition.TradingFeePaid) + (shortPosition.TradingFeePaid);
+
+            // 4. Calculate TOTAL P&L (net arbitrage P&L)
+            decimal unrealizedPnlUsd = longPricePnlUsd + shortPricePnlUsd + netFundingUsd - totalFeesUsd;
+
+            // 5. Calculate PERCENTAGES (relative to total capital = both legs)
+            decimal totalCapitalUsd = positionSizeUsd * 2;
+
+            var unrealizedPnlPct = totalCapitalUsd != 0
+                ? SanitizeDecimal((unrealizedPnlUsd / totalCapitalUsd) * 100m)
+                : 0m;
+
+            // Individual leg P&L percentages (relative to each leg's position size)
+            var longPnlPct = positionSizeUsd != 0
+                ? SanitizeDecimal((longPricePnlUsd / positionSizeUsd) * 100m)
+                : 0m;
+
+            var shortPnlPct = positionSizeUsd != 0
+                ? SanitizeDecimal((shortPricePnlUsd / positionSizeUsd) * 100m)
+                : 0m;
+
+            // === END P&L CALCULATION ===
+
+            // Calculate liquidation distance (simplified formula)
+            var longLiqDistance = CalculateLiquidationDistance(longPosition.Leverage);
+            var shortLiqDistance = CalculateLiquidationDistance(shortPosition.Leverage);
+            var minLiqDistance = Math.Min(longLiqDistance, shortLiqDistance);
 
             positionData.Add(new PositionRawData
             {
