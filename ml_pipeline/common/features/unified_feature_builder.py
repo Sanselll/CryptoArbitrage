@@ -183,7 +183,7 @@ class UnifiedFeatureBuilder:
         positions = portfolio.get('positions', [])
         num_positions = sum(
             1 for p in positions
-            if p.get('is_active', False) or p.get('position_is_active', 0.0) > 0.5
+            if p.get('is_active', False)
         )
         max_positions = trading_config.get('max_positions', 2)
         num_positions_ratio = num_positions / max_positions if max_positions > 0 else 0.0
@@ -194,7 +194,7 @@ class UnifiedFeatureBuilder:
             active_liq_distances = [
                 p.get('liquidation_distance', 1.0)
                 for p in positions
-                if p.get('is_active', False) or p.get('position_is_active', 0.0) > 0.5
+                if p.get('is_active', False)
             ]
             if active_liq_distances:
                 min_liq_distance = min(active_liq_distances)
@@ -238,7 +238,7 @@ class UnifiedFeatureBuilder:
             85-dimensional array (5 slots × 17 features)
         """
         positions = portfolio.get('positions', [])
-        capital = portfolio.get('total_capital', portfolio.get('capital', 10000.0))
+        capital = portfolio.get('total_capital', 10000.0)
 
         all_features = []
 
@@ -247,7 +247,7 @@ class UnifiedFeatureBuilder:
                 pos = positions[slot_idx]
 
                 # Check if position is ACTUALLY active
-                is_active = pos.get('is_active', False) or pos.get('position_is_active', 0.0) > 0.5
+                is_active = pos.get('is_active', False)
 
                 if not is_active:
                     # Empty/inactive slot - all zeros
@@ -256,13 +256,13 @@ class UnifiedFeatureBuilder:
 
                 # Extract position data
                 total_capital_used = pos.get('position_size_usd', 0.0) * 2
-                raw_hours_held = pos.get('position_age_hours', pos.get('hours_held', 0.0))
+                raw_hours_held = pos.get('position_age_hours', 0.0)
 
                 # Prices
-                current_long_price = pos.get('current_long_price', pos.get('current_price', 0.0))
-                current_short_price = pos.get('current_short_price', pos.get('current_price', 0.0))
-                entry_long_price = pos.get('entry_long_price', pos.get('entry_price', 0.0))
-                entry_short_price = pos.get('entry_short_price', pos.get('entry_price', 0.0))
+                current_long_price = pos.get('current_long_price', 0.0)
+                current_short_price = pos.get('current_short_price', 0.0)
+                entry_long_price = pos.get('entry_long_price', 0.0)
+                entry_short_price = pos.get('entry_short_price', 0.0)
 
                 # ===== Calculate 17 features =====
 
@@ -297,8 +297,10 @@ class UnifiedFeatureBuilder:
                 # 6. estimated_funding_8h_pct
                 long_interval = pos.get('long_funding_interval_hours', 8)
                 short_interval = pos.get('short_funding_interval_hours', 8)
-                long_rate = pos.get('long_funding_rate', 0.0)
-                short_rate = pos.get('short_funding_rate', 0.0)
+                # Use estimated rates (with fallback chain) instead of actual rates
+                # Estimated rates fallback: parquet → opportunity CSV → last known
+                long_rate = pos.get('estimated_long_funding_rate', pos.get('long_funding_rate', 0.0))
+                short_rate = pos.get('estimated_short_funding_rate', pos.get('short_funding_rate', 0.0))
 
                 long_payments_8h = 8.0 / long_interval if long_interval > 0 else 1.0
                 short_payments_8h = 8.0 / short_interval if short_interval > 0 else 1.0
@@ -426,23 +428,23 @@ class UnifiedFeatureBuilder:
                 opp = opportunities[slot_idx]
 
                 fund_profit_8h = opp.get('fund_profit_8h', 0)
-                fundProfit8h24hProj = opp.get('fundProfit8h24hProj', 0)
+                fund_profit_8h_24h_proj = opp.get('fund_profit_8h_24h_proj', 0)
 
                 features = [
                     # Profit projections (6 features)
                     fund_profit_8h,
-                    fundProfit8h24hProj,
-                    opp.get('fundProfit8h3dProj', 0),
+                    fund_profit_8h_24h_proj,
+                    opp.get('fund_profit_8h_3d_proj', 0),
                     opp.get('fund_apr', 0),
-                    opp.get('fundApr24hProj', 0),
-                    opp.get('fundApr3dProj', 0),
+                    opp.get('fund_apr_24h_proj', 0),
+                    opp.get('fund_apr_3d_proj', 0),
                     # Spread metrics (4 features)
-                    opp.get('spread30SampleAvg', 0),
-                    opp.get('priceSpread24hAvg', 0),
-                    opp.get('priceSpread3dAvg', 0),
+                    opp.get('spread_30_sample_avg', 0),
+                    opp.get('price_spread_24h_avg', 0),
+                    opp.get('price_spread_3d_avg', 0),
                     opp.get('spread_volatility_stddev', 0),
                     # Velocity (1 feature)
-                    fund_profit_8h - fundProfit8h24hProj,  # apr_velocity
+                    fund_profit_8h - fund_profit_8h_24h_proj,  # apr_velocity
                 ]
 
                 # Convert to float32 and ensure no NaN/inf

@@ -69,6 +69,9 @@ public class PositionRawData
     [JsonPropertyName("current_short_price")]
     public decimal CurrentShortPrice { get; set; }
 
+    [JsonPropertyName("slippage_pct")]
+    public decimal SlippagePct { get; set; }
+
     // P&L (pre-calculated for convenience)
     [JsonPropertyName("unrealized_pnl_pct")]
     public decimal UnrealizedPnlPct { get; set; }
@@ -170,25 +173,6 @@ public class PortfolioRawData
 
     [JsonPropertyName("capital_utilization")]
     public decimal CapitalUtilization { get; set; }
-
-    // Optional fields (accepted by Python but not required)
-    [JsonPropertyName("initial_capital")]
-    public decimal? InitialCapital { get; set; }
-
-    [JsonPropertyName("num_positions")]
-    public int? NumPositions { get; set; }
-
-    [JsonPropertyName("margin_utilization")]
-    public decimal? MarginUtilization { get; set; }
-
-    [JsonPropertyName("total_pnl_pct")]
-    public decimal? TotalPnlPct { get; set; }
-
-    [JsonPropertyName("drawdown")]
-    public decimal? Drawdown { get; set; }
-
-    [JsonPropertyName("min_liquidation_distance")]
-    public decimal? MinLiquidationDistance { get; set; }
 }
 
 /// <summary>

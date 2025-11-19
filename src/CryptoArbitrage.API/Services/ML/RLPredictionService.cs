@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using CryptoArbitrage.API.Constants;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.Agent;
@@ -26,6 +27,7 @@ public class RLPredictionService
     private readonly IAgentConfigurationService _agentConfigService;
     private readonly IDataRepository<UserDataSnapshot> _userDataRepository;
     private readonly IDataRepository<MarketDataSnapshot> _marketDataRepository;
+    private readonly IDataRepository<FundingRateDto> _fundingRateRepository;
     private readonly ILogger<RLPredictionService> _logger;
 
     // ML API endpoint
@@ -37,12 +39,14 @@ public class RLPredictionService
         IAgentConfigurationService agentConfigService,
         IDataRepository<UserDataSnapshot> userDataRepository,
         IDataRepository<MarketDataSnapshot> marketDataRepository,
+        IDataRepository<FundingRateDto> fundingRateRepository,
         ILogger<RLPredictionService> logger)
     {
         _httpClient = httpClient;
         _agentConfigService = agentConfigService;
         _userDataRepository = userDataRepository;
         _marketDataRepository = marketDataRepository;
+        _fundingRateRepository = fundingRateRepository;
         _logger = logger;
 
         _httpClient.BaseAddress = new Uri(ML_API_BASE_URL);
@@ -159,10 +163,11 @@ public class RLPredictionService
             var positionData = await BuildPositionRawDataFromDtos(positions, oppList, cancellationToken);
 
             // 5. Calculate portfolio metrics from user balance data
+            // For perpetual futures arbitrage, use ONLY futures balance (not SPOT)
             var userDataDict = await _userDataRepository.GetByPatternAsync($"userdata:{userId}:*", cancellationToken);
             decimal totalCapital = userDataDict.Values
                 .Where(s => s?.Balance != null)
-                .Sum(s => s!.Balance!.OperationalBalanceUsd);
+                .Sum(s => s!.Balance!.FuturesBalanceUsd);
 
             // Fallback to default if no balance data available
             if (totalCapital == 0m)
@@ -303,27 +308,19 @@ public class RLPredictionService
     {
         try
         {
-            const string key = "market_data_snapshot";
-            var snapshot = await _marketDataRepository.GetAsync(key, cancellationToken);
+            // Query funding rate repository with key format: "funding:exchange:symbol"
+            string key = DataCollectionConstants.CacheKeys.BuildFundingRateKey(exchange, symbol);
+            var fundingRate = await _fundingRateRepository.GetAsync(key, cancellationToken);
 
-            if (snapshot == null)
+            if (fundingRate == null)
             {
-                _logger.LogDebug("Market data snapshot not available for funding rates");
+                _logger.LogWarning("🔍 Funding rate NOT FOUND - Key: '{Key}' (Exchange: {Exchange}, Symbol: {Symbol})",
+                    key, exchange, symbol);
                 return null;
             }
 
-            // Find funding rate for this exchange and symbol
-            if (snapshot.FundingRates.TryGetValue(exchange, out var exchangeRates))
-            {
-                var fundingRate = exchangeRates.FirstOrDefault(r => r.Symbol == symbol);
-                if (fundingRate != null)
-                {
-                    return fundingRate.Rate;
-                }
-            }
-
-            _logger.LogDebug("Funding rate not found for {Exchange}:{Symbol}", exchange, symbol);
-            return null;
+            _logger.LogDebug("✅ Funding rate FOUND - Key: '{Key}', Rate: {Rate}", key, fundingRate.Rate);
+            return fundingRate.Rate;
         }
         catch (Exception ex)
         {
@@ -465,6 +462,9 @@ public class RLPredictionService
                 // Current prices from market data
                 CurrentLongPrice = currentLongPrice,
                 CurrentShortPrice = currentShortPrice,
+
+                // Slippage (0% to match training environment)
+                SlippagePct = 0m,
 
                 // P&L
                 UnrealizedPnlPct = unrealizedPnlPct,

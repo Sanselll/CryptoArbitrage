@@ -8,6 +8,7 @@ Runs on port 5053 and provides prediction endpoints.
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sys
+import os
 from pathlib import Path
 import json
 from datetime import datetime
@@ -29,7 +30,8 @@ agent_manager = AgentManager()
 decision_logger = DecisionLogger(max_decisions_per_user=1000)
 
 # Decision log file for raw input/output analysis
-DECISION_LOG_FILE = '/tmp/ml_decisions.log'
+# Stored in server directory for easy access
+DECISION_LOG_FILE = os.path.join(os.path.dirname(__file__), 'ml_decisions.log')
 
 
 def log_raw_decision(request_data: dict, response_data: dict, user_id: str = None):

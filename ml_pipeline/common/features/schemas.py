@@ -22,13 +22,11 @@ class PositionRawData(BaseModel):
     """Raw position data from backend."""
     # Identity
     is_active: bool = False
-    position_is_active: Optional[float] = Field(default=None, ge=0.0, le=1.0)  # Legacy field - defaults to None
     symbol: Optional[str] = None
 
     # Position basics
     position_size_usd: float = Field(default=0.0, ge=0.0)
     position_age_hours: Optional[float] = Field(default=None, ge=0.0)
-    hours_held: Optional[float] = Field(default=None, ge=0.0)  # Legacy field - defaults to None
     leverage: float = Field(default=1.0, ge=1.0, le=10.0)
 
     # Prices
@@ -36,8 +34,7 @@ class PositionRawData(BaseModel):
     entry_short_price: float = Field(default=0.0, ge=0.0)
     current_long_price: float = Field(default=0.0, ge=0.0)
     current_short_price: float = Field(default=0.0, ge=0.0)
-    entry_price: Optional[float] = Field(default=None, ge=0.0)  # Legacy field - defaults to None
-    current_price: Optional[float] = Field(default=None, ge=0.0)  # Legacy field - defaults to None
+    slippage_pct: float = Field(default=0.0, ge=0.0)  # Slippage percentage for exit calculations
 
     # P&L
     unrealized_pnl_pct: float = Field(default=0.0)
@@ -68,18 +65,18 @@ class OpportunityRawData(BaseModel):
     long_exchange: str
     short_exchange: str
 
-    # Funding profit projections
+    # Funding profit projections (6 features)
     fund_profit_8h: float = Field(default=0.0)
-    fundProfit8h24hProj: float = Field(default=0.0)
-    fundProfit8h3dProj: float = Field(default=0.0)
+    fund_profit_8h_24h_proj: float = Field(default=0.0)
+    fund_profit_8h_3d_proj: float = Field(default=0.0)
     fund_apr: float = Field(default=0.0)
-    fundApr24hProj: float = Field(default=0.0)
-    fundApr3dProj: float = Field(default=0.0)
+    fund_apr_24h_proj: float = Field(default=0.0)
+    fund_apr_3d_proj: float = Field(default=0.0)
 
-    # Spread metrics (can be negative when short exchange price < long exchange price)
-    spread30SampleAvg: float = Field(default=0.0)
-    priceSpread24hAvg: float = Field(default=0.0)
-    priceSpread3dAvg: float = Field(default=0.0)
+    # Spread metrics (4 features - can be negative when short exchange price < long exchange price)
+    spread_30_sample_avg: float = Field(default=0.0)
+    price_spread_24h_avg: float = Field(default=0.0)
+    price_spread_3d_avg: float = Field(default=0.0)
     spread_volatility_stddev: float = Field(default=0.0, ge=0.0)  # Standard deviation is always >= 0
 
     # Position tracking
@@ -93,7 +90,6 @@ class PortfolioRawData(BaseModel):
     """Raw portfolio data from backend."""
     positions: List[PositionRawData] = Field(default_factory=list, max_items=5)
     total_capital: float = Field(default=10000.0, gt=0.0)
-    capital: Optional[float] = Field(default=None, gt=0.0)  # Legacy field
     capital_utilization: float = Field(default=0.0, ge=0.0, le=100.0)
 
     @validator('positions')

@@ -238,20 +238,54 @@ public class BybitConnector : IExchangeConnector
 
         try
         {
-            // First, fetch instruments info to get funding interval for each symbol
-            var instrumentsInfo = await _restClient.V5Api.ExchangeData.GetLinearInverseSymbolsAsync(Category.Linear);
+            // Fetch ALL instruments info with pagination to get funding intervals
             var fundingIntervalMap = new Dictionary<string, int>();
+            string? cursor = null;
+            int pageCount = 0;
+            int totalSymbols = 0;
 
-            if (instrumentsInfo.Success && instrumentsInfo.Data != null)
+            do
             {
-                foreach (var info in instrumentsInfo.Data.List)
+                pageCount++;
+                var instrumentsInfo = await _restClient.V5Api.ExchangeData.GetLinearInverseSymbolsAsync(
+                    Category.Linear,
+                    cursor: cursor,
+                    limit: 1000 // Max limit per page
+                );
+
+                if (instrumentsInfo.Success && instrumentsInfo.Data != null)
                 {
-                    // FundingInterval is in minutes, convert to hours
-                    int intervalMinutes = info.FundingInterval > 0 ? info.FundingInterval : 480; // Default: 480 minutes = 8 hours
-                    fundingIntervalMap[info.Name] = intervalMinutes / 60;
+                    foreach (var info in instrumentsInfo.Data.List)
+                    {
+                        // FundingInterval is in minutes, convert to hours
+                        int intervalMinutes = info.FundingInterval > 0 ? info.FundingInterval : 480; // Default: 480 minutes = 8 hours
+                        fundingIntervalMap[info.Name] = intervalMinutes / 60;
+
+                        // DEBUG: Log TNSRUSDT specifically
+                        if (info.Name == "TNSRUSDT")
+                        {
+                            _logger.LogWarning("✅ Found TNSRUSDT: FundingInterval={Minutes}min ({Hours}h) on page {Page}",
+                                info.FundingInterval, intervalMinutes / 60, pageCount);
+                        }
+                    }
+
+                    totalSymbols += instrumentsInfo.Data.List.Count();
+                    cursor = instrumentsInfo.Data.NextPageCursor;
+
+                    _logger.LogDebug("Loaded page {Page}: {Count} symbols (cursor: {Cursor})",
+                        pageCount, instrumentsInfo.Data.List.Count(), cursor ?? "END");
                 }
-                _logger.LogInformation("Loaded funding intervals for {Count} symbols from Bybit", fundingIntervalMap.Count);
-            }
+                else
+                {
+                    _logger.LogWarning("Failed to fetch Bybit instruments page {Page}: {Error}",
+                        pageCount, instrumentsInfo.Error?.Message ?? "Unknown error");
+                    break;
+                }
+
+            } while (!string.IsNullOrEmpty(cursor));
+
+            _logger.LogInformation("Loaded funding intervals for {Total} symbols from Bybit across {Pages} pages",
+                totalSymbols, pageCount);
 
             // Get all linear perpetual contracts
             var instruments = await _restClient.V5Api.ExchangeData.GetLinearInverseTickersAsync(Category.Linear);

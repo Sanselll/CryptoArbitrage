@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CryptoArbitrage.API.Constants;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.Data;
@@ -105,8 +106,10 @@ public class ProductionDataCollectionService : BackgroundService
                 return;
             }
 
-            // Get funding rates from repository
-            var fundingRatesDict = await fundingRateRepository.GetByPatternAsync("*", cancellationToken);
+            // Get funding rates from repository using correct pattern
+            var fundingRatesDict = await fundingRateRepository.GetByPatternAsync(
+                DataCollectionConstants.CacheKeys.FundingRatePattern,
+                cancellationToken);
             var fundingRates = fundingRatesDict.Values.ToList();
 
             _logger.LogDebug(

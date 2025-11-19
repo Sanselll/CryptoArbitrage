@@ -978,7 +978,7 @@ class FundingArbitrageEnv(gym.Env):
 
         return prices
 
-    def _get_current_funding_rates(self) -> Dict[str, Dict[str, float]]:
+    def _get_current_funding_rates(self, for_pnl: bool = True) -> Dict[str, Dict[str, float]]:
         """
         Get current funding rates for all symbols with open positions.
 
@@ -987,12 +987,18 @@ class FundingArbitrageEnv(gym.Env):
         CRITICAL FIX: Funding rates change hourly and must be updated from market data!
         Rates are fetched from price_history, NOT from static opportunity CSV.
 
+        Args:
+            for_pnl: If True (default), use ONLY parquet data for P&L calculation (0 if missing).
+                    If False, use fallback chain for feature estimation: parquet → CSV → last known.
+
         Returns:
             Dict mapping symbol to {'long_rate': float, 'short_rate': float}
         """
-        # Return cached rates if already computed for this timestep
-        if self._cached_funding_rates_time == self.current_time and self._cached_funding_rates is not None:
-            return self._cached_funding_rates
+        # Return cached rates if already computed for this timestep and mode
+        # Note: We cache separately for P&L vs estimation modes
+        cache_key = (self.current_time, for_pnl)
+        if hasattr(self, '_cached_funding_rates_dict') and cache_key in self._cached_funding_rates_dict:
+            return self._cached_funding_rates_dict[cache_key]
 
         funding_rates = {}
 
@@ -1017,17 +1023,27 @@ class FundingArbitrageEnv(gym.Env):
                     fallback=True
                 )
 
-                # Use real market rates if available
-                if long_rate is not None and short_rate is not None:
+                if for_pnl:
+                    # P&L calculation: Use parquet ONLY, treat missing/None as 0
+                    # If parquet has 0, then funding payment = 0 (accurate cash flow)
+                    funding_rates[symbol] = {
+                        'long_rate': long_rate if long_rate is not None else 0.0,
+                        'short_rate': short_rate if short_rate is not None else 0.0,
+                    }
+                else:
+                    # Feature estimation: Use fallback chain for better estimates
+                    # parquet → opportunity CSV → last known position rate
+                    if long_rate is None or short_rate is None:
+                        # Fallback to CSV rates from opportunities
+                        csv_rates = self._get_funding_rates_from_opportunities(symbol)
+                        if long_rate is None:
+                            long_rate = csv_rates.get('long_rate', position.long_funding_rate)
+                        if short_rate is None:
+                            short_rate = csv_rates.get('short_rate', position.short_funding_rate)
+
                     funding_rates[symbol] = {
                         'long_rate': long_rate,
                         'short_rate': short_rate,
-                    }
-                else:
-                    # Fallback: Keep current rates (no update)
-                    funding_rates[symbol] = {
-                        'long_rate': position.long_funding_rate,
-                        'short_rate': position.short_funding_rate,
                     }
             else:
                 # No price_loader available: Keep current rates
@@ -1036,11 +1052,34 @@ class FundingArbitrageEnv(gym.Env):
                     'short_rate': position.short_funding_rate,
                 }
 
-        # Cache for this timestep
-        self._cached_funding_rates = funding_rates
-        self._cached_funding_rates_time = self.current_time
+        # Cache for this timestep and mode
+        if not hasattr(self, '_cached_funding_rates_dict'):
+            self._cached_funding_rates_dict = {}
+        self._cached_funding_rates_dict[cache_key] = funding_rates
 
         return funding_rates
+
+    def _get_funding_rates_from_opportunities(self, symbol: str) -> Dict[str, float]:
+        """
+        Get funding rates from current opportunities CSV data (fallback source).
+
+        This is used when parquet files have missing/0 funding rates and we need
+        a better estimate for feature calculation (not for P&L).
+
+        Args:
+            symbol: The trading pair symbol (e.g., 'BTCUSDT')
+
+        Returns:
+            Dict with 'long_rate' and 'short_rate' keys (0.0 if not found)
+        """
+        for opp in self.current_opportunities:
+            if opp['symbol'] == symbol:
+                return {
+                    'long_rate': opp.get('long_funding_rate', 0.0),
+                    'short_rate': opp.get('short_funding_rate', 0.0),
+                }
+        # Symbol not found in opportunities
+        return {'long_rate': 0.0, 'short_rate': 0.0}
 
     def get_raw_state_for_ml_api(self) -> dict:
         """
@@ -1156,6 +1195,9 @@ class FundingArbitrageEnv(gym.Env):
             'liquidation_buffer': float(config_array[4]),
         }
 
+        # Get estimated funding rates (with fallback chain for features)
+        estimated_funding_rates = self._get_current_funding_rates(for_pnl=False)
+
         # Build positions list - convert Position objects to dicts with ALL needed attributes
         positions = []
         for pos in self.portfolio.positions:
@@ -1171,6 +1213,11 @@ class FundingArbitrageEnv(gym.Env):
                     current_position_apr = opp.get('fund_apr', 0.0)
                     break
 
+            # Get estimated rates for this position (with fallback to CSV if parquet=0)
+            estimated_rates = estimated_funding_rates.get(pos.symbol, {})
+            estimated_long_rate = estimated_rates.get('long_rate', pos.long_funding_rate)
+            estimated_short_rate = estimated_rates.get('short_rate', pos.short_funding_rate)
+
             positions.append({
                 'is_active': True,
                 'symbol': pos.symbol,
@@ -1184,8 +1231,10 @@ class FundingArbitrageEnv(gym.Env):
                 'unrealized_pnl_pct': float(pos.unrealized_pnl_pct),
                 'long_pnl_pct': float(pos.long_pnl_pct),  # Direct from Position object
                 'short_pnl_pct': float(pos.short_pnl_pct),  # Direct from Position object
-                'long_funding_rate': float(pos.long_funding_rate),  # CRITICAL for estimated_funding_8h_pct
-                'short_funding_rate': float(pos.short_funding_rate),  # CRITICAL for estimated_funding_8h_pct
+                'long_funding_rate': float(pos.long_funding_rate),  # Actual rate (for P&L)
+                'short_funding_rate': float(pos.short_funding_rate),  # Actual rate (for P&L)
+                'estimated_long_funding_rate': float(estimated_long_rate),  # Estimated (for features)
+                'estimated_short_funding_rate': float(estimated_short_rate),  # Estimated (for features)
                 'long_funding_interval_hours': int(pos.long_funding_interval_hours),
                 'short_funding_interval_hours': int(pos.short_funding_interval_hours),
                 'entry_apr': float(pos.entry_apr),

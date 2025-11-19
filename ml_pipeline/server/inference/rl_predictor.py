@@ -146,10 +146,7 @@ class ModularRLPredictor:
             'portfolio': portfolio,
             'opportunities': opportunities
         }
-        obs = self.feature_builder.build_observation_from_raw_data(
-            raw_data,
-            log_file='/tmp/ml_api_features.log'
-        )
+        obs = self.feature_builder.build_observation_from_raw_data(raw_data)
 
         # Log observation for debugging
         self._log_observation(obs, portfolio, opportunities)
