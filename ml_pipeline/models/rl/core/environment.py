@@ -1035,11 +1035,16 @@ class FundingArbitrageEnv(gym.Env):
                 )
 
                 if for_pnl:
-                    # P&L calculation: Use parquet ONLY, treat missing/None as 0
-                    # If parquet has 0, then funding payment = 0 (accurate cash flow)
+                    # P&L calculation: Use parquet data, but 0.0 means "no payment this hour"
+                    # Funding rates persist between payments - use last known rate from position
+                    if long_rate is None or long_rate == 0.0:
+                        long_rate = position.long_funding_rate  # Keep current rate
+                    if short_rate is None or short_rate == 0.0:
+                        short_rate = position.short_funding_rate  # Keep current rate
+
                     funding_rates[symbol] = {
-                        'long_rate': long_rate if long_rate is not None else 0.0,
-                        'short_rate': short_rate if short_rate is not None else 0.0,
+                        'long_rate': long_rate,
+                        'short_rate': short_rate,
                     }
                 else:
                     # Feature estimation: Use fallback chain for better estimates
