@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
     parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler_v2.pkl',
-                        help='Path to fitted StandardScaler pickle (V3: 11 features, was 19)')
+                        help='Path to fitted feature scaler pickle (V3: StandardScaler with 11 features, was 19)')
 
     # Environment (V3: 301→203 dimensions)
     parser.add_argument('--initial-capital', type=float, default=10000.0,
@@ -86,6 +86,12 @@ def parse_args():
                         help='Value loss coefficient')
     parser.add_argument('--entropy-coef', type=float, default=0.05,
                         help='Entropy coefficient (balanced to maintain exploration without over-trading)')
+    parser.add_argument('--initial-entropy-coef', type=float, default=None,
+                        help='Initial entropy coefficient for decay schedule (V3.1). If set, enables entropy decay.')
+    parser.add_argument('--final-entropy-coef', type=float, default=None,
+                        help='Final entropy coefficient for decay schedule (V3.1). Requires --initial-entropy-coef.')
+    parser.add_argument('--entropy-decay-episodes', type=int, default=2000,
+                        help='Number of episodes over which to decay entropy (V3.1). Default: 2000')
     parser.add_argument('--n-epochs', type=int, default=4,
                         help='Number of epochs per update')
     parser.add_argument('--batch-size', type=int, default=64,
@@ -403,6 +409,9 @@ def train(args):
         n_epochs=args.n_epochs,
         batch_size=args.batch_size,
         device=args.device,
+        initial_entropy_coef=args.initial_entropy_coef,  # V3.1
+        final_entropy_coef=args.final_entropy_coef,      # V3.1
+        entropy_decay_episodes=args.entropy_decay_episodes,  # V3.1
     )
 
     # Resume from checkpoint if specified
@@ -445,6 +454,9 @@ def train(args):
             print(f"  Reward: {stats['episode_reward']:8.2f}  |  Length: {stats['episode_length']:4d}  |  Mean(100): {stats['mean_reward_100']:8.2f}")
             print(f"  Loss: {stats['loss']:6.4f}  |  Policy: {stats['policy_loss']:6.4f}  |  Value: {stats['value_loss']:6.4f}  |  Entropy: {stats['entropy']:6.4f}")
             print(f"  KL: {stats['approx_kl']:6.4f}  |  Clipfrac: {stats['clipfrac']:6.4f}")
+            # V3.1: Show entropy coefficient if using decay
+            if 'entropy_coef' in stats:
+                print(f"  Entropy Coef: {stats['entropy_coef']:6.4f}")
             print(f"  Time: {episode_time:.2f}s  |  FPS: {fps:.0f}  |  Total steps: {trainer.total_timesteps}")
             print()
 

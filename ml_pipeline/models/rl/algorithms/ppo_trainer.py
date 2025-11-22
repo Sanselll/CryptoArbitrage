@@ -89,7 +89,10 @@ class PPOTrainer:
                  max_grad_norm: float = 0.5,
                  n_epochs: int = 4,
                  batch_size: int = 64,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 initial_entropy_coef: Optional[float] = None,
+                 final_entropy_coef: Optional[float] = None,
+                 entropy_decay_episodes: int = 2000):
         """
         Initialize PPO trainer.
 
@@ -100,11 +103,14 @@ class PPOTrainer:
             gae_lambda: GAE lambda for advantage estimation
             clip_range: PPO clipping parameter
             value_coef: Value loss coefficient
-            entropy_coef: Entropy bonus coefficient
+            entropy_coef: Entropy bonus coefficient (used if no decay)
             max_grad_norm: Maximum gradient norm for clipping
             n_epochs: Number of epochs per update
             batch_size: Mini-batch size for updates
             device: Device to use ('cpu' or 'cuda')
+            initial_entropy_coef: Starting entropy coefficient (for decay schedule)
+            final_entropy_coef: Final entropy coefficient (for decay schedule)
+            entropy_decay_episodes: Number of episodes over which to decay entropy
         """
         self.network = network.to(device)
 
@@ -129,14 +135,48 @@ class PPOTrainer:
         self.n_epochs = n_epochs
         self.batch_size = batch_size
 
+        # Entropy decay schedule (V3.1)
+        self.use_entropy_decay = initial_entropy_coef is not None and final_entropy_coef is not None
+        if self.use_entropy_decay:
+            self.initial_entropy_coef = initial_entropy_coef
+            self.final_entropy_coef = final_entropy_coef
+            self.entropy_decay_episodes = entropy_decay_episodes
+            print(f"✅ Entropy decay enabled: {initial_entropy_coef:.3f} → {final_entropy_coef:.3f} over {entropy_decay_episodes} episodes")
+        else:
+            self.initial_entropy_coef = entropy_coef
+            self.final_entropy_coef = entropy_coef
+            self.entropy_decay_episodes = 0
+
         # Optimizer
         self.optimizer = optim.Adam(self.network.parameters(), lr=learning_rate)
 
         # Training statistics
         self.total_timesteps = 0
         self.num_updates = 0
+        self.num_episodes = 0  # V3.1: Track episode count for entropy decay
         self.episode_rewards = deque(maxlen=100)
         self.episode_lengths = deque(maxlen=100)
+
+    def get_entropy_coef(self, episode: int) -> float:
+        """
+        Get the current entropy coefficient based on episode number.
+
+        V3.1: Linear decay from initial_entropy_coef to final_entropy_coef
+        over entropy_decay_episodes.
+
+        Args:
+            episode: Current episode number
+
+        Returns:
+            Current entropy coefficient
+        """
+        if not self.use_entropy_decay:
+            return self.entropy_coef
+
+        # Linear decay: initial - (initial - final) * progress
+        progress = min(episode / self.entropy_decay_episodes, 1.0)
+        current_coef = self.initial_entropy_coef - (self.initial_entropy_coef - self.final_entropy_coef) * progress
+        return current_coef
 
     def select_action(self,
                       obs: np.ndarray,
@@ -220,13 +260,14 @@ class PPOTrainer:
 
         return returns, advantages
 
-    def update(self, rollout_buffer: RolloutBuffer, last_value: float = 0.0) -> Dict[str, float]:
+    def update(self, rollout_buffer: RolloutBuffer, last_value: float = 0.0, episode: int = 0) -> Dict[str, float]:
         """
         Update policy using PPO.
 
         Args:
             rollout_buffer: Buffer containing rollout data
             last_value: Value estimate for final state
+            episode: Current episode number (for entropy decay)
 
         Returns:
             Dictionary of training statistics
@@ -248,6 +289,9 @@ class PPOTrainer:
 
         # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        # Get current entropy coefficient (with decay)
+        current_entropy_coef = self.get_entropy_coef(episode)
 
         # Training statistics
         total_loss = 0.0
@@ -300,8 +344,8 @@ class PPOTrainer:
                 # Entropy bonus
                 entropy_loss = -entropy.mean()
 
-                # Total loss
-                loss = policy_loss + self.value_coef * value_loss + self.entropy_coef * entropy_loss
+                # Total loss (V3.1: use current_entropy_coef instead of self.entropy_coef)
+                loss = policy_loss + self.value_coef * value_loss + current_entropy_coef * entropy_loss
 
                 # Backward pass
                 self.optimizer.zero_grad()
@@ -331,6 +375,7 @@ class PPOTrainer:
             'entropy': total_entropy / n_batches,
             'approx_kl': total_approx_kl / n_batches,
             'clipfrac': total_clipfrac / n_batches,
+            'entropy_coef': current_entropy_coef,  # V3.1: Include current entropy coefficient
         }
 
     def train_episode(self, env, max_steps: int = 1000) -> Dict[str, float]:
@@ -344,6 +389,9 @@ class PPOTrainer:
         Returns:
             Dictionary of episode statistics
         """
+        # Explicitly set network to training mode
+        self.network.train()
+
         buffer = RolloutBuffer()
         obs, info = env.reset()
 
@@ -385,8 +433,9 @@ class PPOTrainer:
                 _, last_value_tensor = self.network(obs_tensor, None)
                 last_value = last_value_tensor.item()
 
-        # Update policy
-        update_stats = self.update(buffer, last_value)
+        # Update policy (V3.1: pass episode number for entropy decay)
+        update_stats = self.update(buffer, last_value, episode=self.num_episodes)
+        self.num_episodes += 1  # Increment episode counter
 
         # Track episode statistics
         self.episode_rewards.append(episode_reward)

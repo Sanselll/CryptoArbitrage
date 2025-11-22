@@ -416,7 +416,15 @@ def create_opportunities_dataframe(opportunities: List[dict]) -> pd.DataFrame:
         'fundProfit8h': 'fund_profit_8h',
         'fundApr': 'fund_apr',
         'volume24h': 'volume_24h',
-        'spreadVolatilityStdDev': 'spread_volatility_stddev'
+        'spreadVolatilityStdDev': 'spread_volatility_stddev',
+        # Projection fields (camelCase → snake_case)
+        'fundProfit8h24hProj': 'fund_profit_8h_24h_proj',
+        'fundProfit8h3dProj': 'fund_profit_8h_3d_proj',
+        'fundApr24hProj': 'fund_apr_24h_proj',
+        'fundApr3dProj': 'fund_apr_3d_proj',
+        'spread30SampleAvg': 'spread_30_sample_avg',
+        'priceSpread24hAvg': 'price_spread_24h_avg',
+        'priceSpread3dAvg': 'price_spread_3d_avg',
     }
 
     existing_columns = {k: v for k, v in column_mapping.items() if k in df.columns}

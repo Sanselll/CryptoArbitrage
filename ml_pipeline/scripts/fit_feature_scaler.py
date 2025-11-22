@@ -25,18 +25,18 @@ def extract_opportunity_features(row):
     features = [
         # Profit projections (6 features)
         row.get('fund_profit_8h', 0),
-        row.get('fundProfit8h24hProj', 0),
-        row.get('fundProfit8h3dProj', 0),
+        row.get('fund_profit_8h_24h_proj', 0),
+        row.get('fund_profit_8h_3d_proj', 0),
         row.get('fund_apr', 0),
-        row.get('fundApr24hProj', 0),
-        row.get('fundApr3dProj', 0),
+        row.get('fund_apr_24h_proj', 0),
+        row.get('fund_apr_3d_proj', 0),
         # Spread statistics (4 features)
-        row.get('spread30SampleAvg', 0),
-        row.get('priceSpread24hAvg', 0),
-        row.get('priceSpread3dAvg', 0),
+        row.get('spread_30_sample_avg', 0),
+        row.get('price_spread_24h_avg', 0),
+        row.get('price_spread_3d_avg', 0),
         row.get('spread_volatility_stddev', 0),
         # Velocity (1 feature - NEW in V3)
-        row.get('fund_profit_8h', 0) - row.get('fundProfit8h24hProj', 0),  # apr_velocity
+        row.get('fund_profit_8h', 0) - row.get('fund_profit_8h_24h_proj', 0),  # apr_velocity
     ]
 
     # Convert to float and handle NaN/inf
@@ -46,12 +46,12 @@ def extract_opportunity_features(row):
 
 def main():
     print("="*80)
-    print("FITTING FEATURE SCALER FOR RL ENVIRONMENT (V3)")
+    print("FITTING FEATURE SCALER FOR RL ENVIRONMENT (V3 - StandardScaler)")
     print("="*80)
 
     # Paths
     train_data_path = "data/rl_train.csv"
-    scaler_output_path = "trained_models/rl/feature_scaler_v2.pkl"  # V3: Save as v2
+    scaler_output_path = "trained_models/rl/feature_scaler_v2.pkl"  # V3: StandardScaler
 
     # Create output directory
     Path(scaler_output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -80,9 +80,9 @@ def main():
     print("FEATURE STATISTICS (BEFORE SCALING)")
     print("-"*80)
     feature_names = [
-        'fund_profit_8h', 'fundProfit8h24hProj', 'fundProfit8h3dProj',
-        'fund_apr', 'fundApr24hProj', 'fundApr3dProj',
-        'spread30SampleAvg', 'priceSpread24hAvg', 'priceSpread3dAvg',
+        'fund_profit_8h', 'fund_profit_8h_24h_proj', 'fund_profit_8h_3d_proj',
+        'fund_apr', 'fund_apr_24h_proj', 'fund_apr_3d_proj',
+        'spread_30_sample_avg', 'price_spread_24h_avg', 'price_spread_3d_avg',
         'spread_volatility_stddev',
         'apr_velocity',  # NEW in V3
     ]
@@ -96,14 +96,14 @@ def main():
 
     # Fit StandardScaler
     print("\n" + "="*80)
-    print("FITTING STANDARDSCALER")
+    print("FITTING STANDARDSCALER (mean/std-based)")
     print("="*80)
     scaler = StandardScaler()
     scaler.fit(X)
 
     print("✅ Scaler fitted successfully")
     print(f"   Mean shape: {scaler.mean_.shape}")
-    print(f"   Scale shape: {scaler.scale_.shape}")
+    print(f"   Scale (std) shape: {scaler.scale_.shape}")
 
     # Display feature statistics after scaling (for verification)
     X_scaled = scaler.transform(X)
@@ -128,7 +128,7 @@ def main():
     print("\nV3 SCALER USAGE:")
     print(f"   1. Load scaler: scaler = pickle.load(open('{scaler_output_path}', 'rb'))")
     print("   2. Transform features: X_scaled = scaler.transform(X)  # X must be shape [N, 11]")
-    print("\nNOTE: This is V3 scaler (11 features). Old V1 scaler had 19 features.")
+    print("\nNOTE: This is V3 scaler (11 features, StandardScaler).")
     print("      Use --feature-scaler-path trained_models/rl/feature_scaler_v2.pkl in training scripts")
     print("="*80)
 

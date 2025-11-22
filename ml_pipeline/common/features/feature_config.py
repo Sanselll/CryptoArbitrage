@@ -49,6 +49,7 @@ class FeatureConfig:
     RETURN_EFFICIENCY_CLIP_MAX: Final[float] = 50.0
 
     # Feature scaler path (relative to ml_pipeline/)
+    # V3: StandardScaler (11 features)
     FEATURE_SCALER_PATH: Final[str] = "trained_models/rl/feature_scaler_v2.pkl"
 
     # Feature names for execution slots (17 features)
@@ -75,14 +76,14 @@ class FeatureConfig:
     # Feature names for opportunity slots (11 features)
     OPPORTUNITY_FEATURE_NAMES: Final[tuple] = (
         "fund_profit_8h",
-        "fundProfit8h24hProj",
-        "fundProfit8h3dProj",
+        "fund_profit_8h_24h_proj",
+        "fund_profit_8h_3d_proj",
         "fund_apr",
-        "fundApr24hProj",
-        "fundApr3dProj",
-        "spread30SampleAvg",
-        "priceSpread24hAvg",
-        "priceSpread3dAvg",
+        "fund_apr_24h_proj",
+        "fund_apr_3d_proj",
+        "spread_30_sample_avg",
+        "price_spread_24h_avg",
+        "price_spread_3d_avg",
         "spread_volatility_stddev",
         "apr_velocity"
     )

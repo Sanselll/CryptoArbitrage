@@ -86,7 +86,7 @@ def parse_args():
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
     parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler_v2.pkl',
-                        help='Path to fitted StandardScaler pickle (default: trained_models/rl/feature_scaler_v2.pkl)')
+                        help='Path to fitted feature scaler pickle (V3: StandardScaler, default: trained_models/rl/feature_scaler_v2.pkl)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducible results (default: 42)')
     parser.add_argument('--force-zero-pnl', action='store_true',
@@ -249,14 +249,14 @@ class MLAPIClient:
                 'long_exchange': opp['long_exchange'],
                 'short_exchange': opp['short_exchange'],
                 'fund_profit_8h': opp.get('fund_profit_8h', 0.0),
-                'fundProfit8h24hProj': opp.get('fundProfit8h24hProj', 0.0),
-                'fundProfit8h3dProj': opp.get('fundProfit8h3dProj', 0.0),
+                'fund_profit_8h_24h_proj': opp.get('fund_profit_8h_24h_proj', 0.0),
+                'fund_profit_8h_3d_proj': opp.get('fund_profit_8h_3d_proj', 0.0),
                 'fund_apr': opp.get('fund_apr', 0.0),
-                'fundApr24hProj': opp.get('fundApr24hProj', 0.0),
-                'fundApr3dProj': opp.get('fundApr3dProj', 0.0),
-                'spread30SampleAvg': opp.get('spread30SampleAvg', 0.0),
-                'priceSpread24hAvg': opp.get('priceSpread24hAvg', 0.0),
-                'priceSpread3dAvg': opp.get('priceSpread3dAvg', 0.0),
+                'fund_apr_24h_proj': opp.get('fund_apr_24h_proj', 0.0),
+                'fund_apr_3d_proj': opp.get('fund_apr_3d_proj', 0.0),
+                'spread_30_sample_avg': opp.get('spread_30_sample_avg', 0.0),
+                'price_spread_24h_avg': opp.get('price_spread_24h_avg', 0.0),
+                'price_spread_3d_avg': opp.get('price_spread_3d_avg', 0.0),
                 'spread_volatility_stddev': opp.get('spread_volatility_stddev', 0.0),
                 'has_existing_position': opp.get('has_existing_position', False),
             })

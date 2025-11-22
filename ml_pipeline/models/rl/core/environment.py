@@ -222,7 +222,7 @@ class FundingArbitrageEnv(gym.Env):
             Composite score (higher is better)
         """
         # Use 24h APR projection if available, otherwise current APR
-        apr = opp.get('fundApr24hProj', opp.get('fund_apr', 0))
+        apr = opp.get('fund_apr_24h_proj', opp.get('fund_apr', 0))
 
         # Quality multiplier based on volume and spread
         volume_score = 1.0 if opp.get('volume_24h', 0) > 1_000_000 else 0.5

@@ -37,15 +37,17 @@ class RewardConfig:
     All parameters are multiplicative scales applied to normalized reward components.
     """
 
-    # Funding P&L reward: Equal weight with price P&L
+    # Funding P&L reward: 10x scale to overcome entropy noise
+    # V3.1: Increased from 1.0 to 10.0 to provide stronger learning signal
     # Funding fees are paid every 1-8 hours and are the actual arbitrage profit
     # Equal weights let agent learn natural balance between funding and price
-    funding_reward_scale: float = 1.0
+    funding_reward_scale: float = 10.0
 
-    # Price P&L reward: Equal weight with funding P&L
+    # Price P&L reward: 10x scale to overcome entropy noise
+    # V3.1: Increased from 1.0 to 10.0 to provide stronger learning signal
     # Both components matter for total P&L outcome
     # Equal weights prevent over-optimization on either component
-    price_reward_scale: float = 1.0
+    price_reward_scale: float = 10.0
 
     # Liquidation risk penalty: Critical safety mechanism
     # Applied when position approaches liquidation threshold

@@ -68,7 +68,7 @@ class ModularRLPredictor:
 
         Args:
             model_path: Path to trained PPOTrainer checkpoint (.pt file)
-            feature_scaler_path: Path to fitted StandardScaler pickle
+            feature_scaler_path: Path to fitted feature scaler pickle (V3: StandardScaler)
             device: Device to use ('cpu' or 'cuda')
         """
         print(f"Loading Modular RL model from: {model_path}")

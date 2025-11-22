@@ -407,10 +407,10 @@ class UnifiedFeatureBuilder:
         Build opportunity features for up to 10 slots (110 dimensions total).
 
         Each opportunity has 11 features:
-        1-6: fund_profit_8h, fundProfit8h24hProj, fundProfit8h3dProj,
-             fund_apr, fundApr24hProj, fundApr3dProj
-        7-10: spread30SampleAvg, priceSpread24hAvg, priceSpread3dAvg, spread_volatility_stddev
-        11: apr_velocity (fund_profit_8h - fundProfit8h24hProj)
+        1-6: fund_profit_8h, fund_profit_8h_24h_proj, fund_profit_8h_3d_proj,
+             fund_apr, fund_apr_24h_proj, fund_apr_3d_proj
+        7-10: spread_30_sample_avg, price_spread_24h_avg, price_spread_3d_avg, spread_volatility_stddev
+        11: apr_velocity (fund_profit_8h - fund_profit_8h_24h_proj)
 
         CRITICAL: Feature scaler is applied to ALL slots (including empty ones)
         to match training behavior. Empty slots are padded with zeros BEFORE scaling.

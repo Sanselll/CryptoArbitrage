@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using CryptoArbitrage.API.Data.Entities;
 
 namespace CryptoArbitrage.API.Models;
@@ -61,20 +62,30 @@ public class ArbitrageOpportunityDto
     public decimal FundApr { get; set; }       // Annualized percentage rate using current funding rate
 
     // Projected metrics (24-hour average)
+    [JsonPropertyName("fund_profit_8h_24h_proj")]
     public decimal? FundProfit8h24hProj { get; set; }      // 8-hour profit % using 24h average funding rate
+
+    [JsonPropertyName("fund_apr_24h_proj")]
     public decimal? FundApr24hProj { get; set; }           // APR % using 24h average funding rate
     public decimal? FundBreakEvenTime24hProj { get; set; } // Break-even hours using 24h average funding rate
 
     // Projected metrics (3-day average)
+    [JsonPropertyName("fund_profit_8h_3d_proj")]
     public decimal? FundProfit8h3dProj { get; set; }       // 8-hour profit % using 3D average funding rate
+
+    [JsonPropertyName("fund_apr_3d_proj")]
     public decimal? FundApr3dProj { get; set; }            // APR % using 3D average funding rate
     public decimal? FundBreakEvenTime3dProj { get; set; }  // Break-even hours using 3D average funding rate
 
     // Price spread projection metrics (for CFPS - CrossExchangeFuturesPriceSpread)
+    [JsonPropertyName("price_spread_24h_avg")]
     public decimal? PriceSpread24hAvg { get; set; }        // 24-hour average price spread %
+
+    [JsonPropertyName("price_spread_3d_avg")]
     public decimal? PriceSpread3dAvg { get; set; }         // 3-day average price spread %
 
     // Spread history metrics (30 samples) - for Cross-Exchange only
+    [JsonPropertyName("spread_30_sample_avg")]
     public decimal? Spread30SampleAvg { get; set; }        // Average spread based on last 30 price samples
     public decimal? SpreadVolatilityStdDev { get; set; }   // Standard deviation of spread samples
     public decimal? SpreadVolatilityCv { get; set; }       // Coefficient of variation (StdDev/Mean)
