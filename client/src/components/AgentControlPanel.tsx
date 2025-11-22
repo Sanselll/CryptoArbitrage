@@ -462,9 +462,13 @@ export function AgentControlPanel() {
                             )}
                           </>
                         )}
-                        {decision.confidence && (
+                        {(decision.enterProbability !== undefined || decision.exitProbability !== undefined) && (
                           <span className="text-binance-text-secondary ml-auto">
-                            {(decision.confidence * 100).toFixed(0)}%
+                            {decision.action === 'ENTER' && decision.enterProbability !== undefined
+                              ? `${(decision.enterProbability * 100).toFixed(0)}%`
+                              : decision.action === 'EXIT' && decision.exitProbability !== undefined
+                              ? `${(decision.exitProbability * 100).toFixed(0)}%`
+                              : decision.confidence || ''}
                           </span>
                         )}
                       </div>
