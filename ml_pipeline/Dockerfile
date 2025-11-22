@@ -19,11 +19,12 @@ COPY server/ ./server/
 COPY common/ ./common/
 COPY models/rl/core/ ./models/rl/core/
 COPY trained_models/rl/ ./trained_models/rl/
+COPY checkpoints/v3-fixed-entropy/ ./checkpoints/v3-fixed-entropy/
 
 # Verify RL models exist and are not LFS pointers
-RUN ls -lh trained_models/rl/deployed/best_model.zip && \
-    ls -lh trained_models/rl/feature_scaler.pkl && \
-    if [ $(stat -c%s trained_models/rl/deployed/best_model.zip 2>/dev/null || stat -f%z trained_models/rl/deployed/best_model.zip 2>/dev/null || echo 0) -lt 100000 ]; then \
+RUN ls -lh checkpoints/v3-fixed-entropy/checkpoint_ep350.pt && \
+    ls -lh trained_models/rl/feature_scaler_v2.pkl && \
+    if [ $(stat -c%s checkpoints/v3-fixed-entropy/checkpoint_ep350.pt 2>/dev/null || stat -f%z checkpoints/v3-fixed-entropy/checkpoint_ep350.pt 2>/dev/null || echo 0) -lt 1000000 ]; then \
         echo "ERROR: Model files appear to be LFS pointers, not actual files!"; \
         exit 1; \
     fi
