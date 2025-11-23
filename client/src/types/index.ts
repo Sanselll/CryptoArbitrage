@@ -133,21 +133,21 @@ export interface ArbitrageOpportunity {
   fundApr: number;                // Annualized percentage rate using current funding rate
 
   // Projected metrics (24-hour average)
-  fundProfit8h24hProj?: number;       // 8-hour profit % using 24h average funding rate
-  fundApr24hProj?: number;            // APR % using 24h average funding rate
+  fund_profit_8h_24h_proj?: number;   // 8-hour profit % using 24h average funding rate
+  fund_apr_24h_proj?: number;         // APR % using 24h average funding rate
   fundBreakEvenTime24hProj?: number;  // Break-even hours using 24h average funding rate
 
   // Projected metrics (3-day average)
-  fundProfit8h3dProj?: number;        // 8-hour profit % using 3D average funding rate
-  fundApr3dProj?: number;             // APR % using 3D average funding rate
+  fund_profit_8h_3d_proj?: number;    // 8-hour profit % using 3D average funding rate
+  fund_apr_3d_proj?: number;          // APR % using 3D average funding rate
   fundBreakEvenTime3dProj?: number;   // Break-even hours using 3D average funding rate
 
   // Price spread projection metrics (for CFPS - CrossExchangeFuturesPriceSpread)
-  priceSpread24hAvg?: number;         // 24-hour average price spread %
-  priceSpread3dAvg?: number;          // 3-day average price spread %
+  price_spread_24h_avg?: number;      // 24-hour average price spread %
+  price_spread_3d_avg?: number;       // 3-day average price spread %
 
   // Spread history metrics (30 samples) - for Cross-Exchange only
-  spread30SampleAvg?: number;         // Average spread based on last 30 price samples
+  spread_30_sample_avg?: number;      // Average spread based on last 30 price samples
   spreadVolatilityStdDev?: number;    // Standard deviation of spread samples
   spreadVolatilityCv?: number;        // Coefficient of variation (StdDev/Mean)
 
