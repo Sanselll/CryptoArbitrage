@@ -853,47 +853,47 @@ export const OpportunitiesList = () => {
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className={`font-mono text-[11px] ${
-                        opp.priceSpread24hAvg !== null && opp.priceSpread24hAvg !== undefined
+                        opp.priceSpread24hAvg != null
                           ? opp.priceSpread24hAvg >= 0 ? 'text-binance-green' : 'text-binance-red'
                           : 'text-binance-text-secondary'
                       }`}>
-                        {opp.priceSpread24hAvg !== null && opp.priceSpread24hAvg !== undefined
+                        {opp.priceSpread24hAvg != null
                           ? `${opp.priceSpread24hAvg >= 0 ? '+' : ''}${opp.priceSpread24hAvg.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className={`font-mono text-[11px] ${
-                        opp.priceSpread3dAvg !== null && opp.priceSpread3dAvg !== undefined
+                        opp.priceSpread3dAvg != null
                           ? opp.priceSpread3dAvg >= 0 ? 'text-binance-green' : 'text-binance-red'
                           : 'text-binance-text-secondary'
                       }`}>
-                        {opp.priceSpread3dAvg !== null && opp.priceSpread3dAvg !== undefined
+                        {opp.priceSpread3dAvg != null
                           ? `${opp.priceSpread3dAvg >= 0 ? '+' : ''}${opp.priceSpread3dAvg.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className={`font-mono text-[11px] ${
-                        opp.spread30SampleAvg !== null && opp.spread30SampleAvg !== undefined
+                        opp.spread30SampleAvg != null
                           ? opp.spread30SampleAvg >= 0 ? 'text-binance-green' : 'text-binance-red'
                           : 'text-binance-text-secondary'
                       }`}>
-                        {opp.spread30SampleAvg !== null && opp.spread30SampleAvg !== undefined
+                        {opp.spread30SampleAvg != null
                           ? `${opp.spread30SampleAvg >= 0 ? '+' : ''}${opp.spread30SampleAvg.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.spreadVolatilityStdDev !== null && opp.spreadVolatilityStdDev !== undefined
+                        {opp.spreadVolatilityStdDev != null
                           ? `${(opp.spreadVolatilityStdDev * 100).toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.spreadVolatilityCv !== null && opp.spreadVolatilityCv !== undefined
+                        {opp.spreadVolatilityCv != null
                           ? `${opp.spreadVolatilityCv.toFixed(4)}`
                           : '--'}
                       </span>
@@ -905,21 +905,21 @@ export const OpportunitiesList = () => {
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.breakEvenTimeHours !== null && opp.breakEvenTimeHours !== undefined
+                        {opp.breakEvenTimeHours != null
                           ? `${Math.round(opp.breakEvenTimeHours)}h`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.fundBreakEvenTime24hProj !== null && opp.fundBreakEvenTime24hProj !== undefined
+                        {opp.fundBreakEvenTime24hProj != null
                           ? `${Math.round(opp.fundBreakEvenTime24hProj)}h`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.fundBreakEvenTime3dProj !== null && opp.fundBreakEvenTime3dProj !== undefined
+                        {opp.fundBreakEvenTime3dProj != null
                           ? `${Math.round(opp.fundBreakEvenTime3dProj)}h`
                           : '--'}
                       </span>
@@ -961,7 +961,7 @@ export const OpportunitiesList = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
-                      {apr24h !== null ? (
+                      {apr24h != null ? (
                         <Badge variant={apr24h >= 0 ? "success" : "danger"} size="sm" className="text-[10px]">
                           <span className="font-mono font-bold">
                             {apr24h.toFixed(2)}%
@@ -972,7 +972,7 @@ export const OpportunitiesList = () => {
                       )}
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
-                      {apr3d !== null ? (
+                      {apr3d != null ? (
                         <Badge variant={apr3d >= 0 ? "success" : "danger"} size="sm" className="text-[10px]">
                           <span className="font-mono font-bold">
                             {apr3d.toFixed(2)}%
