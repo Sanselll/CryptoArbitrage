@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Copy application code (new structure)
 COPY server/ ./server/
 COPY common/ ./common/
-COPY models/rl/core/ ./models/rl/core/
+COPY models/rl/ ./models/rl/
 COPY trained_models/rl/ ./trained_models/rl/
 COPY checkpoints/v3-fixed-entropy/ ./checkpoints/v3-fixed-entropy/
 
