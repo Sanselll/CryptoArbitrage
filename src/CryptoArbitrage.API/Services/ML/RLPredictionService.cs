@@ -6,6 +6,7 @@ using CryptoArbitrage.API.Models.DataCollection;
 using CryptoArbitrage.API.Services.Agent;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 using CryptoArbitrage.API.Data.Entities;
+using Microsoft.Extensions.Configuration;
 
 namespace CryptoArbitrage.API.Services.ML;
 
@@ -31,7 +32,6 @@ public class RLPredictionService
     private readonly ILogger<RLPredictionService> _logger;
 
     // ML API endpoint
-    private const string ML_API_BASE_URL = "http://localhost:5250";
     private const string PREDICT_ENDPOINT = "/rl/predict";
 
     public RLPredictionService(
@@ -40,7 +40,8 @@ public class RLPredictionService
         IDataRepository<UserDataSnapshot> userDataRepository,
         IDataRepository<MarketDataSnapshot> marketDataRepository,
         IDataRepository<FundingRateDto> fundingRateRepository,
-        ILogger<RLPredictionService> logger)
+        ILogger<RLPredictionService> logger,
+        IConfiguration configuration)
     {
         _httpClient = httpClient;
         _agentConfigService = agentConfigService;
@@ -49,8 +50,15 @@ public class RLPredictionService
         _fundingRateRepository = fundingRateRepository;
         _logger = logger;
 
-        _httpClient.BaseAddress = new Uri(ML_API_BASE_URL);
+        // Read ML API URL from configuration (supports Docker networking)
+        var mlApiHost = configuration["MLApi:Host"] ?? "localhost";
+        var mlApiPort = configuration["MLApi:Port"] ?? "5250";
+        var mlApiBaseUrl = $"http://{mlApiHost}:{mlApiPort}";
+
+        _httpClient.BaseAddress = new Uri(mlApiBaseUrl);
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+        _logger.LogInformation("RLPredictionService initialized. ML API: {MlApiUrl}", mlApiBaseUrl);
     }
 
     /// <summary>
