@@ -211,16 +211,16 @@ export const OpportunitiesList = () => {
           bValue = b._calculated.spread;
           break;
         case 'priceSpread24h':
-          aValue = a.priceSpread24hAvg ?? -Infinity;
-          bValue = b.priceSpread24hAvg ?? -Infinity;
+          aValue = a.price_spread_24h_avg ?? -Infinity;
+          bValue = b.price_spread_24h_avg ?? -Infinity;
           break;
         case 'priceSpread3d':
-          aValue = a.priceSpread3dAvg ?? -Infinity;
-          bValue = b.priceSpread3dAvg ?? -Infinity;
+          aValue = a.price_spread_3d_avg ?? -Infinity;
+          bValue = b.price_spread_3d_avg ?? -Infinity;
           break;
         case 'spread30Sample':
-          aValue = a.spread30SampleAvg ?? -Infinity;
-          bValue = b.spread30SampleAvg ?? -Infinity;
+          aValue = a.spread_30_sample_avg ?? -Infinity;
+          bValue = b.spread_30_sample_avg ?? -Infinity;
           break;
         case 'spreadVolStdDev':
           aValue = a.spreadVolatilityStdDev ?? -Infinity;
@@ -235,24 +235,24 @@ export const OpportunitiesList = () => {
           bValue = b.fundProfit8h;
           break;
         case 'fundProfit8h3d':
-          aValue = a.fundProfit8h3dProj ?? -Infinity;
-          bValue = b.fundProfit8h3dProj ?? -Infinity;
+          aValue = a.fund_profit_8h_3d_proj ?? -Infinity;
+          bValue = b.fund_profit_8h_3d_proj ?? -Infinity;
           break;
         case 'fundProfit8h24h':
-          aValue = a.fundProfit8h24hProj ?? -Infinity;
-          bValue = b.fundProfit8h24hProj ?? -Infinity;
+          aValue = a.fund_profit_8h_24h_proj ?? -Infinity;
+          bValue = b.fund_profit_8h_24h_proj ?? -Infinity;
           break;
         case 'fundApr':
           aValue = a.fundApr;
           bValue = b.fundApr;
           break;
         case 'fundApr3d':
-          aValue = a.fundApr3dProj ?? -Infinity;
-          bValue = b.fundApr3dProj ?? -Infinity;
+          aValue = a.fund_apr_3d_proj ?? -Infinity;
+          bValue = b.fund_apr_3d_proj ?? -Infinity;
           break;
         case 'fundApr24h':
-          aValue = a.fundApr24hProj ?? -Infinity;
-          bValue = b.fundApr24hProj ?? -Infinity;
+          aValue = a.fund_apr_24h_proj ?? -Infinity;
+          bValue = b.fund_apr_24h_proj ?? -Infinity;
           break;
         case 'volume':
           aValue = a.volume24h ?? 0;
