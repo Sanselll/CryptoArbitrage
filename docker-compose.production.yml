@@ -54,6 +54,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=ProductionReal
       - ASPNETCORE_URLS=http://+:8080
       - ML_API_URL=http://ml-api:5250
+      - MLApi__Host=ml-api
+      - MLApi__Port=5250
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=crypto_arbitrage_real;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - Jwt__SecretKey=${JWT_SECRET_KEY}
@@ -94,6 +96,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=ProductionDemo
       - ASPNETCORE_URLS=http://+:8080
       - ML_API_URL=http://ml-api:5250
+      - MLApi__Host=ml-api
+      - MLApi__Port=5250
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=crypto_arbitrage_demo;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - Jwt__SecretKey=${JWT_SECRET_KEY}

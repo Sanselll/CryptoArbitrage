@@ -325,7 +325,10 @@
       "Bash(timeout 60 bash:*)",
       "Bash(else echo \"No log file\")",
       "Bash(timeout 5 python:*)",
-      "Bash(gtimeout 5 python:*)"
+      "Bash(gtimeout 5 python:*)",
+      "Bash(xxd:*)",
+      "Bash(docker rm:*)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []
