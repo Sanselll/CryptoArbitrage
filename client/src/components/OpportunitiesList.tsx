@@ -933,22 +933,22 @@ export const OpportunitiesList = () => {
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className={`font-mono text-[11px] font-bold ${
-                        profit8h24h !== null
+                        profit8h24h != null
                           ? profit8h24h >= 0 ? 'text-binance-green' : 'text-binance-red'
                           : 'text-binance-text-secondary'
                       }`}>
-                        {profit8h24h !== null
+                        {profit8h24h != null
                           ? `${profit8h24h >= 0 ? '+' : ''}${profit8h24h.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className={`font-mono text-[11px] font-bold ${
-                        profit8h3d !== null
+                        profit8h3d != null
                           ? profit8h3d >= 0 ? 'text-binance-green' : 'text-binance-red'
                           : 'text-binance-text-secondary'
                       }`}>
-                        {profit8h3d !== null
+                        {profit8h3d != null
                           ? `${profit8h3d >= 0 ? '+' : ''}${profit8h3d.toFixed(4)}%`
                           : '--'}
                       </span>
