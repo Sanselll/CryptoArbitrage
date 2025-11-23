@@ -724,10 +724,10 @@ export const OpportunitiesList = () => {
                 // All metrics now come from backend - no calculations needed!
                 const profit8h = opp.fundProfit8h;
                 const apr = opp.fundApr;
-                const profit8h24h = opp.fundProfit8h24hProj;
-                const apr24h = opp.fundApr24hProj;
-                const profit8h3d = opp.fundProfit8h3dProj;
-                const apr3d = opp.fundApr3dProj;
+                const profit8h24h = opp.fund_profit_8h_24h_proj;
+                const apr24h = opp.fund_apr_24h_proj;
+                const profit8h3d = opp.fund_profit_8h_3d_proj;
+                const apr3d = opp.fund_apr_3d_proj;
 
                 // Use backend-calculated spread if available, otherwise calculate as fallback
                 const spread = opp.currentPriceSpreadPercent ?? (
@@ -853,34 +853,34 @@ export const OpportunitiesList = () => {
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className={`font-mono text-[11px] ${
-                        opp.priceSpread24hAvg != null
-                          ? opp.priceSpread24hAvg >= 0 ? 'text-binance-green' : 'text-binance-red'
+                        opp.price_spread_24h_avg != null
+                          ? opp.price_spread_24h_avg >= 0 ? 'text-binance-green' : 'text-binance-red'
                           : 'text-binance-text-secondary'
                       }`}>
-                        {opp.priceSpread24hAvg != null
-                          ? `${opp.priceSpread24hAvg >= 0 ? '+' : ''}${opp.priceSpread24hAvg.toFixed(4)}%`
+                        {opp.price_spread_24h_avg != null
+                          ? `${opp.price_spread_24h_avg >= 0 ? '+' : ''}${opp.price_spread_24h_avg.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className={`font-mono text-[11px] ${
-                        opp.priceSpread3dAvg != null
-                          ? opp.priceSpread3dAvg >= 0 ? 'text-binance-green' : 'text-binance-red'
+                        opp.price_spread_3d_avg != null
+                          ? opp.price_spread_3d_avg >= 0 ? 'text-binance-green' : 'text-binance-red'
                           : 'text-binance-text-secondary'
                       }`}>
-                        {opp.priceSpread3dAvg != null
-                          ? `${opp.priceSpread3dAvg >= 0 ? '+' : ''}${opp.priceSpread3dAvg.toFixed(4)}%`
+                        {opp.price_spread_3d_avg != null
+                          ? `${opp.price_spread_3d_avg >= 0 ? '+' : ''}${opp.price_spread_3d_avg.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className={`font-mono text-[11px] ${
-                        opp.spread30SampleAvg != null
-                          ? opp.spread30SampleAvg >= 0 ? 'text-binance-green' : 'text-binance-red'
+                        opp.spread_30_sample_avg != null
+                          ? opp.spread_30_sample_avg >= 0 ? 'text-binance-green' : 'text-binance-red'
                           : 'text-binance-text-secondary'
                       }`}>
-                        {opp.spread30SampleAvg != null
-                          ? `${opp.spread30SampleAvg >= 0 ? '+' : ''}${opp.spread30SampleAvg.toFixed(4)}%`
+                        {opp.spread_30_sample_avg != null
+                          ? `${opp.spread_30_sample_avg >= 0 ? '+' : ''}${opp.spread_30_sample_avg.toFixed(4)}%`
                           : '--'}
                       </span>
                     </TableCell>
