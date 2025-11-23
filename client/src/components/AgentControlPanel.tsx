@@ -440,33 +440,33 @@ export function AgentControlPanel() {
 
                       {/* Compact data row */}
                       <div className="flex items-center gap-2 text-[10px]">
-                        {decision.action === 'ENTER' && decision.amountUsd !== undefined && (
+                        {decision.action === 'ENTER' && decision.amountUsd != null && (
                           <span className="text-binance-text">
                             ${decision.amountUsd.toFixed(2)}
                           </span>
                         )}
-                        {decision.action === 'EXIT' && decision.profitUsd !== undefined && (
+                        {decision.action === 'EXIT' && decision.profitUsd != null && (
                           <>
                             <span className={decision.profitUsd >= 0 ? 'text-binance-green' : 'text-binance-red'}>
                               {decision.profitUsd >= 0 ? '+' : ''}${decision.profitUsd.toFixed(2)}
                             </span>
-                            {decision.profitPct !== undefined && (
+                            {decision.profitPct != null && (
                               <span className={decision.profitPct >= 0 ? 'text-binance-green' : 'text-binance-red'}>
                                 ({decision.profitPct >= 0 ? '+' : ''}{decision.profitPct.toFixed(1)}%)
                               </span>
                             )}
-                            {decision.durationHours !== undefined && (
+                            {decision.durationHours != null && (
                               <span className="text-binance-text-secondary">
                                 • {decision.durationHours.toFixed(1)}h
                               </span>
                             )}
                           </>
                         )}
-                        {(decision.enterProbability !== undefined || decision.exitProbability !== undefined) && (
+                        {(decision.enterProbability != null || decision.exitProbability != null || decision.confidence) && (
                           <span className="text-binance-text-secondary ml-auto">
-                            {decision.action === 'ENTER' && decision.enterProbability !== undefined
+                            {decision.action === 'ENTER' && decision.enterProbability != null
                               ? `${(decision.enterProbability * 100).toFixed(0)}%`
-                              : decision.action === 'EXIT' && decision.exitProbability !== undefined
+                              : decision.action === 'EXIT' && decision.exitProbability != null
                               ? `${(decision.exitProbability * 100).toFixed(0)}%`
                               : decision.confidence || ''}
                           </span>
