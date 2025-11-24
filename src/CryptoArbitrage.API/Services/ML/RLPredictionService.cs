@@ -171,17 +171,33 @@ public class RLPredictionService
             var positionData = await BuildPositionRawDataFromDtos(positions, oppList, cancellationToken);
 
             // 5. Calculate portfolio metrics from user balance data
-            // For perpetual futures arbitrage, use ONLY futures balance (not SPOT)
+            // For cross-exchange arbitrage, use MINIMUM balance (bottleneck exchange)
+            // Agent needs equal capital on both sides, so it's limited by the smallest balance
             var userDataDict = await _userDataRepository.GetByPatternAsync($"userdata:{userId}:*", cancellationToken);
-            decimal totalCapital = userDataDict.Values
+            var exchangeBalances = userDataDict.Values
                 .Where(s => s?.Balance != null)
-                .Sum(s => s!.Balance!.FuturesBalanceUsd);
+                .Select(s => s!.Balance!.FuturesBalanceUsd)
+                .ToList();
+
+            decimal totalCapital = exchangeBalances.Any()
+                ? exchangeBalances.Min()  // Use minimum (bottleneck exchange)
+                : 0m;
 
             // Fallback to default if no balance data available
             if (totalCapital == 0m)
             {
                 _logger.LogWarning("No balance data found for user {UserId}, using default $10,000", userId);
                 totalCapital = 10000m;
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Capital calculation for user {UserId}: {ExchangeCount} exchange(s), Balances=[{Balances}], Using MIN=${MinCapital:N2}",
+                    userId,
+                    exchangeBalances.Count,
+                    string.Join(", ", exchangeBalances.Select(b => $"${b:N2}")),
+                    totalCapital
+                );
             }
 
             decimal capitalUtilization = positionData.Any() && totalCapital != 0
