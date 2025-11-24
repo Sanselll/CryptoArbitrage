@@ -83,8 +83,7 @@ class ModularRLPredictor:
         self.trainer = PPOTrainer(
             network=network,
             learning_rate=3e-4,
-            device=device,
-            compile_model=False  # Disable torch.compile for production (no C++ compiler in Docker)
+            device=device
         )
 
         # Load trained weights

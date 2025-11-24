@@ -92,8 +92,7 @@ class PPOTrainer:
                  device: str = 'cpu',
                  initial_entropy_coef: Optional[float] = None,
                  final_entropy_coef: Optional[float] = None,
-                 entropy_decay_episodes: int = 2000,
-                 compile_model: bool = True):
+                 entropy_decay_episodes: int = 2000):
         """
         Initialize PPO trainer.
 
@@ -112,20 +111,9 @@ class PPOTrainer:
             initial_entropy_coef: Starting entropy coefficient (for decay schedule)
             final_entropy_coef: Final entropy coefficient (for decay schedule)
             entropy_decay_episodes: Number of episodes over which to decay entropy
-            compile_model: Whether to use torch.compile (disable for production inference)
         """
         self.network = network.to(device)
-
-        # Compile network for faster training (PyTorch 2.0+)
-        # Disabled by default for production inference (requires C++ compiler)
-        if compile_model:
-            try:
-                self.network = torch.compile(self.network, mode='reduce-overhead')
-                print("✅ Model compiled with torch.compile for faster training")
-            except Exception as e:
-                print(f"⚠️  torch.compile not available (requires PyTorch 2.0+): {e}")
-        else:
-            print("ℹ️  torch.compile disabled (compile_model=False)")
+        # Note: torch.compile removed for compatibility (requires C++ compiler in production)
 
         self.device = device
 
@@ -592,12 +580,12 @@ class PPOTrainer:
         """Load model checkpoint."""
         checkpoint = torch.load(path, map_location=self.device)
 
-        # Handle checkpoints saved with torch.compile (have _orig_mod. prefix)
+        # Handle legacy checkpoints saved with torch.compile (have _orig_mod. prefix)
+        # Since we no longer use torch.compile, always strip the prefix if present
         state_dict = checkpoint['network_state_dict']
         if any(k.startswith('_orig_mod.') for k in state_dict.keys()):
-            # Strip _orig_mod. prefix for compatibility with non-compiled models
             state_dict = {k.replace('_orig_mod.', ''): v for k, v in state_dict.items()}
-            print("ℹ️  Stripped '_orig_mod.' prefix from checkpoint (was saved with torch.compile)")
+            print("ℹ️  Stripped '_orig_mod.' prefix from legacy torch.compile checkpoint")
 
         self.network.load_state_dict(state_dict)
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

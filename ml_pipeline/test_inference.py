@@ -368,7 +368,9 @@ def test_model_inference(args):
 
         if args.end_time:
             end_dt = pd.to_datetime(args.end_time, utc=True)
-            df = df[df['entry_time'] <= end_dt]
+            # Add 1 second to make end time inclusive (handles microseconds)
+            end_dt_inclusive = end_dt + pd.Timedelta(seconds=1)
+            df = df[df['entry_time'] < end_dt_inclusive]
             print(f"   Filtered end <= {end_dt}: {len(df)} rows")
 
         if len(df) == 0:

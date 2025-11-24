@@ -171,16 +171,17 @@ public class RLPredictionService
             var positionData = await BuildPositionRawDataFromDtos(positions, oppList, cancellationToken);
 
             // 5. Calculate portfolio metrics from user balance data
-            // For cross-exchange arbitrage, use MINIMUM balance (bottleneck exchange)
-            // Agent needs equal capital on both sides, so it's limited by the smallest balance
+            // For cross-exchange arbitrage, use MINIMUM AVAILABLE balance (bottleneck exchange)
+            // Agent needs equal capital on both sides, so it's limited by the smallest available balance
+            // IMPORTANT: Use FuturesAvailableUsd (not FuturesBalanceUsd) to match execution logic in AgentBackgroundService
             var userDataDict = await _userDataRepository.GetByPatternAsync($"userdata:{userId}:*", cancellationToken);
             var exchangeBalances = userDataDict.Values
                 .Where(s => s?.Balance != null)
-                .Select(s => s!.Balance!.FuturesBalanceUsd)
+                .Select(s => s!.Balance!.FuturesAvailableUsd)  // Use AVAILABLE, not total balance
                 .ToList();
 
             decimal totalCapital = exchangeBalances.Any()
-                ? exchangeBalances.Min()  // Use minimum (bottleneck exchange)
+                ? exchangeBalances.Min()  // Use minimum available (bottleneck exchange)
                 : 0m;
 
             // Fallback to default if no balance data available
@@ -192,7 +193,7 @@ public class RLPredictionService
             else
             {
                 _logger.LogInformation(
-                    "Capital calculation for user {UserId}: {ExchangeCount} exchange(s), Balances=[{Balances}], Using MIN=${MinCapital:N2}",
+                    "Capital calculation for user {UserId}: {ExchangeCount} exchange(s), Available Balances=[{Balances}], Using MIN=${MinCapital:N2}",
                     userId,
                     exchangeBalances.Count,
                     string.Join(", ", exchangeBalances.Select(b => $"${b:N2}")),
