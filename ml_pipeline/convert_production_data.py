@@ -90,6 +90,27 @@ def convert_snapshots_to_symbol_data(snapshots):
     return symbol_data
 
 
+def is_valid_funding_time(time_str):
+    """Check if a funding time string is valid (not year 1 or empty)"""
+    if not time_str:
+        return False
+    try:
+        parsed_time = pd.to_datetime(time_str)
+        # Check if datetime is realistic (year 1900 or later)
+        return parsed_time.year >= 1900
+    except:
+        return False
+
+
+def calculate_next_funding_time(current_time, funding_interval_hours):
+    """Calculate next funding time based on interval"""
+    # Round up to next funding interval
+    hours_since_epoch = (current_time - pd.Timestamp('1970-01-01', tz='UTC')).total_seconds() / 3600
+    next_funding_hours = int(hours_since_epoch // funding_interval_hours + 1) * funding_interval_hours
+    next_time = pd.Timestamp('1970-01-01', tz='UTC') + pd.Timedelta(hours=next_funding_hours)
+    return next_time.isoformat().replace('+00:00', 'Z')
+
+
 def convert_opportunities_to_csv(snapshots):
     """
     Convert opportunities from snapshots to CSV format matching rl_opportunities.csv
@@ -98,6 +119,7 @@ def convert_opportunities_to_csv(snapshots):
         list of dict: Opportunities in CSV format
     """
     opportunities = []
+    invalid_funding_count = 0
 
     for snapshot in snapshots:
         timestamp = pd.to_datetime(snapshot['timestamp'])
@@ -155,7 +177,30 @@ def convert_opportunities_to_csv(snapshots):
                 'entry_time': timestamp.isoformat()
             }
 
+            # Validate and fix funding times
+            long_funding_time = row['long_next_funding_time']
+            short_funding_time = row['short_next_funding_time']
+
+            if not is_valid_funding_time(long_funding_time):
+                # Calculate reasonable next funding time
+                row['long_next_funding_time'] = calculate_next_funding_time(
+                    timestamp,
+                    row['long_funding_interval_hours']
+                )
+                invalid_funding_count += 1
+
+            if not is_valid_funding_time(short_funding_time):
+                # Calculate reasonable next funding time
+                row['short_next_funding_time'] = calculate_next_funding_time(
+                    timestamp,
+                    row['short_funding_interval_hours']
+                )
+                invalid_funding_count += 1
+
             opportunities.append(row)
+
+    if invalid_funding_count > 0:
+        print(f"  ⚠️  Fixed {invalid_funding_count} invalid funding times")
 
     return opportunities
 
