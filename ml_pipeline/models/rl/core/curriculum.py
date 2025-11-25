@@ -98,6 +98,9 @@ class CurriculumScheduler:
         """
         Get trading config for current episode based on curriculum phase.
 
+        V3 FIXED CONFIGS: Using stable configs instead of random sampling
+        for better learning stability and reproducibility.
+
         Args:
             episode: Current episode number
 
@@ -107,22 +110,37 @@ class CurriculumScheduler:
         phase = self.get_current_phase(episode)
 
         if phase.name == 'simple':
-            # Phase 1: Fixed simple config
+            # Phase 1: Simple - Learn basics
+            # 2 positions, conservative settings
             return TradingConfig(
-                max_leverage=1.0,
-                target_utilization=0.5,
+                max_leverage=1.5,
+                target_utilization=0.6,
+                max_positions=2,
+                stop_loss_threshold=-0.03,
+                liquidation_buffer=0.15,
+            )
+
+        elif phase.name == 'variable':
+            # Phase 2: Intermediate - Scale up gradually
+            # 2 positions, moderate settings (this is where your 105% model likely was)
+            return TradingConfig(
+                max_leverage=2.0,
+                target_utilization=0.8,
                 max_positions=2,
                 stop_loss_threshold=-0.02,
                 liquidation_buffer=0.15,
             )
 
-        elif phase.name == 'variable':
-            # Phase 2: Moderate config sampling
-            return TradingConfig.sample_moderate()
-
         else:  # 'full'
-            # Phase 3: Full config range
-            return TradingConfig.sample_random()
+            # Phase 3: Advanced - Production-like settings
+            # 3 positions, more aggressive
+            return TradingConfig(
+                max_leverage=2.5,
+                target_utilization=0.8,
+                max_positions=3,
+                stop_loss_threshold=-0.02,
+                liquidation_buffer=0.10,
+            )
 
     def get_episode_length_hours(self, episode: int) -> int:
         """

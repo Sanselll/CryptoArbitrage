@@ -597,6 +597,23 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                     var rate1 = fundingRates[exchange1].First(r => r.Symbol == symbol);
                     var rate2 = fundingRates[exchange2].First(r => r.Symbol == symbol);
 
+                    // === VALIDATION: Skip invalid funding rate data ===
+                    // Filter out opportunities with missing/invalid funding rates or times
+
+                    // 1. Check both funding rates are not zero (no arbitrage opportunity)
+                    if (rate1.Rate == 0 && rate2.Rate == 0)
+                    {
+                        continue;
+                    }
+
+                    // 2. Check funding times are valid (not default/missing)
+                    if (rate1.NextFundingTime == default || rate2.NextFundingTime == default)
+                    {
+                        _logger.LogWarning("Skipping {Symbol} ({Ex1}/{Ex2}): Missing next funding time",
+                            symbol, exchange1, exchange2);
+                        continue;
+                    }
+
                     // Get perpetual prices and volumes for both exchanges
                     decimal price1 = 0;
                     decimal price2 = 0;
@@ -614,9 +631,11 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                         volume2 = perpPrices[exchange2][symbol].Volume24h;
                     }
 
-                    // Skip if either price is zero or missing (can't calculate spreads)
+                    // 3. Skip if either price is zero or missing (can't calculate spreads)
                     if (price1 <= 0 || price2 <= 0)
                     {
+                        _logger.LogWarning("Skipping {Symbol} ({Ex1}/{Ex2}): Missing or zero price (Price1={Price1}, Price2={Price2})",
+                            symbol, exchange1, exchange2, price1, price2);
                         continue;
                     }
 

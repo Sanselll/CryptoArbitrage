@@ -182,7 +182,7 @@ class PBTHyperparameters:
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_range: float = 0.2
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.05  # Matches train_ppo.py default
     vf_coef: float = 0.5
 
     # Reward hyperparameters (Balanced RL-v2 approach)
@@ -207,7 +207,7 @@ class PBTHyperparameters:
             gamma=np.clip(self.gamma * multiplier, 0.95, 0.995),
             gae_lambda=np.clip(self.gae_lambda * multiplier, 0.90, 0.98),
             clip_range=np.clip(self.clip_range * multiplier, 0.15, 0.30),
-            entropy_coef=np.clip(self.entropy_coef * multiplier, 0.001, 0.02),
+            entropy_coef=np.clip(self.entropy_coef * multiplier, 0.01, 0.10),  # Updated range for default 0.05
             vf_coef=np.clip(self.vf_coef * multiplier, 0.5, 1.0),
             # Reward hyperparameters (Balanced RL-v2)
             funding_reward_scale=np.clip(self.funding_reward_scale * multiplier, 0.5, 2.0),
@@ -290,47 +290,52 @@ def train_agent_parallel(agent_id: int,
         if curriculum_state:
             curriculum.__dict__.update(curriculum_state)
 
-    # Train for num_episodes
+    # Get config (FIXED 72h episodes for all) - same for all episodes
+    if use_curriculum and curriculum:
+        trading_config = curriculum.get_config(episodes_completed)
+    else:
+        # Fixed config for PBT (V3 optimal settings)
+        trading_config = TradingConfig(
+            max_leverage=2.0,
+            target_utilization=0.8,
+            max_positions=2,
+            stop_loss_threshold=-0.02,
+            liquidation_buffer=0.15,
+        )
+
+    # FIXED: 72h episodes for all agents (3 days)
+    episode_length_days = 3
+    step_hours = 5.0 / 60.0  # 5 minutes
+
+    # Create reward config from agent's hyperparameters (V3 Pure RL-v2)
+    reward_config = RewardConfig(
+        funding_reward_scale=hyperparams.funding_reward_scale,
+        price_reward_scale=hyperparams.price_reward_scale,
+        liquidation_penalty_scale=hyperparams.liquidation_penalty_scale,
+        opportunity_cost_scale=0.0,  # V3: Disabled
+        negative_funding_exit_reward_scale=0.0,  # V3: Disabled
+    )
+
+    # CREATE ENVIRONMENT ONCE - reuse for all episodes
+    env = FundingArbitrageEnv(
+        data_path=data_path,
+        initial_capital=initial_capital,
+        trading_config=trading_config,
+        reward_config=reward_config,
+        episode_length_days=episode_length_days,
+        step_hours=step_hours,
+        price_history_path=price_history_path,
+        feature_scaler_path=feature_scaler_path,
+        verbose=False,
+    )
+
+    import sys
+    print(f"    Agent {agent_id}: Environment loaded, starting {num_episodes} episodes...")
+    sys.stdout.flush()
+
+    # Train for num_episodes (reusing environment)
     for ep in range(num_episodes):
-        episode = episodes_completed
-
-        # Progress logging every 10 episodes
-        if ep % 10 == 0 and ep > 0:
-            import sys
-            print(f"    Agent {agent_id}: {ep}/{num_episodes} episodes, Mean(10)={np.mean(recent_rewards[-10:]):.2f}")
-            sys.stdout.flush()
-
-        # Get config from curriculum
-        if use_curriculum and curriculum:
-            trading_config = curriculum.get_config(episode)
-            episode_length_days = curriculum.get_episode_length_days(episode)
-            step_hours = 5.0 / 60.0  # 5 minutes (consistent with non-curriculum)
-        else:
-            trading_config = TradingConfig.sample_random()
-            episode_length_days = 7
-            step_hours = 5.0 / 60.0  # 5 minutes
-
-        # Create reward config from agent's hyperparameters (Pure RL-v2)
-        reward_config = RewardConfig(
-            funding_reward_scale=hyperparams.funding_reward_scale,
-            price_reward_scale=hyperparams.price_reward_scale,
-            liquidation_penalty_scale=hyperparams.liquidation_penalty_scale,
-        )
-
-        # Create environment
-        env = FundingArbitrageEnv(
-            data_path=data_path,
-            initial_capital=initial_capital,
-            trading_config=trading_config,
-            reward_config=reward_config,
-            episode_length_days=episode_length_days,
-            step_hours=step_hours,
-            price_history_path=price_history_path,
-            feature_scaler_path=feature_scaler_path,
-            verbose=False,
-        )
-
-        # Train episode (match regular PPO training max_steps)
+        # Train episode (environment resets internally)
         stats = trainer.train_episode(env, max_steps=1000)
 
         # Update state
@@ -340,6 +345,16 @@ def train_agent_parallel(agent_id: int,
         # Keep only last 100 rewards
         if len(recent_rewards) > 100:
             recent_rewards = recent_rewards[-100:]
+
+        # Progress logging every 10 episodes
+        if (ep + 1) % 10 == 0:
+            mean_10 = np.mean(recent_rewards[-10:]) if len(recent_rewards) >= 10 else 0.0
+            mean_100 = np.mean(recent_rewards[-100:]) if len(recent_rewards) >= 100 else 0.0
+            print(f"    Agent {agent_id}: {ep+1:3d}/{num_episodes} eps | "
+                  f"Reward: {stats['episode_reward']:7.2f} | "
+                  f"Mean(10): {mean_10:7.2f} | "
+                  f"Mean(100): {mean_100:7.2f}")
+            sys.stdout.flush()
 
     # Return updated state
     return (
@@ -417,18 +432,22 @@ class PBTManager:
 
     def _create_environment(self, data_path: str, verbose: bool = False):
         """Create an environment (train or test)."""
-        # Use default reward config (Pure RL-v2 approach)
+        # Use V3 Pure RL-v2 reward config
         reward_config = RewardConfig(
-            funding_reward_scale=5.0,
+            funding_reward_scale=1.0,
             price_reward_scale=1.0,
-            liquidation_penalty_scale=1000.0,
+            liquidation_penalty_scale=10.0,
+            opportunity_cost_scale=0.0,
+            negative_funding_exit_reward_scale=0.0,
         )
 
         # Use default trading config
         trading_config = TradingConfig(
-            max_leverage=1.0,
-            target_utilization=0.9,
-            max_positions=5,
+            max_leverage=2.0,
+            target_utilization=0.8,
+            max_positions=2,
+            stop_loss_threshold=-0.02,
+            liquidation_buffer=0.15,
         )
 
         env = FundingArbitrageEnv(
@@ -438,7 +457,7 @@ class PBTManager:
             initial_capital=self.initial_capital,
             trading_config=trading_config,
             reward_config=reward_config,
-            episode_length_days=7,
+            episode_length_days=3,  # 72h episodes
             step_hours=5.0 / 60.0,  # 5 minutes
             verbose=verbose,
         )
@@ -496,39 +515,48 @@ class PBTManager:
         print()
 
     def train_agent(self, agent: AgentState, num_episodes: int):
-        """Train a single agent for N episodes."""
-        for _ in range(num_episodes):
-            episode = agent.episodes_completed
-
-            # Get config from curriculum
-            if self.use_curriculum:
-                trading_config = self.curriculum.get_config(episode)
-                episode_length_days = self.curriculum.get_episode_length_days(episode)
-            else:
-                trading_config = TradingConfig.sample_random()
-                episode_length_days = 7
-
-            # Create reward config from agent's hyperparameters (Pure RL-v2)
-            reward_config = RewardConfig(
-                funding_reward_scale=agent.hyperparams.funding_reward_scale,
-                price_reward_scale=agent.hyperparams.price_reward_scale,
-                liquidation_penalty_scale=agent.hyperparams.liquidation_penalty_scale,
+        """Train a single agent for N episodes (with environment reuse)."""
+        # Get config (FIXED 72h episodes for all) - same for all episodes
+        if self.use_curriculum:
+            trading_config = self.curriculum.get_config(agent.episodes_completed)
+        else:
+            # Fixed config for PBT (V3 optimal settings)
+            trading_config = TradingConfig(
+                max_leverage=2.0,
+                target_utilization=0.8,
+                max_positions=2,
+                stop_loss_threshold=-0.02,
+                liquidation_buffer=0.15,
             )
 
-            # Create environment
-            env = FundingArbitrageEnv(
-                data_path=self.data_path,
-                initial_capital=self.initial_capital,
-                trading_config=trading_config,
-                reward_config=reward_config,
-                episode_length_days=episode_length_days,
-                step_hours=5.0 / 60.0,  # 5 minutes (consistent with parallel training)
-                price_history_path=self.price_history_path,
-                feature_scaler_path=self.feature_scaler_path,  # For 19 features per opportunity
-                verbose=False,
-            )
+        # FIXED: 72h episodes for all agents (3 days)
+        episode_length_days = 3
 
-            # Train episode
+        # Create reward config from agent's hyperparameters (V3 Pure RL-v2)
+        reward_config = RewardConfig(
+            funding_reward_scale=agent.hyperparams.funding_reward_scale,
+            price_reward_scale=agent.hyperparams.price_reward_scale,
+            liquidation_penalty_scale=agent.hyperparams.liquidation_penalty_scale,
+            opportunity_cost_scale=0.0,  # V3: Disabled
+            negative_funding_exit_reward_scale=0.0,  # V3: Disabled
+        )
+
+        # CREATE ENVIRONMENT ONCE - reuse for all episodes
+        env = FundingArbitrageEnv(
+            data_path=self.data_path,
+            initial_capital=self.initial_capital,
+            trading_config=trading_config,
+            reward_config=reward_config,
+            episode_length_days=episode_length_days,
+            step_hours=5.0 / 60.0,  # 5 minutes
+            price_history_path=self.price_history_path,
+            feature_scaler_path=self.feature_scaler_path,
+            verbose=False,
+        )
+
+        # Train for num_episodes (reusing environment)
+        for ep in range(num_episodes):
+            # Train episode (environment resets internally)
             stats = agent.trainer.train_episode(env, max_steps=1000)
 
             # Update agent state
@@ -541,6 +569,14 @@ class PBTManager:
                 agent.recent_rewards = agent.recent_rewards[-100:]
 
             agent.mean_reward_100 = np.mean(agent.recent_rewards)
+
+            # Progress logging every 10 episodes
+            if (ep + 1) % 10 == 0:
+                mean_10 = np.mean(agent.recent_rewards[-10:]) if len(agent.recent_rewards) >= 10 else 0.0
+                print(f"    Agent {agent.agent_id}: {ep+1:3d}/{num_episodes} eps | "
+                      f"Reward: {stats['episode_reward']:7.2f} | "
+                      f"Mean(10): {mean_10:7.2f} | "
+                      f"Mean(100): {agent.mean_reward_100:7.2f}")
 
     def train_agents_parallel(self, num_episodes: int, num_processes: int = None):
         """
@@ -601,30 +637,14 @@ class PBTManager:
             agent.trainer.network.load_state_dict(network_state_dict)
 
     def exploit_and_explore(self):
-        """PBT exploit and explore step."""
+        """PBT exploit and explore step (assumes composite scores are already calculated)."""
         self.generation += 1
 
         print("\n" + "=" * 80)
         print(f"PBT GENERATION {self.generation}: EXPLOIT & EXPLORE")
         print("=" * 80)
 
-        # Evaluate all agents on test set to get composite scores
-        print("\nEvaluating agents on test set...")
-        for agent in self.agents:
-            eval_stats = evaluate(agent.trainer, self.test_env, num_episodes=1)
-
-            # Calculate composite score (same as train_ppo.py)
-            pnl_score = np.tanh(eval_stats['mean_pnl_pct'] / 5.0)
-            profit_factor_score = min(eval_stats['profit_factor'] / 2.0, 1.0)
-            drawdown_score = max(0.0, 1.0 - (eval_stats['mean_max_drawdown_pct'] / 100.0))
-
-            agent.composite_score = (
-                0.50 * pnl_score +
-                0.30 * profit_factor_score +
-                0.20 * drawdown_score
-            )
-
-        # Rank agents by composite score (test performance)
+        # Rank agents by composite score (already calculated in main training loop)
         agents_sorted = sorted(self.agents, key=lambda a: a.composite_score, reverse=True)
 
         # Display rankings
@@ -679,21 +699,6 @@ class PBTManager:
 
         print()
 
-        # Update best agent (based on composite score)
-        best_agent = agents_sorted[0]
-        if best_agent.composite_score > self.best_score:
-            self.best_score = best_agent.composite_score
-            self.best_agent_id = best_agent.agent_id
-
-            # Save best agent
-            best_path = self.checkpoint_dir / 'best_agent.pt'
-            best_agent.trainer.save(str(best_path))
-
-            print(f"✅ New best agent: Agent {best_agent.agent_id}")
-            print(f"   Composite Score: {best_agent.composite_score:.4f}")
-            print(f"   Train Reward: {best_agent.mean_reward_100:.2f}")
-            print(f"   Saved to: {best_path}\n")
-
     def train(self, episodes_per_agent: int):
         """Run PBT training."""
         print("\n" + "=" * 80)
@@ -718,13 +723,78 @@ class PBTManager:
             # Train all agents in parallel for perturbation_interval episodes
             self.train_agents_parallel(self.perturbation_interval, num_processes=self.num_processes)
 
-            # Print results
+            # Print training results
+            print(f"\n📊 Training Progress:")
             for agent in self.agents:
                 print(f"  Agent {agent.agent_id}: Episodes={agent.episodes_completed}, "
                       f"Mean(100)={agent.mean_reward_100:.2f}")
 
             round_time = time.time() - round_start
-            print(f"Round {round_num + 1} completed in {round_time/60:.1f} minutes")
+            print(f"\nRound {round_num + 1} completed in {round_time/60:.1f} minutes")
+
+            # === EVALUATE ALL AGENTS ON TEST DATA ===
+            print(f"\n{'='*80}")
+            print(f"EVALUATION ON TEST SET (Round {round_num + 1})")
+            print(f"{'='*80}\n")
+
+            # Evaluate each agent and display detailed metrics
+            for agent in self.agents:
+                eval_stats = evaluate(agent.trainer, self.test_env, num_episodes=1)
+
+                # Calculate composite score
+                pnl_score = np.tanh(eval_stats['mean_pnl_pct'] / 5.0)
+                profit_factor_score = min(eval_stats['profit_factor'] / 2.0, 1.0)
+                drawdown_score = max(0.0, 1.0 - (eval_stats['mean_max_drawdown_pct'] / 100.0))
+
+                agent.composite_score = (
+                    0.50 * pnl_score +
+                    0.30 * profit_factor_score +
+                    0.20 * drawdown_score
+                )
+
+                # Display metrics for this agent
+                print(f"Agent {agent.agent_id} Results:")
+
+                print(f"  💰 P&L Metrics:")
+                print(f"     Mean P&L (USD):  ${eval_stats['mean_pnl_usd']:8.2f}")
+                print(f"     Mean P&L (%):    {eval_stats['mean_pnl_pct']:8.2f}%")
+
+                print(f"  📈 Trading Metrics:")
+                print(f"     Total Trades:    {eval_stats['total_trades']:8.0f}")
+                print(f"     Winning Trades:  {eval_stats['total_winning_trades']:8.0f}")
+                print(f"     Losing Trades:   {eval_stats['total_losing_trades']:8.0f}")
+                print(f"     Win Rate:        {eval_stats['win_rate']:8.1f}%")
+                print(f"     Avg Duration:    {eval_stats['mean_trade_duration_hours']:8.1f} hours")
+
+                print(f"  ⚠️  Risk Metrics:")
+                print(f"     Max Drawdown:    {eval_stats['mean_max_drawdown_pct']:8.2f}%")
+                print(f"     Profit Factor:   {eval_stats['profit_factor']:8.2f}")
+
+                print(f"  🎯 Composite Score: {agent.composite_score:.4f}")
+                print()
+
+            # Find and save best agent
+            best_agent = max(self.agents, key=lambda a: a.composite_score)
+
+            if best_agent.composite_score > self.best_score:
+                prev_best = self.best_score
+                self.best_score = best_agent.composite_score
+                self.best_agent_id = best_agent.agent_id
+
+                # Save best agent
+                best_path = self.checkpoint_dir / 'best_agent.pt'
+                best_agent.trainer.save(str(best_path))
+
+                print(f"✅ NEW BEST MODEL!")
+                print(f"   Agent ID: {best_agent.agent_id}")
+                print(f"   Composite Score: {best_agent.composite_score:.4f}")
+                if prev_best > -float('inf'):
+                    print(f"   Improvement: {prev_best:.4f} → {best_agent.composite_score:.4f} (+{best_agent.composite_score - prev_best:.4f})")
+                print(f"   Saved to: {best_path}")
+            else:
+                print(f"Current best: Agent {self.best_agent_id} (Score: {self.best_score:.4f})")
+
+            print(f"{'='*80}\n")
 
             # Exploit and explore
             if round_num < total_rounds - 1:  # Don't perturb on last round
@@ -737,7 +807,8 @@ class PBTManager:
         print("=" * 80)
         print(f"Total time: {total_time / 3600:.2f} hours")
         print(f"Best agent: Agent {self.best_agent_id}")
-        print(f"Best score: {self.best_score:.2f}")
+        print(f"Best score: {self.best_score:.4f}")
+        print(f"Best model: {self.checkpoint_dir}/best_agent.pt")
         print()
 
 
