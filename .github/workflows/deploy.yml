@@ -52,10 +52,9 @@ jobs:
       - name: Verify LFS files
         run: |
           echo "Checking LFS files..."
-          ls -lh ml_pipeline/checkpoints/v3-fixed-entropy/checkpoint_ep350.pt
           ls -lh ml_pipeline/trained_models/rl/*.pt
           echo "Total size of models:"
-          du -sh ml_pipeline/checkpoints/ ml_pipeline/trained_models/
+          du -sh ml_pipeline/trained_models/
 
       - name: Build and push ML API image
         uses: docker/build-push-action@v5
