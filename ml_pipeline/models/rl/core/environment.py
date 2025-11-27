@@ -1243,10 +1243,18 @@ class FundingArbitrageEnv(gym.Env):
             'capital_utilization': float(self.portfolio.capital_utilization),
         }
 
+        # Add has_existing_position flag to opportunities (for action mask consistency)
+        existing_symbols = {pos.symbol for pos in self.portfolio.positions}
+        opportunities_with_flags = []
+        for opp in self.current_opportunities:
+            opp_copy = opp.copy()
+            opp_copy['has_existing_position'] = opp.get('symbol', '') in existing_symbols
+            opportunities_with_flags.append(opp_copy)
+
         return {
             'trading_config': trading_config,
             'portfolio': portfolio,
-            'opportunities': self.current_opportunities,
+            'opportunities': opportunities_with_flags,
         }
 
     def _get_observation(self) -> np.ndarray:
@@ -1345,11 +1353,20 @@ class FundingArbitrageEnv(gym.Env):
         if len(self.current_opportunities) > 0:
             best_available_apr = max(opp.get('fund_apr', 0.0) for opp in self.current_opportunities)
 
+        # Add has_existing_position flag to opportunities (for action mask consistency)
+        # This flag must be set for UnifiedFeatureBuilder.get_action_mask() to work correctly
+        existing_symbols = {pos.symbol for pos in self.portfolio.positions}
+        opportunities_with_flags = []
+        for opp in self.current_opportunities:
+            opp_copy = opp.copy()
+            opp_copy['has_existing_position'] = opp.get('symbol', '') in existing_symbols
+            opportunities_with_flags.append(opp_copy)
+
         # Build raw data dict
         raw_data = {
             'trading_config': trading_config,
             'portfolio': portfolio_dict,
-            'opportunities': self.current_opportunities
+            'opportunities': opportunities_with_flags
         }
 
         # CRITICAL: Cache raw_data for ML API mode (deep copy to avoid mutation)
