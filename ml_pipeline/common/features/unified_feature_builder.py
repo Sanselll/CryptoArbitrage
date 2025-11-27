@@ -45,15 +45,22 @@ class UnifiedFeatureBuilder:
         observation = builder.build_observation_from_raw_data(raw_data)
     """
 
-    def __init__(self, feature_scaler_path: Optional[str] = None):
+    def __init__(self, feature_scaler_path: Optional[str] = None, enable_velocity_tracking: bool = True):
         """
         Initialize the unified feature builder.
 
         Args:
             feature_scaler_path: Path to fitted StandardScaler pickle file (for opportunity features)
                                If None, uses default path from CONFIG
+            enable_velocity_tracking: If True, track state for velocity feature calculation
         """
         self.feature_scaler = None
+        self.enable_velocity_tracking = enable_velocity_tracking
+
+        # Velocity tracking state (per position slot)
+        self._prev_estimated_pnl = {}  # slot_idx -> previous value
+        self._prev_funding_8h = {}     # slot_idx -> previous value
+        self._prev_spread = {}         # slot_idx -> previous value
 
         if feature_scaler_path is None:
             feature_scaler_path = CONFIG.FEATURE_SCALER_PATH
@@ -72,6 +79,17 @@ class UnifiedFeatureBuilder:
             else:
                 print(f"⚠️  WARNING: Feature scaler not found at: {scaler_path}")
                 print(f"   Using raw features (may cause poor predictions!)")
+
+    def reset_velocity_tracking(self):
+        """
+        Reset velocity tracking state.
+
+        Call this at the start of each episode to prevent stale velocity values
+        from bleeding across episodes.
+        """
+        self._prev_estimated_pnl.clear()
+        self._prev_funding_8h.clear()
+        self._prev_spread.clear()
 
     def build_observation_from_raw_data(self, raw_data: Dict[str, Any], log_file: Optional[str] = None) -> np.ndarray:
         """
@@ -291,8 +309,12 @@ class UnifiedFeatureBuilder:
                     short_price_pnl = position_size * ((entry_short_price - effective_current_short) / entry_short_price)
                 estimated_pnl_pct = ((long_price_pnl + short_price_pnl) / total_capital_used) / 100 if total_capital_used > 0 else 0.0
 
-                # 5. estimated_pnl_velocity (disabled - requires state tracking)
+                # 5. estimated_pnl_velocity (change per step)
                 estimated_pnl_velocity = 0.0
+                if self.enable_velocity_tracking:
+                    prev_pnl = self._prev_estimated_pnl.get(slot_idx, estimated_pnl_pct)
+                    estimated_pnl_velocity = np.clip(estimated_pnl_pct - prev_pnl, -0.1, 0.1)  # Clip to ±10%
+                    self._prev_estimated_pnl[slot_idx] = estimated_pnl_pct
 
                 # 6. estimated_funding_8h_pct
                 long_interval = pos.get('long_funding_interval_hours', 8)
@@ -309,15 +331,23 @@ class UnifiedFeatureBuilder:
                 # Convert to percentage then back to decimal to match original implementation
                 estimated_funding_8h_pct = ((long_funding_8h + short_funding_8h) * 100) / 100
 
-                # 7. funding_velocity (disabled - requires state tracking)
+                # 7. funding_velocity (change per step)
                 funding_velocity = 0.0
+                if self.enable_velocity_tracking:
+                    prev_funding = self._prev_funding_8h.get(slot_idx, estimated_funding_8h_pct)
+                    funding_velocity = np.clip(estimated_funding_8h_pct - prev_funding, -0.05, 0.05)  # Clip to ±5%
+                    self._prev_funding_8h[slot_idx] = estimated_funding_8h_pct
 
                 # 8. spread_pct
                 avg_price = (current_long_price + current_short_price) / 2
                 spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
 
-                # 9. spread_velocity (disabled - requires state tracking)
+                # 9. spread_velocity (change per step)
                 spread_velocity = 0.0
+                if self.enable_velocity_tracking:
+                    prev_spread = self._prev_spread.get(slot_idx, spread_pct)
+                    spread_velocity = np.clip(spread_pct - prev_spread, -0.01, 0.01)  # Clip to ±1%
+                    self._prev_spread[slot_idx] = spread_pct
 
                 # 10. liquidation_distance_pct
                 liquidation_distance_pct = pos.get('liquidation_distance', 1.0)
@@ -453,11 +483,12 @@ class UnifiedFeatureBuilder:
                     for x in features
                 ]
             else:
-                # Empty slot - all zeros BEFORE scaling
-                features = [0.0] * DIMS.OPPORTUNITIES_PER_SLOT
+                # Empty slot - all zeros (DO NOT SCALE - keep as zeros)
+                # Scaling zeros produces non-zero values which misleads the model
+                all_features.extend([0.0] * DIMS.OPPORTUNITIES_PER_SLOT)
+                continue
 
-            # Apply feature scaler to ALL slots (including empty ones)
-            # This matches training environment behavior
+            # Apply feature scaler ONLY to non-empty slots
             if self.feature_scaler is not None:
                 features_array = np.array(features, dtype=np.float32)
                 features_scaled = self.feature_scaler.transform(

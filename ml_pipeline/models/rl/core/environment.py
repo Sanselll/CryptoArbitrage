@@ -13,11 +13,25 @@ import bisect
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import timedelta
+from enum import Enum
 
 from .portfolio import Portfolio, Position
 from .config import TradingConfig
 from .reward_config import RewardConfig
 from common.data.price_history_loader import PriceHistoryLoader
+
+
+class ExitType(Enum):
+    """
+    Type of position exit for reward differentiation.
+
+    AGENT: Agent chose to exit (action 31-35) - Gets full price P&L reward
+    STOP_LOSS: Triggered by stop-loss - Gets price P&L reward (penalty is natural)
+    EPISODE_END: Forced at episode boundary - NO price P&L reward (incomplete trade)
+    """
+    AGENT = "agent"
+    STOP_LOSS = "stop_loss"
+    EPISODE_END = "episode"
 
 
 class FundingArbitrageEnv(gym.Env):
@@ -43,6 +57,8 @@ class FundingArbitrageEnv(gym.Env):
                  sample_random_config: bool = False,
                  max_position_size_pct: float = 33.3,
                  episode_length_days: int = 3,
+                 episode_length_hours_min: int = None,  # For random episode lengths
+                 episode_length_hours_max: int = None,  # For random episode lengths
                  max_opportunities_per_hour: int = 10,
                  step_hours: int = 1,
                  reward_config: Optional[RewardConfig] = None,
@@ -91,6 +107,13 @@ class FundingArbitrageEnv(gym.Env):
         self.use_full_range_episodes = use_full_range_episodes
         self.fixed_position_size_usd = fixed_position_size_usd
         self.force_zero_total_pnl_pct = force_zero_total_pnl_pct  # For testing: simulates production bug
+
+        # Random episode length support (to prevent episode-length-dependent learning)
+        # If min/max not set, use fixed episode length
+        self.episode_length_hours_min = episode_length_hours_min
+        self.episode_length_hours_max = episode_length_hours_max
+        self.use_random_episode_length = (episode_length_hours_min is not None and
+                                          episode_length_hours_max is not None)
 
         # Reward configuration (Pure RL-v2 approach)
         if reward_config is None:
@@ -390,12 +413,21 @@ class FundingArbitrageEnv(gym.Env):
             self.episode_start = self.data_start
             self.episode_end = self.data_end
             # Calculate actual episode length in hours
-            self.episode_length_hours = int((self.episode_end - self.episode_start).total_seconds() / 3600)
+            actual_episode_length = int((self.episode_end - self.episode_start).total_seconds() / 3600)
         else:
+            # Random episode length (to prevent episode-length-dependent learning)
+            if self.use_random_episode_length:
+                actual_episode_length = np.random.randint(
+                    self.episode_length_hours_min,
+                    self.episode_length_hours_max + 1
+                )
+            else:
+                actual_episode_length = self.episode_length_hours
+
             # Sample random episode start time
             # Ensure we have enough data for full episode
             min_start = self.data_start
-            max_start = self.data_end - timedelta(days=self.episode_length_hours / 24 + 1)
+            max_start = self.data_end - timedelta(days=actual_episode_length / 24 + 1)
 
             # Random start time (with UTC timezone)
             # If seed was set, this will be deterministic
@@ -404,7 +436,10 @@ class FundingArbitrageEnv(gym.Env):
                 max_start.timestamp()
             )
             self.episode_start = pd.Timestamp(start_timestamp, unit='s', tz='UTC')
-            self.episode_end = self.episode_start + timedelta(hours=self.episode_length_hours)
+            self.episode_end = self.episode_start + timedelta(hours=actual_episode_length)
+
+        # Store current episode length for reference
+        self.current_episode_length_hours = actual_episode_length
 
         self.current_time = self.episode_start
 
@@ -419,6 +454,15 @@ class FundingArbitrageEnv(gym.Env):
         self.step_count = 0
         self.previous_funding_total_usd = 0.0
 
+        # Track realized funding from closed positions (fixes P&L tracking bug)
+        # Without this, funding P&L goes negative when positions close
+        self.realized_funding_total_usd = 0.0
+
+        # Track exit statistics for monitoring (forced vs agent closes)
+        self.agent_closes = 0
+        self.forced_closes = 0
+        self.stop_loss_closes = 0
+
         # Track episode capital for reward normalization (constant throughout episode)
         # This prevents reward inflation when positions close
         self.episode_capital_for_normalization = self.initial_capital
@@ -428,6 +472,10 @@ class FundingArbitrageEnv(gym.Env):
         self._cached_prices_time = None
         self._cached_funding_rates = None
         self._cached_funding_rates_time = None
+
+        # Reset velocity tracking in feature builder (prevents stale values between episodes)
+        if hasattr(self, 'feature_builder') and self.feature_builder is not None:
+            self.feature_builder.reset_velocity_tracking()
 
         # Get initial opportunities
         self.current_opportunities = self._get_opportunities_at_time(self.current_time)
@@ -478,43 +526,42 @@ class FundingArbitrageEnv(gym.Env):
         stop_loss_reward = self._check_stop_loss(price_data)
         reward += stop_loss_reward
 
-        # REWARD STRUCTURE: Pure RL-v2 Approach
-        # Component 1: Funding P&L reward (1x) - Primary signal
-        # Component 2: Price P&L reward (1x) - Secondary signal
+        # REWARD STRUCTURE: Episode-Independent Learning
+        # Key change: Price P&L only rewarded on agent EXIT decisions (not hourly)
+        # This prevents episode-length-dependent behavior where agent learns "hold until episode ends"
+        #
+        # Component 1: Funding P&L reward - Hourly (actual cash flow)
+        # Component 2: Price P&L reward - ONLY on agent close (realized P&L)
         # Component 3: Liquidation risk penalty - Safety critical
-        # Component 4: Opportunity cost penalty - DISABLED (causes overtrading due to step accumulation)
+        # Component 4: Opportunity cost penalty - DISABLED
 
         # Initialize reward breakdown for logging
         reward_breakdown = {
             'funding_reward': 0.0,
-            'price_reward': 0.0,
+            'price_reward': 0.0,  # Only set on exit now
             'liquidation_penalty': 0.0,
             'opportunity_cost_penalty': 0.0,
         }
 
-        # Component 1: P&L Reward normalized by episode capital (FIXED)
-        # Use constant episode capital instead of current position sizes to prevent reward inflation
-        # Get current funding total
-        current_funding_total = self.portfolio.get_total_funding_usd()
+        # Component 1: Funding P&L Reward (hourly - actual cash flow)
+        # FIX: Include realized funding from closed positions to prevent negative spikes
+        open_funding_total = self.portfolio.get_total_funding_usd()
+        total_funding = open_funding_total + self.realized_funding_total_usd
 
-        # Separate funding vs price P&L
-        funding_pnl_change = current_funding_total - self.previous_funding_total_usd
-        price_pnl_change = pnl_change - funding_pnl_change
+        # Calculate funding change since last step
+        funding_pnl_change = total_funding - self.previous_funding_total_usd
 
         # Update tracking
-        self.previous_funding_total_usd = current_funding_total
+        self.previous_funding_total_usd = total_funding
 
-        # Normalize by CONSTANT episode capital (not dynamic position sizes)
-        # This ensures reward scale is consistent regardless of how many positions are open
+        # Normalize by CONSTANT episode capital
         funding_pnl_pct = (funding_pnl_change / self.episode_capital_for_normalization) * 100
-        price_pnl_pct = (price_pnl_change / self.episode_capital_for_normalization) * 100
-
         funding_reward = funding_pnl_pct * self.funding_reward_scale
-        price_reward = price_pnl_pct * self.price_reward_scale
 
-        reward += funding_reward + price_reward
+        # Only add funding reward (NOT price reward - that's on exit only)
+        reward += funding_reward
         reward_breakdown['funding_reward'] = funding_reward
-        reward_breakdown['price_reward'] = price_reward
+        # Note: price_reward stays 0.0 here - it's given in _exit_position()
 
         # Component 2: Liquidation Risk Penalty (Safety Critical)
         min_liq_distance = self.portfolio.get_min_liquidation_distance(price_data)
@@ -609,6 +656,12 @@ class FundingArbitrageEnv(gym.Env):
             info['episode_trades_count'] = total_trades
             info['episode_win_rate'] = win_rate
             info['episode_final_value'] = self.portfolio.portfolio_value
+
+            # Exit statistics for monitoring (episode-independent learning)
+            info['agent_closes'] = self.agent_closes
+            info['forced_closes'] = self.forced_closes
+            info['stop_loss_closes'] = self.stop_loss_closes
+            info['episode_length_hours'] = self.current_episode_length_hours
 
         return observation, reward, terminated, truncated, info
 
@@ -798,34 +851,30 @@ class FundingArbitrageEnv(gym.Env):
             # No penalty - rely on action masking to prevent invalid actions
             return 0.0
 
-    def _exit_position(self, position_idx: int) -> float:
+    def _exit_position(self, position_idx: int, exit_type: ExitType = ExitType.AGENT) -> float:
         """
-        Exit an existing position.
+        Exit an existing position with exit-type-dependent reward.
 
-        RL-v2 Philosophy: NO EXIT REWARD
-        Agent learns optimal exit timing purely from cumulative P&L rewards.
-        - Holding winners longer accumulates more P&L → agent naturally learns to hold
-        - Exiting early misses P&L accumulation → agent naturally learns not to exit early
-        - Holding losers reduces P&L → agent naturally learns to exit losers
+        Episode-Independent Learning:
+        - Price P&L reward ONLY for AGENT and STOP_LOSS exits (realized P&L)
+        - EPISODE_END exits get NO price P&L reward (incomplete trade)
+        - This prevents episode-length-dependent behavior
+
+        Args:
+            position_idx: Index of position to close
+            exit_type: Type of exit (AGENT, STOP_LOSS, or EPISODE_END)
 
         Returns:
-            Reward for exiting (includes bonus for exiting negative funding positions)
+            Reward for exiting (price P&L for AGENT/STOP_LOSS, 0 for EPISODE_END)
         """
         position = self.portfolio.positions[position_idx]
 
-        # Calculate estimated funding BEFORE closing
-        # Use estimated rates (with fallback chain) instead of actual rates
-        estimated_rates = self._get_current_funding_rates(for_pnl=False)
-        symbol_rates = estimated_rates.get(position.symbol, {})
-        estimated_long_rate = symbol_rates.get('long_rate', position.long_funding_rate)
-        estimated_short_rate = symbol_rates.get('short_rate', position.short_funding_rate)
+        # Track position's funding BEFORE closing (for realized funding tracking)
+        position_funding = position.long_net_funding_usd + position.short_net_funding_usd
 
-        # Calculate 8h funding using estimated rates
-        long_payments_8h = 8.0 / position.long_funding_interval_hours
-        short_payments_8h = 8.0 / position.short_funding_interval_hours
-        long_funding_8h = -estimated_long_rate * long_payments_8h
-        short_funding_8h = estimated_short_rate * short_payments_8h
-        estimated_funding_8h_pct = (long_funding_8h + short_funding_8h) * 100
+        # Get position's price P&L (excluding funding) BEFORE closing
+        # This is what we reward on exit
+        position_price_pnl = position.unrealized_pnl_usd - position_funding + position.entry_fees_paid_usd
 
         # Get current prices for exit
         prices = self._get_current_prices()
@@ -841,14 +890,30 @@ class FundingArbitrageEnv(gym.Env):
                 symbol_prices['short_price']
             )
 
-            # Negative funding exit reward: Bonus for exiting positions losing money via funding
-            # When estimated_funding_8h_pct < 0, position is paying funding (bad!)
-            # Reward agent for recognizing and exiting these positions
+            # Track realized funding from closed position (fixes funding P&L tracking)
+            self.realized_funding_total_usd += position_funding
+
+            # Calculate exit reward based on exit type
             exit_reward = 0.0
-            if estimated_funding_8h_pct < 0:
-                # Positive reward for exiting negative funding position
-                # Scale by magnitude of negative funding and config scale
-                exit_reward = abs(estimated_funding_8h_pct) * self.reward_config.negative_funding_exit_reward_scale
+
+            if exit_type == ExitType.AGENT:
+                # Agent decided to close - reward realized price P&L
+                # This is the KEY change: price P&L only rewarded on agent decision
+                price_pnl_pct = (position_price_pnl / self.episode_capital_for_normalization) * 100
+                exit_reward = price_pnl_pct * self.price_reward_scale
+                self.agent_closes += 1
+
+            elif exit_type == ExitType.STOP_LOSS:
+                # Stop-loss triggered - still reward price P&L (natural penalty)
+                price_pnl_pct = (position_price_pnl / self.episode_capital_for_normalization) * 100
+                exit_reward = price_pnl_pct * self.price_reward_scale
+                self.stop_loss_closes += 1
+
+            elif exit_type == ExitType.EPISODE_END:
+                # Forced close at episode end - NO price P&L reward
+                # This teaches agent: "You should have closed before episode end"
+                exit_reward = 0.0
+                self.forced_closes += 1
 
             return exit_reward
         else:
@@ -880,21 +945,28 @@ class FundingArbitrageEnv(gym.Env):
 
         # Close positions in reverse order to avoid index shifting
         for idx, symbol, loss_pct in reversed(positions_to_close):
-            self._exit_position(idx)
-            # Pure RL-v2: No stop-loss penalty
-            # The -2% loss is already negative P&L reward (naturally punishing)
-            # Agent learns risk management through outcomes, not artificial penalties
+            # Pass STOP_LOSS exit type - gets price P&L reward (natural penalty)
+            reward = self._exit_position(idx, exit_type=ExitType.STOP_LOSS)
+            total_reward += reward
 
-        return total_reward  # Always 0.0 now
+        return total_reward
 
     def _close_all_positions(self) -> float:
-        """Close all open positions at episode end."""
+        """
+        Close all open positions at episode end.
+
+        Uses EPISODE_END exit type - NO price P&L reward for forced closes.
+        This is key to preventing episode-length-dependent learning.
+        """
+        total_reward = 0.0
+
         # Close in reverse order to avoid index issues
         for i in range(len(self.portfolio.positions) - 1, -1, -1):
-            self._exit_position(i)
-            # NO REWARD: P&L was already tracked hourly via base_reward
+            # Pass EPISODE_END - these are interrupted trades, NO price P&L reward
+            reward = self._exit_position(i, exit_type=ExitType.EPISODE_END)
+            total_reward += reward  # Will be 0.0 for EPISODE_END
 
-        return 0.0  # No additional reward
+        return total_reward  # Always 0.0 for episode-end closes
 
     def _get_opportunities_at_time(self, timestamp: pd.Timestamp) -> List[Dict]:
         """

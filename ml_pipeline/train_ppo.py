@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 import torch
 import numpy as np
+from torch.utils.tensorboard import SummaryWriter
 
 from models.rl.core.environment import FundingArbitrageEnv
 from models.rl.core.config import TradingConfig
@@ -76,6 +77,11 @@ def parse_args():
     # PPO hyperparameters
     parser.add_argument('--learning-rate', type=float, default=3e-4,
                         help='Learning rate')
+    parser.add_argument('--lr-schedule', type=str, default='constant',
+                        choices=['constant', 'linear', 'cosine'],
+                        help='Learning rate schedule (default: constant)')
+    parser.add_argument('--final-learning-rate', type=float, default=None,
+                        help='Final learning rate for linear/cosine decay (default: learning_rate / 10)')
     parser.add_argument('--gamma', type=float, default=0.99,
                         help='Discount factor')
     parser.add_argument('--gae-lambda', type=float, default=0.95,
@@ -94,14 +100,16 @@ def parse_args():
                         help='Number of episodes over which to decay entropy (V3.1). Default: 2000')
     parser.add_argument('--n-epochs', type=int, default=4,
                         help='Number of epochs per update')
-    parser.add_argument('--batch-size', type=int, default=64,
-                        help='Mini-batch size')
+    parser.add_argument('--batch-size', type=int, default=256,
+                        help='Mini-batch size (default: 256, was 64)')
 
     # Training
     parser.add_argument('--num-episodes', type=int, default=1000,
                         help='Number of training episodes')
     parser.add_argument('--eval-every', type=int, default=50,
                         help='Evaluate every N episodes')
+    parser.add_argument('--eval-episodes', type=int, default=5,
+                        help='Number of episodes to average for evaluation (default: 5)')
     parser.add_argument('--save-every', type=int, default=50,
                         help='Save checkpoint every N episodes')
     parser.add_argument('--device', type=str, default='cpu',
@@ -117,6 +125,12 @@ def parse_args():
     # Logging
     parser.add_argument('--log-interval', type=int, default=10,
                         help='Log every N episodes')
+    parser.add_argument('--tensorboard', action='store_true', default=True,
+                        help='Enable TensorBoard logging (default: True)')
+    parser.add_argument('--no-tensorboard', action='store_false', dest='tensorboard',
+                        help='Disable TensorBoard logging')
+    parser.add_argument('--tensorboard-dir', type=str, default='runs',
+                        help='Directory for TensorBoard logs (default: runs)')
 
     # Reproducibility
     parser.add_argument('--seed', type=int, default=42,
@@ -350,6 +364,33 @@ def train(args):
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+    # Initialize TensorBoard writer
+    writer = None
+    if args.tensorboard:
+        # Create unique run name with timestamp
+        run_name = datetime.now().strftime('%Y%m%d_%H%M%S')
+        tensorboard_path = Path(args.tensorboard_dir) / run_name
+        writer = SummaryWriter(str(tensorboard_path))
+        print(f"📊 TensorBoard logging enabled: {tensorboard_path}")
+        print(f"   Run: tensorboard --logdir={args.tensorboard_dir}")
+
+        # Log hyperparameters
+        hparams = {
+            'learning_rate': args.learning_rate,
+            'gamma': args.gamma,
+            'gae_lambda': args.gae_lambda,
+            'clip_range': args.clip_range,
+            'entropy_coef': args.entropy_coef,
+            'batch_size': args.batch_size,
+            'n_epochs': args.n_epochs,
+            'episode_length_days': args.episode_length_days,
+            'step_minutes': args.step_minutes,
+            'funding_reward_scale': args.funding_reward_scale,
+            'price_reward_scale': args.price_reward_scale,
+        }
+        for key, value in hparams.items():
+            writer.add_text('hyperparameters', f'{key}: {value}', 0)
+
     # Create train and test environments (separate data to prevent leakage)
     print("\n" + "=" * 80)
     print("CREATING TRAIN ENVIRONMENT")
@@ -412,6 +453,9 @@ def train(args):
         initial_entropy_coef=args.initial_entropy_coef,  # V3.1
         final_entropy_coef=args.final_entropy_coef,      # V3.1
         entropy_decay_episodes=args.entropy_decay_episodes,  # V3.1
+        lr_schedule=args.lr_schedule,
+        lr_schedule_total_episodes=args.num_episodes,
+        final_learning_rate=args.final_learning_rate,
     )
 
     # Resume from checkpoint if specified
@@ -438,18 +482,22 @@ def train(args):
         episode_start_time = time.time()
 
         # Train one episode (on TRAIN data)
+        # max_steps should exceed episode length to allow natural episode termination
+        # 5-day episode at 5-min steps = 1440 steps, so use 2000 for safety
+        max_episode_steps = int((args.episode_length_days * 24 * 60) / args.step_minutes) + 500
         if use_parallel:
-            stats = trainer.train_episode_vectorized(train_env, max_steps=1000)
+            stats = trainer.train_episode_vectorized(train_env, max_steps=max_episode_steps)
         else:
-            stats = trainer.train_episode(train_env, max_steps=1000)
+            stats = trainer.train_episode(train_env, max_steps=max_episode_steps)
 
         episode_time = time.time() - episode_start_time
 
+        # Calculate FPS (needed for both console and TensorBoard logging)
+        elapsed_time = time.time() - start_time
+        fps = trainer.total_timesteps / elapsed_time if elapsed_time > 0 else 0
+
         # Logging
         if (episode + 1) % args.log_interval == 0:
-            elapsed_time = time.time() - start_time
-            fps = trainer.total_timesteps / elapsed_time
-
             print(f"Episode {episode + 1}/{args.num_episodes}")
             print(f"  Reward: {stats['episode_reward']:8.2f}  |  Length: {stats['episode_length']:4d}  |  Mean(100): {stats['mean_reward_100']:8.2f}")
             print(f"  Loss: {stats['loss']:6.4f}  |  Policy: {stats['policy_loss']:6.4f}  |  Value: {stats['value_loss']:6.4f}  |  Entropy: {stats['entropy']:6.4f}")
@@ -457,15 +505,55 @@ def train(args):
             # V3.1: Show entropy coefficient if using decay
             if 'entropy_coef' in stats:
                 print(f"  Entropy Coef: {stats['entropy_coef']:6.4f}")
+            # Show learning rate if using scheduling
+            if 'learning_rate' in stats and args.lr_schedule != 'constant':
+                print(f"  Learning Rate: {stats['learning_rate']:.2e}")
             print(f"  Time: {episode_time:.2f}s  |  FPS: {fps:.0f}  |  Total steps: {trainer.total_timesteps}")
             print()
+
+        # TensorBoard logging (every episode for smooth curves)
+        if writer is not None:
+            # Episode metrics
+            writer.add_scalar('train/episode_reward', stats['episode_reward'], episode)
+            writer.add_scalar('train/episode_length', stats['episode_length'], episode)
+            writer.add_scalar('train/mean_reward_100', stats['mean_reward_100'], episode)
+
+            # Loss metrics
+            writer.add_scalar('train/loss', stats['loss'], episode)
+            writer.add_scalar('train/policy_loss', stats['policy_loss'], episode)
+            writer.add_scalar('train/value_loss', stats['value_loss'], episode)
+            writer.add_scalar('train/entropy', stats['entropy'], episode)
+            writer.add_scalar('train/approx_kl', stats['approx_kl'], episode)
+            writer.add_scalar('train/clipfrac', stats['clipfrac'], episode)
+
+            # Entropy coefficient (if using decay)
+            if 'entropy_coef' in stats:
+                writer.add_scalar('train/entropy_coef', stats['entropy_coef'], episode)
+
+            # Learning rate (if using schedule)
+            if 'learning_rate' in stats:
+                writer.add_scalar('train/learning_rate', stats['learning_rate'], episode)
+
+            # Exit statistics (from new reward system)
+            if 'agent_closes' in stats:
+                writer.add_scalar('exits/agent_closes', stats['agent_closes'], episode)
+                writer.add_scalar('exits/forced_closes', stats['forced_closes'], episode)
+                writer.add_scalar('exits/stop_loss_closes', stats['stop_loss_closes'], episode)
+                total_closes = stats['agent_closes'] + stats['forced_closes'] + stats['stop_loss_closes']
+                if total_closes > 0:
+                    agent_close_ratio = stats['agent_closes'] / total_closes
+                    writer.add_scalar('exits/agent_close_ratio', agent_close_ratio, episode)
+
+            # Performance metrics
+            writer.add_scalar('perf/fps', fps, episode)
+            writer.add_scalar('perf/total_timesteps', trainer.total_timesteps, episode)
 
         # Evaluation (on TEST data to prevent overfitting)
         if (episode + 1) % args.eval_every == 0:
             print(f"\n{'='*80}")
             print(f"EVALUATION ON TEST SET (Episode {episode + 1})")
             print(f"{'='*80}")
-            eval_stats = evaluate(trainer, test_env, num_episodes=1)
+            eval_stats = evaluate(trainer, test_env, num_episodes=args.eval_episodes)
 
             # Display comprehensive metrics
             print(f"\n📊 Episode Metrics:")
@@ -526,6 +614,23 @@ def train(args):
             print(f"   (P&L: {pnl_score:.3f} | ProfitFactor: {profit_factor_score:.3f} | Drawdown: {drawdown_score:.3f})")
             print()
 
+            # TensorBoard evaluation logging
+            if writer is not None:
+                writer.add_scalar('eval/mean_reward', eval_stats['mean_reward'], episode)
+                writer.add_scalar('eval/mean_pnl_pct', eval_stats['mean_pnl_pct'], episode)
+                writer.add_scalar('eval/mean_pnl_usd', eval_stats['mean_pnl_usd'], episode)
+                writer.add_scalar('eval/total_trades', eval_stats['total_trades'], episode)
+                writer.add_scalar('eval/win_rate', eval_stats['win_rate'], episode)
+                writer.add_scalar('eval/profit_factor', eval_stats['profit_factor'], episode)
+                writer.add_scalar('eval/mean_trade_duration_hours', eval_stats['mean_trade_duration_hours'], episode)
+                writer.add_scalar('eval/max_drawdown_pct', eval_stats['mean_max_drawdown_pct'], episode)
+                writer.add_scalar('eval/composite_score', composite_score, episode)
+
+                # Score components
+                writer.add_scalar('eval/score_pnl', pnl_score, episode)
+                writer.add_scalar('eval/score_profit_factor', profit_factor_score, episode)
+                writer.add_scalar('eval/score_drawdown', drawdown_score, episode)
+
             # Save best model based on composite score
             if composite_score > best_composite_score:
                 prev_best = best_composite_score
@@ -551,6 +656,11 @@ def train(args):
     if use_parallel:
         print("\n🧹 Closing parallel environments...")
         train_env.close()
+
+    # Close TensorBoard writer
+    if writer is not None:
+        writer.close()
+        print("📊 TensorBoard logs saved")
 
     total_time = time.time() - start_time
     print("\n" + "=" * 80)

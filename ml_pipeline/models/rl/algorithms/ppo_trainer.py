@@ -8,6 +8,7 @@ FundingArbitrageEnv environment.
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, LambdaLR
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 from collections import deque
@@ -92,7 +93,10 @@ class PPOTrainer:
                  device: str = 'cpu',
                  initial_entropy_coef: Optional[float] = None,
                  final_entropy_coef: Optional[float] = None,
-                 entropy_decay_episodes: int = 2000):
+                 entropy_decay_episodes: int = 2000,
+                 lr_schedule: str = 'constant',
+                 lr_schedule_total_episodes: int = 1000,
+                 final_learning_rate: Optional[float] = None):
         """
         Initialize PPO trainer.
 
@@ -111,6 +115,9 @@ class PPOTrainer:
             initial_entropy_coef: Starting entropy coefficient (for decay schedule)
             final_entropy_coef: Final entropy coefficient (for decay schedule)
             entropy_decay_episodes: Number of episodes over which to decay entropy
+            lr_schedule: Learning rate schedule type ('constant', 'linear', 'cosine')
+            lr_schedule_total_episodes: Total episodes for LR schedule decay
+            final_learning_rate: Final LR for linear/cosine decay (default: learning_rate / 10)
         """
         self.network = network.to(device)
         # Note: torch.compile removed for compatibility (requires C++ compiler in production)
@@ -143,6 +150,34 @@ class PPOTrainer:
         # Optimizer
         self.optimizer = optim.Adam(self.network.parameters(), lr=learning_rate)
 
+        # Learning rate scheduling
+        self.lr_schedule_type = lr_schedule
+        self.lr_schedule_total_episodes = lr_schedule_total_episodes
+        self.final_learning_rate = final_learning_rate if final_learning_rate is not None else learning_rate / 10.0
+
+        if lr_schedule == 'constant':
+            self.scheduler = None
+        elif lr_schedule == 'linear':
+            # Linear decay from learning_rate to final_learning_rate
+            end_factor = self.final_learning_rate / learning_rate
+            self.scheduler = LinearLR(
+                self.optimizer,
+                start_factor=1.0,
+                end_factor=end_factor,
+                total_iters=lr_schedule_total_episodes
+            )
+            print(f"✅ Linear LR schedule: {learning_rate:.1e} → {self.final_learning_rate:.1e} over {lr_schedule_total_episodes} episodes")
+        elif lr_schedule == 'cosine':
+            # Cosine annealing from learning_rate to final_learning_rate
+            self.scheduler = CosineAnnealingLR(
+                self.optimizer,
+                T_max=lr_schedule_total_episodes,
+                eta_min=self.final_learning_rate
+            )
+            print(f"✅ Cosine LR schedule: {learning_rate:.1e} → {self.final_learning_rate:.1e} over {lr_schedule_total_episodes} episodes")
+        else:
+            raise ValueError(f"Unknown lr_schedule: {lr_schedule}. Use 'constant', 'linear', or 'cosine'.")
+
         # Training statistics
         self.total_timesteps = 0
         self.num_updates = 0
@@ -170,6 +205,15 @@ class PPOTrainer:
         progress = min(episode / self.entropy_decay_episodes, 1.0)
         current_coef = self.initial_entropy_coef - (self.initial_entropy_coef - self.final_entropy_coef) * progress
         return current_coef
+
+    def get_learning_rate(self) -> float:
+        """Get current learning rate from optimizer."""
+        return self.optimizer.param_groups[0]['lr']
+
+    def step_scheduler(self):
+        """Step the learning rate scheduler (call after each episode)."""
+        if self.scheduler is not None:
+            self.scheduler.step()
 
     def select_action(self,
                       obs: np.ndarray,
@@ -369,6 +413,7 @@ class PPOTrainer:
             'approx_kl': total_approx_kl / n_batches,
             'clipfrac': total_clipfrac / n_batches,
             'entropy_coef': current_entropy_coef,  # V3.1: Include current entropy coefficient
+            'learning_rate': self.get_learning_rate(),  # Current LR (may be decayed)
         }
 
     def train_episode(self, env, max_steps: int = 1000) -> Dict[str, float]:
@@ -430,17 +475,29 @@ class PPOTrainer:
         update_stats = self.update(buffer, last_value, episode=self.num_episodes)
         self.num_episodes += 1  # Increment episode counter
 
+        # Step learning rate scheduler (after episode)
+        self.step_scheduler()
+
         # Track episode statistics
         self.episode_rewards.append(episode_reward)
         self.episode_lengths.append(episode_length)
 
-        return {
+        # Build return stats
+        stats = {
             'episode_reward': episode_reward,
             'episode_length': episode_length,
             'mean_reward_100': np.mean(self.episode_rewards) if self.episode_rewards else 0.0,
             'mean_length_100': np.mean(self.episode_lengths) if self.episode_lengths else 0.0,
             **update_stats
         }
+
+        # Add exit statistics from environment info (for TensorBoard logging)
+        if 'agent_closes' in info:
+            stats['agent_closes'] = info['agent_closes']
+            stats['forced_closes'] = info['forced_closes']
+            stats['stop_loss_closes'] = info['stop_loss_closes']
+
+        return stats
 
     def train_episode_vectorized(self, vec_env, max_steps: int = 1000) -> Dict[str, float]:
         """

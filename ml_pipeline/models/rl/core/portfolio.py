@@ -47,7 +47,7 @@ class Position:
     # Leverage and fees (with defaults)
     leverage: float = 1.0      # Leverage multiplier (1-10x)
     maker_fee: float = 0.0002  # 0.02% maker fee (realistic rate)
-    taker_fee: float = 0.0002  # 0.02% taker fee (realistic rate)
+    taker_fee: float = 0.00055  # 0.055% taker fee (Bybit rate)
     slippage_pct: float = 0  # 0% slippage
     entry_fee_pct: float = field(init=False)  # Calculated from maker/taker
     exit_fee_pct: float = field(init=False)
