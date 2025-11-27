@@ -5,17 +5,17 @@
 
 set -e
 
-CHECKPOINT_DIR="checkpoints/v3-fixed-entropy"
-RESULTS_FILE="checkpoint_results_v3_fixed_entropy.txt"
+CHECKPOINT_DIR="checkpoints"
+RESULTS_FILE="checkpoint_results_v4.txt"
 PARALLEL_JOBS=4
 
 # Common test parameters
 TEST_DATA="data/production/rl_opportunities.csv"
 PRICE_HISTORY="data/production/price_history"
 LEVERAGE=2
-START_TIME="2025-11-13 20:50:00"
-END_TIME="2025-11-21 06:50:00"
-INITIAL_CAPITAL=990
+START_TIME="2025-11-25 08:00:00"
+END_TIME="2025-11-27 16:00:00"
+INITIAL_CAPITAL=400
 
 echo "========================================================================"
 echo "TESTING ALL CHECKPOINTS IN PARALLEL"

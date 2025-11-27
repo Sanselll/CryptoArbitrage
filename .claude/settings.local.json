@@ -328,7 +328,9 @@
       "Bash(gtimeout 5 python:*)",
       "Bash(xxd:*)",
       "Bash(docker rm:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(while IFS='|' read -r checkpoint pnl winrate trades avg_hours)",
+      "Bash(do printf \"%-30s %9s%% %9s%% %10s %11sh\\n\" \"$checkpoint\" \"$pnl\" \"$winrate\" \"$trades\" \"$avg_hours\" done)"
     ],
     "deny": [],
     "ask": []

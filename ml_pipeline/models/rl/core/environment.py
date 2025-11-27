@@ -872,10 +872,6 @@ class FundingArbitrageEnv(gym.Env):
         # Track position's funding BEFORE closing (for realized funding tracking)
         position_funding = position.long_net_funding_usd + position.short_net_funding_usd
 
-        # Get position's price P&L (excluding funding) BEFORE closing
-        # This is what we reward on exit
-        position_price_pnl = position.unrealized_pnl_usd - position_funding + position.entry_fees_paid_usd
-
         # Get current prices for exit
         prices = self._get_current_prices()
 
@@ -883,6 +879,7 @@ class FundingArbitrageEnv(gym.Env):
             symbol_prices = prices[position.symbol]
 
             # Close position (updates portfolio)
+            # realized_pnl includes ALL fees (entry + exit) - this is the source of truth
             realized_pnl = self.portfolio.close_position(
                 position_idx,
                 self.current_time,
@@ -892,6 +889,10 @@ class FundingArbitrageEnv(gym.Env):
 
             # Track realized funding from closed position (fixes funding P&L tracking)
             self.realized_funding_total_usd += position_funding
+
+            # Price P&L = realized - funding (funding already rewarded hourly, don't double-count)
+            # This CORRECTLY includes ALL trading fees (entry + exit)
+            position_price_pnl = realized_pnl - position_funding
 
             # Calculate exit reward based on exit type
             exit_reward = 0.0
