@@ -105,8 +105,8 @@ const formatExecutionTime = (openedAt: string) => {
   return `${hours}h ${minutes}m ${seconds}s`;
 };
 
-type SortField = 'spread' | 'priceSpread24h' | 'priceSpread3d' | 'spread30Sample' | 'spreadVolStdDev' | 'spreadVolCv' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
-  | 'volume' | 'liquidity' | 'posCost' | 'breakEven' | 'fundBreakEven24h' | 'fundBreakEven3d';
+type SortField = 'spread' | 'priceSpread24h' | 'priceSpread3d' | 'spread30Sample' | 'spreadVolCv' | 'fundProfit8h' | 'fundProfit8h3d' | 'fundProfit8h24h' | 'fundApr' | 'fundApr3d' | 'fundApr24h'
+  | 'volume' | 'liquidity';
 type SortDirection = 'asc' | 'desc';
 
 export const OpportunitiesList = () => {
@@ -222,10 +222,6 @@ export const OpportunitiesList = () => {
           aValue = a.spread_30_sample_avg ?? -Infinity;
           bValue = b.spread_30_sample_avg ?? -Infinity;
           break;
-        case 'spreadVolStdDev':
-          aValue = a.spreadVolatilityStdDev ?? -Infinity;
-          bValue = b.spreadVolatilityStdDev ?? -Infinity;
-          break;
         case 'spreadVolCv':
           aValue = a.spreadVolatilityCv ?? -Infinity;
           bValue = b.spreadVolatilityCv ?? -Infinity;
@@ -261,22 +257,6 @@ export const OpportunitiesList = () => {
         case 'liquidity':
           aValue = a.orderbookDepthUsd ?? 0;
           bValue = b.orderbookDepthUsd ?? 0;
-          break;
-        case 'posCost':
-          aValue = a.positionCostPercent;
-          bValue = b.positionCostPercent;
-          break;
-        case 'breakEven':
-          aValue = a.breakEvenTimeHours ?? Infinity;
-          bValue = b.breakEvenTimeHours ?? Infinity;
-          break;
-        case 'fundBreakEven24h':
-          aValue = a.fundBreakEvenTime24hProj ?? Infinity;
-          bValue = b.fundBreakEvenTime24hProj ?? Infinity;
-          break;
-        case 'fundBreakEven3d':
-          aValue = a.fundBreakEvenTime3dProj ?? Infinity;
-          bValue = b.fundBreakEvenTime3dProj ?? Infinity;
           break;
         default:
           aValue = a.fundApr;
@@ -607,44 +587,9 @@ export const OpportunitiesList = () => {
                         )}
                       </div></TableHead>
                 <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('spreadVolStdDev')} title="spread volatility - standard deviation"><div className="flex items-center justify-end gap-1">
-                        Spread Vol (σ)
-                        {sortField === 'spreadVolStdDev' && (
-                          <ArrowUpDown className="w-3 h-3" />
-                        )}
-                      </div></TableHead>
-                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
                   onClick={() => handleSort('spreadVolCv')} title="spread volatility - coefficient of variation (relative volatility)"><div className="flex items-center justify-end gap-1">
                         Spread Vol (CV)
                         {sortField === 'spreadVolCv' && (
-                          <ArrowUpDown className="w-3 h-3" />
-                        )}
-                      </div></TableHead>
-                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('posCost')} title="cost to open + close position (trading fees %)"><div className="flex items-center justify-end gap-1">
-                        Pos Cost
-                        {sortField === 'posCost' && (
-                          <ArrowUpDown className="w-3 h-3" />
-                        )}
-                      </div></TableHead>
-                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('breakEven')} title="hours to recover position cost at current rate"><div className="flex items-center justify-end gap-1">
-                        Break Even
-                        {sortField === 'breakEven' && (
-                          <ArrowUpDown className="w-3 h-3" />
-                        )}
-                      </div></TableHead>
-                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('fundBreakEven24h')} title="break-even time projected from 24h average rate"><div className="flex items-center justify-end gap-1">
-                        Break Even (24h PROJ)
-                        {sortField === 'fundBreakEven24h' && (
-                          <ArrowUpDown className="w-3 h-3" />
-                        )}
-                      </div></TableHead>
-                <TableHead className="text-right cursor-pointer hover:bg-binance-bg-hover transition-colors"
-                  onClick={() => handleSort('fundBreakEven3d')} title="break-even time projected from 3D average rate"><div className="flex items-center justify-end gap-1">
-                        Break Even (3D PROJ)
-                        {sortField === 'fundBreakEven3d' && (
                           <ArrowUpDown className="w-3 h-3" />
                         )}
                       </div></TableHead>
@@ -886,41 +831,8 @@ export const OpportunitiesList = () => {
                     </TableCell>
                     <TableCell className="text-right" rowSpan={2}>
                       <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.spreadVolatilityStdDev != null
-                          ? `${(opp.spreadVolatilityStdDev * 100).toFixed(4)}%`
-                          : '--'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right" rowSpan={2}>
-                      <span className="font-mono text-[11px] text-binance-text-secondary">
                         {opp.spreadVolatilityCv != null
                           ? `${opp.spreadVolatilityCv.toFixed(4)}`
-                          : '--'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right" rowSpan={2}>
-                      <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.positionCostPercent.toFixed(2)}%
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right" rowSpan={2}>
-                      <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.breakEvenTimeHours != null
-                          ? `${Math.round(opp.breakEvenTimeHours)}h`
-                          : '--'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right" rowSpan={2}>
-                      <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.fundBreakEvenTime24hProj != null
-                          ? `${Math.round(opp.fundBreakEvenTime24hProj)}h`
-                          : '--'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right" rowSpan={2}>
-                      <span className="font-mono text-[11px] text-binance-text-secondary">
-                        {opp.fundBreakEvenTime3dProj != null
-                          ? `${Math.round(opp.fundBreakEvenTime3dProj)}h`
                           : '--'}
                       </span>
                     </TableCell>

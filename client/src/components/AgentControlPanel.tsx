@@ -272,69 +272,23 @@ export function AgentControlPanel() {
               </div>
             )}
 
-            {/* Configuration Form */}
-            <div className="space-y-3">
-              <h4 className="text-sm font-semibold text-binance-text">Configuration</h4>
-
-              <div>
-                <label className="block text-xs text-binance-text-secondary mb-1">
-                  Max Leverage: {config.maxLeverage.toFixed(1)}x
-                </label>
-                <input
-                  type="range"
-                  min="1"
-                  max="5"
-                  step="0.5"
-                  value={config.maxLeverage}
-                  onChange={(e) => setConfig({ ...config, maxLeverage: parseFloat(e.target.value) })}
-                  disabled={agent.status === 'running'}
-                  className="w-full h-2 bg-binance-bg rounded-lg appearance-none cursor-pointer slider"
-                />
+            {/* Configuration Display (read-only) */}
+            <div className="bg-binance-bg rounded-lg p-2 space-y-1">
+              <h4 className="text-xs font-semibold text-binance-text-secondary">Configuration</h4>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <span className="text-binance-text-secondary">Leverage:</span>
+                  <span className="text-binance-text ml-1">{config.maxLeverage.toFixed(1)}x</span>
+                </div>
+                <div>
+                  <span className="text-binance-text-secondary">Util:</span>
+                  <span className="text-binance-text ml-1">{(config.targetUtilization * 100).toFixed(0)}%</span>
+                </div>
+                <div>
+                  <span className="text-binance-text-secondary">Pos:</span>
+                  <span className="text-binance-text ml-1">{config.maxPositions}</span>
+                </div>
               </div>
-
-              <div>
-                <label className="block text-xs text-binance-text-secondary mb-1">
-                  Target Utilization: {(config.targetUtilization * 100).toFixed(0)}%
-                </label>
-                <input
-                  type="range"
-                  min="0.5"
-                  max="1.0"
-                  step="0.05"
-                  value={config.targetUtilization}
-                  onChange={(e) => setConfig({ ...config, targetUtilization: parseFloat(e.target.value) })}
-                  disabled={agent.status === 'running'}
-                  className="w-full h-2 bg-binance-bg rounded-lg appearance-none cursor-pointer slider"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs text-binance-text-secondary mb-1">
-                  Max Positions: {config.maxPositions}
-                </label>
-                <input
-                  type="range"
-                  min="1"
-                  max="3"
-                  step="1"
-                  value={config.maxPositions}
-                  onChange={(e) => setConfig({ ...config, maxPositions: parseInt(e.target.value) })}
-                  disabled={agent.status === 'running'}
-                  className="w-full h-2 bg-binance-bg rounded-lg appearance-none cursor-pointer slider"
-                />
-              </div>
-
-              {agent.status !== 'running' && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleUpdateConfig}
-                  isLoading={isLoading}
-                  className="w-full"
-                >
-                  Update Configuration
-                </Button>
-              )}
             </div>
 
             {/* Control Buttons */}
