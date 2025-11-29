@@ -15,11 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true
+          lfs: false
 
-      - name: Pull LFS files
+      - name: Install Git LFS and fetch only needed files
         run: |
-          git lfs pull
+          git lfs install
+          # Only fetch trained_models, not checkpoints
+          git lfs pull --include="ml_pipeline/trained_models/**"
           git lfs ls-files
 
       - name: Free up disk space
