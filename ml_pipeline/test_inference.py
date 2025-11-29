@@ -97,10 +97,10 @@ def parse_args():
                         help='End time for filtering test data (e.g., "2025-11-13 09:30:00")')
 
     # Confidence threshold settings
-    parser.add_argument('--enter-threshold', type=float, default=0.3,
-                        help='Minimum confidence for ENTER actions (default: 0.3 = 30%%, 0.0 = disabled)')
-    parser.add_argument('--exit-threshold', type=float, default=0.4,
-                        help='Minimum confidence for EXIT actions (default: 0.4 = 40%%, 0.0 = disabled)')
+    parser.add_argument('--enter-threshold', type=float, default=0.0,
+                        help='Minimum confidence for ENTER actions (default: 0.0 = disabled, use 0.3 for 30%%)')
+    parser.add_argument('--exit-threshold', type=float, default=0.0,
+                        help='Minimum confidence for EXIT actions (default: 0.0 = disabled, use 0.4 for 40%%)')
 
     return parser.parse_args()
 

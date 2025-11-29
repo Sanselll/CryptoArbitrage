@@ -31,8 +31,8 @@ decision_logger = DecisionLogger(max_decisions_per_user=1000)
 
 # Confidence thresholds for action filtering
 # Actions below these thresholds are converted to HOLD
-ENTER_CONFIDENCE_THRESHOLD = 0.30  # 30% minimum for ENTER actions
-EXIT_CONFIDENCE_THRESHOLD = 0.40   # 40% minimum for EXIT actions
+ENTER_CONFIDENCE_THRESHOLD = 0.0   # Disabled - allow all ENTER actions
+EXIT_CONFIDENCE_THRESHOLD = 0.0    # Disabled - allow all EXIT actions
 
 # Decision log file for raw input/output analysis
 # Stored in server directory for easy access
