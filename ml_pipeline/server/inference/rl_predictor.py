@@ -55,6 +55,12 @@ class ModularRLPredictor:
 
     All feature preparation is delegated to UnifiedFeatureBuilder,
     ensuring consistency with training environment and eliminating duplication.
+
+    Per-Session Feature Builders:
+    - Each agent session has its own UnifiedFeatureBuilder instance
+    - This isolates velocity tracking state between different users/sessions
+    - Without isolation, velocity features would be contaminated across sessions
+    - Sessions without ID use a default builder with velocity tracking disabled
     """
 
     def __init__(
@@ -75,8 +81,21 @@ class ModularRLPredictor:
 
         self.device = device
 
-        # Initialize unified feature builder (SINGLE SOURCE OF TRUTH)
-        self.feature_builder = UnifiedFeatureBuilder(feature_scaler_path=feature_scaler_path)
+        # Store scaler path for creating per-session builders
+        self.feature_scaler_path = feature_scaler_path
+
+        # Per-session feature builders for velocity tracking isolation
+        # Key: session_id (string), Value: UnifiedFeatureBuilder instance
+        self.session_builders: Dict[str, UnifiedFeatureBuilder] = {}
+
+        # Default builder for requests without session_id (velocity tracking disabled)
+        self.default_builder = UnifiedFeatureBuilder(
+            feature_scaler_path=feature_scaler_path,
+            enable_velocity_tracking=False
+        )
+
+        # Legacy: Keep single feature_builder for backward compatibility
+        self.feature_builder = self.default_builder
 
         # Create network and trainer (SAME AS test_inference.py)
         network = ModularPPONetwork()
@@ -103,6 +122,54 @@ class ModularRLPredictor:
         print(f"   Network parameters: {total_params:,}")
         print(f"   Observation space: {DIMS.TOTAL} dimensions (V3)")
         print(f"   Action space: {DIMS.TOTAL_ACTIONS} actions")
+
+    def _get_feature_builder(self, session_id: Optional[str]) -> UnifiedFeatureBuilder:
+        """
+        Get or create a feature builder for the given session.
+
+        Per-session builders ensure velocity tracking state isolation:
+        - Each session has its own velocity history (_prev_estimated_pnl, etc.)
+        - Without isolation, sessions would contaminate each other's velocity features
+        - Sessions without ID use the default builder (velocity tracking disabled)
+
+        Args:
+            session_id: Agent session ID (Guid string) or None
+
+        Returns:
+            UnifiedFeatureBuilder instance for this session
+        """
+        if not session_id:
+            return self.default_builder
+
+        if session_id not in self.session_builders:
+            print(f"Creating new feature builder for session: {session_id}")
+            self.session_builders[session_id] = UnifiedFeatureBuilder(
+                feature_scaler_path=self.feature_scaler_path,
+                enable_velocity_tracking=True
+            )
+
+        return self.session_builders[session_id]
+
+    def cleanup_session(self, session_id: str) -> bool:
+        """
+        Remove a session's feature builder when the session ends.
+        Call this when an agent session is stopped to free memory.
+
+        Args:
+            session_id: Agent session ID to cleanup
+
+        Returns:
+            True if session was found and removed, False otherwise
+        """
+        if session_id in self.session_builders:
+            del self.session_builders[session_id]
+            print(f"Cleaned up feature builder for session: {session_id}")
+            return True
+        return False
+
+    def get_active_sessions(self) -> List[str]:
+        """Get list of active session IDs with feature builders."""
+        return list(self.session_builders.keys())
 
     def predict_opportunities(
         self,
@@ -140,22 +207,26 @@ class ModularRLPredictor:
                 'liquidation_buffer': 0.15,
             }
 
-        # Build observation using unified feature builder
+        # Get session-specific feature builder for velocity tracking isolation
+        session_id = portfolio.get('session_id')
+        feature_builder = self._get_feature_builder(session_id)
+
+        # Build observation using session-specific feature builder
         raw_data = {
             'trading_config': trading_config,
             'portfolio': portfolio,
             'opportunities': opportunities
         }
-        obs = self.feature_builder.build_observation_from_raw_data(raw_data)
+        obs = feature_builder.build_observation_from_raw_data(raw_data)
 
         # Log observation for debugging
-        self._log_observation(obs, portfolio, opportunities)
+        self._log_observation(obs, portfolio, opportunities, session_id)
 
-        # Build action mask using unified feature builder
+        # Build action mask using session-specific feature builder
         positions = portfolio.get('positions', [])
         num_positions = sum(1 for p in positions if p.get('is_active', False) or p.get('symbol', '') != '')
         max_positions = trading_config.get('max_positions', 3)
-        action_mask = self.feature_builder.get_action_mask(opportunities, num_positions, max_positions)
+        action_mask = feature_builder.get_action_mask(opportunities, num_positions, max_positions)
 
         # Select action (deterministic = greedy)
         action, value, log_prob = self.trainer.select_action(
@@ -252,7 +323,7 @@ class ModularRLPredictor:
         else:
             raise ValueError(f"Invalid action: {action}")
 
-    def _log_observation(self, obs: np.ndarray, portfolio: Dict, opportunities: List[Dict]):
+    def _log_observation(self, obs: np.ndarray, portfolio: Dict, opportunities: List[Dict], session_id: Optional[str] = None):
         """Log observation vector for debugging."""
         import json
         import datetime
@@ -266,6 +337,7 @@ class ModularRLPredictor:
 
             log_entry = {
                 'timestamp': datetime.datetime.utcnow().isoformat(),
+                'session_id': session_id,
                 'num_positions': num_positions,
                 'num_opportunities': len(opportunities),
                 'observation_vector': obs.tolist(),

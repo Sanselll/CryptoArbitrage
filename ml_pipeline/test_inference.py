@@ -96,6 +96,12 @@ def parse_args():
     parser.add_argument('--end-time', type=str, default=None,
                         help='End time for filtering test data (e.g., "2025-11-13 09:30:00")')
 
+    # Confidence threshold settings
+    parser.add_argument('--enter-threshold', type=float, default=0.3,
+                        help='Minimum confidence for ENTER actions (default: 0.3 = 30%%, 0.0 = disabled)')
+    parser.add_argument('--exit-threshold', type=float, default=0.4,
+                        help='Minimum confidence for EXIT actions (default: 0.4 = 40%%, 0.0 = disabled)')
+
     return parser.parse_args()
 
 
@@ -325,6 +331,9 @@ class MLAPIClient:
         value = result.get('state_value', 0.0)
         log_prob = 0.0  # Dummy value
 
+        # Store confidence for threshold checking
+        self._last_confidence = result.get('confidence', 1.0)
+
         return action, value, log_prob
 
 
@@ -452,6 +461,10 @@ def test_model_inference(args):
         print(f"   Price History: {args.price_history_path} (dynamic funding updates enabled)")
     if args.force_zero_pnl:
         print(f"   ⚠️  FORCING total_pnl_pct = 0 in observations (production bug simulation)")
+    if args.enter_threshold > 0 or args.exit_threshold > 0:
+        print(f"\n   🎯 Confidence Thresholds:")
+        print(f"      ENTER threshold: {args.enter_threshold*100:.0f}% (actions below this default to HOLD)")
+        print(f"      EXIT threshold:  {args.exit_threshold*100:.0f}% (actions below this default to HOLD)")
 
     # Initialize inference method based on mode
     if args.api_mode:
@@ -518,6 +531,10 @@ def test_model_inference(args):
     # Profit factor metrics
     all_winning_pnl = []
     all_losing_pnl = []
+
+    # Threshold tracking
+    threshold_blocked_enters = 0
+    threshold_blocked_exits = 0
 
     for episode in range(args.num_episodes):
         obs, info = env.reset(seed=args.seed)
@@ -720,9 +737,29 @@ def test_model_inference(args):
             if args.api_mode:
                 # Use API client (passes env, obs and mask are ignored by API)
                 action, _, _ = predictor.select_action(env, obs, action_mask)
+                # Get confidence from last API response
+                confidence = getattr(predictor, '_last_confidence', 1.0)
             else:
                 # Use direct model inference
                 action, _, _ = predictor.select_action(obs, action_mask, deterministic=True)
+                # Get confidence from action probabilities
+                with torch.no_grad():
+                    obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
+                    mask_tensor = torch.BoolTensor(action_mask).unsqueeze(0)
+                    action_logits, _ = predictor.network(obs_tensor, mask_tensor)
+                    probs = torch.softmax(action_logits, dim=1).cpu().numpy()[0]
+                    confidence = float(probs[action])
+
+            # Apply confidence threshold (action 0 = HOLD, 1-30 = ENTER, 31-35 = EXIT)
+            original_action = action
+            if action >= 1 and action <= 30:  # ENTER action
+                if confidence < args.enter_threshold:
+                    action = 0  # Default to HOLD
+                    threshold_blocked_enters += 1
+            elif action >= 31 and action <= 35:  # EXIT action
+                if confidence < args.exit_threshold:
+                    action = 0  # Default to HOLD
+                    threshold_blocked_exits += 1
 
             # Step
             obs, reward, terminated, truncated, info = env.step(action)
@@ -859,6 +896,14 @@ def test_model_inference(args):
     print(f"  Leverage:        {avg_config['leverage']:.1f}x")
     print(f"  Utilization:     {avg_config['utilization']:.0%}")
     print(f"  Max Positions:   {avg_config['max_positions']}")
+
+    # Report threshold filtering if enabled
+    if args.enter_threshold > 0 or args.exit_threshold > 0:
+        print(f"\n🎯 Confidence Threshold Results:")
+        print(f"  ENTER threshold: {args.enter_threshold*100:.0f}%")
+        print(f"  EXIT threshold:  {args.exit_threshold*100:.0f}%")
+        print(f"  Blocked ENTERs:  {threshold_blocked_enters:8d} (would have entered, defaulted to HOLD)")
+        print(f"  Blocked EXITs:   {threshold_blocked_exits:8d} (would have exited, defaulted to HOLD)")
 
     # Calculate composite score (IMPROVED VERSION)
     # Weights: 50% P&L, 30% Profit Factor, 20% Low Drawdown

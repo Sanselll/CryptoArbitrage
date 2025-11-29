@@ -29,6 +29,11 @@ rl_predictor = None
 agent_manager = AgentManager()
 decision_logger = DecisionLogger(max_decisions_per_user=1000)
 
+# Confidence thresholds for action filtering
+# Actions below these thresholds are converted to HOLD
+ENTER_CONFIDENCE_THRESHOLD = 0.30  # 30% minimum for ENTER actions
+EXIT_CONFIDENCE_THRESHOLD = 0.40   # 40% minimum for EXIT actions
+
 # Decision log file for raw input/output analysis
 # Stored in server directory for easy access
 DECISION_LOG_FILE = os.path.join(os.path.dirname(__file__), 'ml_decisions.log')
@@ -90,6 +95,7 @@ def initialize_predictor():
             print("   Model: trained_models/rl/v4_ep1350.pt")
             print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
             print("   Features: 5 config + 3 portfolio + 85 executions + 110 opportunities")
+            print(f"   Confidence thresholds: ENTER >= {ENTER_CONFIDENCE_THRESHOLD:.0%}, EXIT >= {EXIT_CONFIDENCE_THRESHOLD:.0%}")
         except Exception as e:
             print(f"⚠️  Warning: Could not initialize RL predictor: {e}")
             print("   RL endpoints will be unavailable")
@@ -634,9 +640,33 @@ def predict():
             trading_config=raw_data_dict['trading_config']
         )
 
+        # Apply confidence thresholds
+        # Low-confidence ENTER/EXIT actions are converted to HOLD
+        original_action = prediction.get('action')
+        original_action_id = prediction.get('action_id')
+        confidence = prediction.get('confidence', 0.0)
+
+        threshold_applied = False
+        if original_action == 'ENTER' and confidence < ENTER_CONFIDENCE_THRESHOLD:
+            prediction['action'] = 'HOLD'
+            prediction['action_id'] = 0
+            prediction['threshold_blocked'] = True
+            prediction['original_action'] = original_action
+            prediction['original_action_id'] = original_action_id
+            threshold_applied = True
+        elif original_action == 'EXIT' and confidence < EXIT_CONFIDENCE_THRESHOLD:
+            prediction['action'] = 'HOLD'
+            prediction['action_id'] = 0
+            prediction['threshold_blocked'] = True
+            prediction['original_action'] = original_action
+            prediction['original_action_id'] = original_action_id
+            threshold_applied = True
+
         # LOG RESPONSE DATA
         print(f"\n========== ML API RESPONSE ==========")
         print(f"Action: {prediction.get('action', 'N/A')}")
+        if threshold_applied:
+            print(f"  (Original: {original_action} blocked by threshold, conf={confidence:.1%})")
         print(f"Opportunity Symbol: {prediction.get('opportunity_symbol', 'N/A')}")
         print(f"Opportunity Index: {prediction.get('opportunity_index', 'N/A')}")
         print(f"Confidence: {prediction.get('confidence', 'N/A')}")

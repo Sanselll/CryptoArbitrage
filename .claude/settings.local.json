@@ -330,7 +330,9 @@
       "Bash(docker rm:*)",
       "Bash(npx tsc:*)",
       "Bash(while IFS='|' read -r checkpoint pnl winrate trades avg_hours)",
-      "Bash(do printf \"%-30s %9s%% %9s%% %10s %11sh\\n\" \"$checkpoint\" \"$pnl\" \"$winrate\" \"$trades\" \"$avg_hours\" done)"
+      "Bash(do printf \"%-30s %9s%% %9s%% %10s %11sh\\n\" \"$checkpoint\" \"$pnl\" \"$winrate\" \"$trades\" \"$avg_hours\" done)",
+      "Bash(if [ -f /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/ml_decisions.log ])",
+      "Bash(then echo \"=== TOTAL DECISIONS ===\" wc -l /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/ml_decisions.log echo \"\" echo \"=== ACTION BREAKDOWN ===\" grep -o '\"\"\"\"action\"\"\"\": \"\"\"\"[^\"\"\"\"]*\"\"\"\"' /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/ml_decisions.log)"
     ],
     "deny": [],
     "ask": []

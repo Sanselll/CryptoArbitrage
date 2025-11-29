@@ -595,6 +595,7 @@ public class ArbitrageExecutionService
             {
                 UserId = _currentUser.UserId,
                 ExecutionId = execution.Id,
+                AgentSessionId = request.AgentSessionId,
                 Symbol = request.Symbol,
                 Exchange = request.Exchange,
                 Type = PositionType.Perpetual,
@@ -622,6 +623,7 @@ public class ArbitrageExecutionService
             {
                 UserId = _currentUser.UserId,
                 ExecutionId = execution.Id,
+                AgentSessionId = request.AgentSessionId,
                 Symbol = request.Symbol,
                 Exchange = request.Exchange,
                 Type = PositionType.Spot,
@@ -1044,6 +1046,7 @@ public class ArbitrageExecutionService
             {
                 UserId = _currentUser.UserId,
                 ExecutionId = execution.Id,
+                AgentSessionId = request.AgentSessionId,
                 Symbol = request.Symbol,
                 Exchange = request.LongExchange,
                 Type = isSpotFutures ? PositionType.Spot : PositionType.Perpetual, // Spot for Spot/Futures, Perpetual for Futures/Futures
@@ -1073,6 +1076,7 @@ public class ArbitrageExecutionService
             {
                 UserId = _currentUser.UserId,
                 ExecutionId = execution.Id,
+                AgentSessionId = request.AgentSessionId,
                 Symbol = request.Symbol,
                 Exchange = request.ShortExchange,
                 Type = PositionType.Perpetual,

@@ -165,6 +165,13 @@ public class OpportunityRawData
 /// </summary>
 public class PortfolioRawData
 {
+    /// <summary>
+    /// Agent session ID for per-session feature builder tracking in ML API.
+    /// Ensures velocity state is isolated between different agent sessions.
+    /// </summary>
+    [JsonPropertyName("session_id")]
+    public string? SessionId { get; set; }
+
     [JsonPropertyName("positions")]
     public List<PositionRawData> Positions { get; set; } = new();
 

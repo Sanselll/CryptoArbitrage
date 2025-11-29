@@ -69,7 +69,8 @@ public class RLPredictionService
         List<PositionRawData> positions,
         TradingConfigRawData tradingConfig,
         decimal totalCapital,
-        decimal capitalUtilization)
+        decimal capitalUtilization,
+        Guid? sessionId = null)
     {
         try
         {
@@ -79,6 +80,7 @@ public class RLPredictionService
                 TradingConfig = tradingConfig,
                 Portfolio = new PortfolioRawData
                 {
+                    SessionId = sessionId?.ToString(),
                     Positions = positions,
                     TotalCapital = totalCapital,
                     CapitalUtilization = capitalUtilization
@@ -140,8 +142,14 @@ public class RLPredictionService
     /// Get modular action for autonomous trading agent
     /// This is the primary method used by AgentBackgroundService
     /// </summary>
+    /// <param name="userId">User ID for config lookup</param>
+    /// <param name="sessionId">Agent session ID for per-session feature builder tracking in ML API</param>
+    /// <param name="opportunities">Available trading opportunities</param>
+    /// <param name="positions">Current open positions</param>
+    /// <param name="cancellationToken">Cancellation token</param>
     public async Task<AgentPrediction?> GetModularActionAsync(
         string userId,
+        Guid? sessionId,
         IEnumerable<ArbitrageOpportunityDto> opportunities,
         List<PositionDto> positions,
         CancellationToken cancellationToken = default)
@@ -205,13 +213,14 @@ public class RLPredictionService
                 ? SanitizeDecimal(positionData.Sum(p => p.PositionSizeUsd) / totalCapital * 100m)
                 : 0m;
 
-            // 6. Call base prediction method
+            // 6. Call base prediction method (passing sessionId for per-session feature builder tracking)
             var prediction = await GetPredictionAsync(
                 opportunityData,
                 positionData,
                 tradingConfig,
                 totalCapital,
-                capitalUtilization);
+                capitalUtilization,
+                sessionId);
 
             if (prediction == null)
                 return new AgentPrediction { Action = "HOLD", Confidence = "LOW" };

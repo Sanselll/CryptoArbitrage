@@ -50,6 +50,8 @@ services:
     restart: always
     ports:
       - "8080:8080"
+    volumes:
+      - ./data/real/production:/app/data/production
     environment:
       - ASPNETCORE_ENVIRONMENT=ProductionReal
       - ASPNETCORE_URLS=http://+:8080
@@ -92,6 +94,8 @@ services:
     restart: always
     ports:
       - "8081:8080"
+    volumes:
+      - ./data/demo/production:/app/data/production
     environment:
       - ASPNETCORE_ENVIRONMENT=ProductionDemo
       - ASPNETCORE_URLS=http://+:8080

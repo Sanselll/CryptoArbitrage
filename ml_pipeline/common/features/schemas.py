@@ -88,6 +88,10 @@ class OpportunityRawData(BaseModel):
 
 class PortfolioRawData(BaseModel):
     """Raw portfolio data from backend."""
+    # Agent session ID for per-session feature builder tracking
+    # Ensures velocity state is isolated between different agent sessions
+    session_id: Optional[str] = None
+
     positions: List[PositionRawData] = Field(default_factory=list, max_items=5)
     total_capital: float = Field(default=10000.0, gt=0.0)
     capital_utilization: float = Field(default=0.0, ge=0.0, le=100.0)

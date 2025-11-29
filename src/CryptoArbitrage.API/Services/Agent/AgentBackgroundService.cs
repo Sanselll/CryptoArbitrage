@@ -254,11 +254,16 @@ public class AgentBackgroundService : BackgroundService
         _logger.LogInformation("========== AGENT SENDING TO ML API ==========");
         _logger.LogInformation("=============================================");
 
+        // 3. Get current session ID for per-session feature builder tracking in ML API
+        // This ensures velocity state is isolated between different agent sessions
+        var session = await context.AgentSessions
+            .Where(s => s.UserId == userId && s.Status == AgentStatus.Running)
+            .FirstOrDefaultAsync(cancellationToken);
 
-        // 3. Call RLPredictionService with centralized feature preparation (275 features)
+        // 4. Call RLPredictionService with centralized feature preparation (275 features)
         // Pass positions from repository - same data source as frontend (UserDataSnapshot)
         // This includes: 5 config features, 10 portfolio features, 60 position features, 200 opportunity features
-        var prediction = await _rlPredictionService.GetModularActionAsync(userId, userOpportunities, positions, cancellationToken);
+        var prediction = await _rlPredictionService.GetModularActionAsync(userId, session?.Id, userOpportunities, positions, cancellationToken);
 
         _logger.LogInformation("========== ML API RETURNED ==========");
         _logger.LogInformation("Action: {Action}, Symbol: {Symbol}", prediction?.Action, prediction?.OpportunitySymbol);
@@ -431,7 +436,10 @@ public class AgentBackgroundService : BackgroundService
                         EstimatedProfitPercentage = opportunity.EstimatedProfitPercentage,
 
                         // Pre-calculated FundApr (ensures consistency with opportunity)
-                        FundApr = opportunity.FundApr
+                        FundApr = opportunity.FundApr,
+
+                        // Agent session tracking (for P&L attribution to this session)
+                        AgentSessionId = session.Id
                     };
 
                         _logger.LogInformation(
@@ -692,8 +700,8 @@ public class AgentBackgroundService : BackgroundService
                 session.ExitDecisions++;
 
                 // CRITICAL FIX: Update session P&L after EXIT actions
-                // Calculate cumulative P&L from all successful EXIT decisions in this session
-                var (pnlUsd, pnlPct, _, _) = _decisionRepository.GetSessionMetrics(session.Id);
+                // Calculate from closed positions in database (accurate, survives restarts)
+                var (pnlUsd, pnlPct, _, _) = await CalculateSessionPnLFromPositionsAsync(session.Id, context);
                 session.SessionPnLUsd = pnlUsd;
                 session.SessionPnLPct = pnlPct;
             }
@@ -701,6 +709,41 @@ public class AgentBackgroundService : BackgroundService
             session.UpdatedAt = DateTime.UtcNow;
             await context.SaveChangesAsync();
         }
+    }
+
+    /// <summary>
+    /// Calculate session P&L from closed positions in the database.
+    /// This replaces the in-memory decision repository calculation with accurate database queries.
+    ///
+    /// Formula:
+    /// - SessionPnLUsd = SUM(RealizedPnLUsd) from all closed positions with this AgentSessionId
+    /// - SessionPnLPct = SUM(RealizedPnLUsd) / SUM(InitialMargin) × 100 (weighted average, not simple average)
+    /// </summary>
+    private async Task<(decimal pnlUsd, decimal pnlPct, int winningTrades, int losingTrades)> CalculateSessionPnLFromPositionsAsync(
+        Guid sessionId,
+        ArbitrageDbContext context)
+    {
+        // Query closed positions that belong to this agent session
+        var closedPositions = await context.Positions
+            .Where(p => p.AgentSessionId == sessionId && p.Status == PositionStatus.Closed)
+            .Select(p => new { p.RealizedPnLUsd, p.InitialMargin })
+            .ToListAsync();
+
+        if (!closedPositions.Any())
+            return (0, 0, 0, 0);
+
+        var totalPnlUsd = closedPositions.Sum(p => p.RealizedPnLUsd);
+        var totalInitialMargin = closedPositions.Sum(p => p.InitialMargin);
+        var winningTrades = closedPositions.Count(p => p.RealizedPnLUsd > 0);
+        var losingTrades = closedPositions.Count(p => p.RealizedPnLUsd < 0);
+
+        // Calculate weighted P&L percentage (correct formula, not simple average)
+        // This ensures larger positions have proportionally more weight
+        var pnlPct = totalInitialMargin > 0
+            ? (totalPnlUsd / totalInitialMargin) * 100m
+            : 0m;
+
+        return (totalPnlUsd, pnlPct, winningTrades, losingTrades);
     }
 
     /// <summary>
@@ -830,8 +873,8 @@ public class AgentBackgroundService : BackgroundService
                 // Broadcast status update
                 await signalR.BroadcastAgentStatusAsync(userId, "running", durationSeconds, true, null);
 
-                // Calculate stats from decision repository (real-time, accurate)
-                var (pnlUsd, pnlPct, winningTrades, losingTrades) = _decisionRepository.GetSessionMetrics(session.Id);
+                // Calculate stats from closed positions in database (accurate, survives restarts)
+                var (pnlUsd, pnlPct, winningTrades, losingTrades) = await CalculateSessionPnLFromPositionsAsync(session.Id, context);
                 var totalTrades = winningTrades + losingTrades;
                 var winRate = totalTrades > 0 ? (decimal)winningTrades / totalTrades : 0m;
 

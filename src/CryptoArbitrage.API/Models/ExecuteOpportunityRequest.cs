@@ -30,4 +30,7 @@ public class ExecuteOpportunityRequest
 
     // Pre-calculated FundApr from opportunity (ensures consistency with opportunity APR calculation)
     public decimal? FundApr { get; set; } // Annualized funding rate difference (correctly calculated)
+
+    // Agent session tracking (for P&L attribution to agent sessions)
+    public Guid? AgentSessionId { get; set; }
 }
