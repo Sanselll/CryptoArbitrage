@@ -443,10 +443,29 @@ public class UserDataCollector : IDataCollector<UserDataSnapshot, UserDataCollec
                 {
                     var positionTransactions = allTransactions.Where(pt => pt.PositionId == dbPos.Id).ToList();
 
-                    // Calculate fees from PositionTransaction (single source of truth)
-                    var tradingFeePaid = positionTransactions
-                        .Where(pt => pt.TransactionType == TransactionType.Commission || pt.TransactionType == TransactionType.Trade)
-                        .Sum(pt => pt.Fee);
+                    // For active positions: show estimated total (entry + estimated exit)
+                    // For closed positions: use actual TradingFeesUsd (already has entry + exit)
+                    decimal tradingFeePaid;
+                    if (dbPos.Status == PositionStatus.Open)
+                    {
+                        // Calculate estimated exit fee using same formula as entry fee
+                        decimal takerFeeRate = dbPos.Exchange.ToLower() switch
+                        {
+                            "binance" => 0.0004m,   // 0.04%
+                            "bybit" => 0.00055m,    // 0.055%
+                            _ => 0.0005m            // 0.05% default
+                        };
+                        var notional = dbPos.EntryPrice * dbPos.Quantity;
+                        var estimatedExitFee = notional * takerFeeRate;
+
+                        // Total = entry fee (already in TradingFeesUsd) + estimated exit fee
+                        tradingFeePaid = dbPos.TradingFeesUsd + estimatedExitFee;
+                    }
+                    else
+                    {
+                        // Closed position: TradingFeesUsd already contains entry + actual exit
+                        tradingFeePaid = dbPos.TradingFeesUsd;
+                    }
 
                     var totalFundingFeePaid = positionTransactions
                         .Where(pt => pt.TransactionType == TransactionType.FundingFee && pt.SignedFee < 0)

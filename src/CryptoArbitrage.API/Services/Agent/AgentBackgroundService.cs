@@ -560,12 +560,18 @@ public class AgentBackgroundService : BackgroundService
                                     .Sum(t => Math.Abs(t.SignedFee ?? 0m));
                                 var netFunding = fundingReceived - fundingPaid;
 
-                                // Calculate trading fees from PositionTransaction
-                                var tradingFees = p.Transactions
-                                    .Where(t => t.TransactionType == TransactionType.Commission || t.TransactionType == TransactionType.Trade)
-                                    .Sum(t => t.Fee);
+                                // Use TradingFeesUsd from Position (calculated at open/close)
+                                // For active positions, estimate exit fee (same as entry fee)
+                                decimal takerFeeRate = p.Exchange.ToLower() switch
+                                {
+                                    "binance" => 0.0004m,
+                                    "bybit" => 0.00055m,
+                                    _ => 0.0005m
+                                };
+                                var estimatedExitFee = p.EntryPrice * p.Quantity * takerFeeRate;
+                                var totalFees = p.TradingFeesUsd + estimatedExitFee; // entry + estimated exit
 
-                                return p.UnrealizedPnL + netFunding - tradingFees;
+                                return p.UnrealizedPnL + netFunding - totalFees;
                             });
                             var totalInitialMargin = execPositions.Sum(p => p.InitialMargin);
 

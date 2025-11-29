@@ -768,18 +768,17 @@ public class BybitConnector : IExchangeConnector
                             totalFilledQty += filledQty;
                             weightedPrice += avgPrice * filledQty;
 
-                            // Try to get fee from order, estimate if not available
-                            var orderFee = order.ExecutedFee ?? 0;
-                            if (orderFee == 0)
-                            {
-                                // Estimate fee: taker fee is typically 0.055% for Bybit
-                                orderFee = filledQty * avgPrice * 0.00055m;
-                            }
+                            // Always calculate exit fee explicitly (API returns deprecated/unreliable values)
+                            var calculatedFee = filledQty * avgPrice * 0.00055m;
+                            var apiFee = order.ExecutedFee ?? 0;
+
+                            // Use calculated fee (more reliable than deprecated API field)
+                            var orderFee = calculatedFee;
                             totalFee += orderFee;
 
                             _logger.LogInformation(
-                                "Bybit ClosePosition: Filled {Qty} @ {Price}, Fee: {Fee}",
-                                filledQty, avgPrice, orderFee);
+                                "Bybit ClosePosition: Filled {Qty} @ {Price}, CalculatedFee: {CalcFee}, ApiFee: {ApiFee}, UsingFee: {Fee}",
+                                filledQty, avgPrice, calculatedFee, apiFee, orderFee);
                         }
                     }
                 }

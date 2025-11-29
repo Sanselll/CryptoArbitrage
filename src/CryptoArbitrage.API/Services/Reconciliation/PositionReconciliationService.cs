@@ -366,18 +366,15 @@ public class PositionReconciliationService
             .Where(t => t.TransactionType == TransactionType.FundingFee)
             .Sum(t => t.SignedFee ?? 0);
 
-        // Calculate Trading Fees (sum of all commissions/trading fees)
-        var tradingFeesUsd = linkedTransactions
-            .Where(t => t.TransactionType == TransactionType.Commission || t.TransactionType == TransactionType.Trade)
-            .Sum(t => t.Fee);
+        // Note: TradingFeesUsd is calculated at position open/close time and NOT updated from transactions
+        // This avoids complexity of matching commission transactions by OrderId
 
-        // Update position fields
+        // Update position fields - only funding, never touch TradingFeesUsd
         position.FundingEarnedUsd = fundingEarnedUsd;
-        position.TradingFeesUsd = tradingFeesUsd;
 
         _logger.LogDebug(
-            "Updated fee fields for Position {PositionId}: FundingEarned=${Funding:F4}, TradingFees=${Fees:F4}",
-            position.Id, fundingEarnedUsd, tradingFeesUsd);
+            "Updated fee fields for Position {PositionId}: FundingEarned=${Funding:F4}, TradingFees=${Fees:F4} (preserved)",
+            position.Id, fundingEarnedUsd, position.TradingFeesUsd);
     }
 
     /// <summary>
@@ -398,10 +395,9 @@ public class PositionReconciliationService
             .Where(t => t.TransactionType == TransactionType.FundingFee)
             .Sum(t => t.SignedFee ?? 0);
 
-        // Calculate Trading Fees (sum of all commissions/trading fees)
-        var tradingFeesUsd = linkedTransactions
-            .Where(t => t.TransactionType == TransactionType.Commission || t.TransactionType == TransactionType.Trade)
-            .Sum(t => t.Fee);
+        // Note: TradingFeesUsd is calculated at position open/close and NOT updated from transactions
+        // This avoids complexity of matching commission transactions by OrderId
+        var tradingFeesUsd = position.TradingFeesUsd;
 
         // Calculate Price P&L
         // For LONG: (ExitPrice - EntryPrice) * Quantity
@@ -425,9 +421,8 @@ public class PositionReconciliationService
             ? (realizedPnLUsd / position.InitialMargin) * 100
             : 0m;
 
-        // Persist to Position entity
+        // Persist to Position entity (TradingFeesUsd is NOT updated - preserved from open/close calculation)
         position.FundingEarnedUsd = fundingEarnedUsd;
-        position.TradingFeesUsd = tradingFeesUsd;
         position.PricePnLUsd = pricePnLUsd;
         position.RealizedPnLUsd = realizedPnLUsd;
         position.RealizedPnLPct = realizedPnLPct;

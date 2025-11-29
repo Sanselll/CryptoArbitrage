@@ -581,8 +581,13 @@ public class ArbitrageExecutionService
                 ExecutionState.Running);
 
             // Create Position records for tracking (one for perpetual, one for spot)
-            // Calculate entry fees: position_size * taker_fee_rate (0.06%)
-            const decimal takerFeeRate = 0.0006m;
+            // Calculate entry fees: position_size * taker_fee_rate (exchange-specific)
+            decimal takerFeeRate = request.Exchange.ToLower() switch
+            {
+                "binance" => 0.0004m,   // 0.04% Binance futures taker
+                "bybit" => 0.00055m,    // 0.055% Bybit futures taker
+                _ => 0.0005m            // 0.05% default
+            };
             var perpNotionalValue = perpQuantity * perpPrice;
             var spotNotionalValue = actualFilledQuantity * spotPrice;
             var perpEntryFee = perpNotionalValue * takerFeeRate;
@@ -1032,12 +1037,17 @@ public class ArbitrageExecutionService
                 ExecutionState.Running);
 
             // Create Position records for both exchanges
-            // Calculate entry fees: position_size * taker_fee_rate (0.06%)
-            const decimal takerFeeRate = 0.0006m;
+            // Calculate entry fees: position_size * taker_fee_rate (exchange-specific)
+            decimal GetTakerFeeRate(string exchange) => exchange.ToLower() switch
+            {
+                "binance" => 0.0004m,   // 0.04% Binance futures taker
+                "bybit" => 0.00055m,    // 0.055% Bybit futures taker
+                _ => 0.0005m            // 0.05% default
+            };
             var longNotionalValue = (isSpotFutures ? actualLongQuantity : quantity) * longPrice;
             var shortNotionalValue = quantity * shortPrice;
-            var longEntryFee = longNotionalValue * takerFeeRate;
-            var shortEntryFee = shortNotionalValue * takerFeeRate;
+            var longEntryFee = longNotionalValue * GetTakerFeeRate(request.LongExchange);
+            var shortEntryFee = shortNotionalValue * GetTakerFeeRate(request.ShortExchange);
 
             // Calculate funding intervals with defaults
             var longInterval = request.LongFundingIntervalHours ?? 8m;

@@ -335,7 +335,9 @@
       "Bash(then echo \"=== TOTAL DECISIONS ===\" wc -l /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/ml_decisions.log echo \"\" echo \"=== ACTION BREAKDOWN ===\" grep -o '\"\"\"\"action\"\"\"\": \"\"\"\"[^\"\"\"\"]*\"\"\"\"' /Users/sansel/Projects/CryptoArbitrage/ml_pipeline/ml_decisions.log)",
       "Bash(/opt/homebrew/Cellar/postgresql@16/16.10/bin/psql:*)",
       "Bash(timeout 10 python:*)",
-      "Bash(gtimeout 10 python:*)"
+      "Bash(gtimeout 10 python:*)",
+      "Bash(git stash:*)",
+      "Bash(git push)"
     ],
     "deny": [],
     "ask": []
