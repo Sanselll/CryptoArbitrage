@@ -488,10 +488,12 @@ public class KrakenConnector : IExchangeConnector
         }
     }
 
-    public async Task<bool> ClosePositionAsync(string symbol)
+    public async Task<ClosePositionResult> ClosePositionAsync(string symbol)
     {
         if (_restClient == null)
             throw new InvalidOperationException("Not connected to Kraken");
+
+        var closeResult = new ClosePositionResult();
 
         try
         {
@@ -502,7 +504,8 @@ public class KrakenConnector : IExchangeConnector
             if (position == null)
             {
                 _logger.LogWarning("No open position found for {Symbol} on Kraken", symbol);
-                return false;
+                closeResult.Success = true; // Already closed
+                return closeResult;
             }
 
             // Determine the opposite side to close the position
@@ -536,22 +539,44 @@ public class KrakenConnector : IExchangeConnector
 
             if (result.Success && result.Data != null)
             {
-                _logger.LogInformation("Successfully closed position for {Symbol} on Kraken. Order ID: {OrderId}, Status: {Status}",
-                    symbol, result.Data.OrderId, result.Data.Status);
-                return true;
+                closeResult.OrderId = result.Data.OrderId;
+                closeResult.Success = true;
+
+                // Try to get the fill price from the order
+                await Task.Delay(500); // Small delay for order to settle
+
+                // Try to get order details - Kraken API might not support this directly
+                // Use mark price as fallback
+                var tickerResult = await _restClient.FuturesApi.ExchangeData.GetTickersAsync();
+                if (tickerResult.Success && tickerResult.Data != null)
+                {
+                    var ticker = tickerResult.Data.FirstOrDefault(t => t.Symbol == krakenSymbol);
+                    if (ticker != null)
+                    {
+                        closeResult.ExitPrice = ticker.LastPrice;
+                        closeResult.FilledQuantity = position.Quantity;
+                        // Estimate fee: Kraken futures taker fee is typically 0.05%
+                        closeResult.TradingFee = position.Quantity * ticker.LastPrice * 0.0005m;
+                    }
+                }
+
+                _logger.LogInformation("Successfully closed position for {Symbol} on Kraken. Order ID: {OrderId}, Status: {Status}, ExitPrice: {ExitPrice}",
+                    symbol, result.Data.OrderId, result.Data.Status, closeResult.ExitPrice);
             }
             else
             {
                 _logger.LogError("Failed to close position for {Symbol} on Kraken: {Error}",
                     symbol, result.Error?.Message ?? "Unknown error");
-                return false;
+                closeResult.ErrorMessage = result.Error?.Message ?? "Unknown error";
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error closing position for {Symbol} on Kraken", symbol);
-            return false;
+            closeResult.ErrorMessage = ex.Message;
         }
+
+        return closeResult;
     }
 
     public async Task<List<PositionDto>> GetOpenPositionsAsync()

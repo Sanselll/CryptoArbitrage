@@ -3,6 +3,19 @@ using CryptoArbitrage.API.Data.Entities;
 
 namespace CryptoArbitrage.API.Services.Exchanges;
 
+/// <summary>
+/// Result of closing a position, including exit price information
+/// </summary>
+public class ClosePositionResult
+{
+    public bool Success { get; set; }
+    public string? OrderId { get; set; }
+    public decimal? ExitPrice { get; set; }
+    public decimal? FilledQuantity { get; set; }
+    public decimal? TradingFee { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
 public interface IExchangeConnector
 {
     string ExchangeName { get; }
@@ -20,7 +33,7 @@ public interface IExchangeConnector
 
     // Perpetual futures trading
     Task<string> PlaceMarketOrderAsync(string symbol, PositionSide side, decimal quantity, decimal leverage);
-    Task<bool> ClosePositionAsync(string symbol);
+    Task<ClosePositionResult> ClosePositionAsync(string symbol);
     Task<List<PositionDto>> GetOpenPositionsAsync();
 
     // Spot trading (for cash-and-carry arbitrage)

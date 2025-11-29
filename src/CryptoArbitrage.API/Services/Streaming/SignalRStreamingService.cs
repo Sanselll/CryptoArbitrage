@@ -262,4 +262,20 @@ public class SignalRStreamingService : ISignalRStreamingService
             _logger.LogError(ex, "Error broadcasting agent decision to user {UserId}", userId);
         }
     }
+
+    /// <summary>
+    /// Broadcast execution history to a specific user
+    /// </summary>
+    public async Task BroadcastExecutionHistoryToUserAsync(string userId, List<ExecutionHistoryDto> history, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group($"user_{userId}").SendAsync("ReceiveExecutionHistory", history, cancellationToken);
+            _logger.LogDebug("Broadcasted {Count} execution history entries to user {UserId}", history.Count, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting execution history to user {UserId}", userId);
+        }
+    }
 }

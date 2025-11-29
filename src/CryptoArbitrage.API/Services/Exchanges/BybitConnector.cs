@@ -717,10 +717,12 @@ public class BybitConnector : IExchangeConnector
         }
     }
 
-    public async Task<bool> ClosePositionAsync(string symbol)
+    public async Task<ClosePositionResult> ClosePositionAsync(string symbol)
     {
         if (_restClient == null)
             throw new InvalidOperationException("Not connected to Bybit");
+
+        var result = new ClosePositionResult();
 
         try
         {
@@ -728,11 +730,15 @@ public class BybitConnector : IExchangeConnector
 
             if (positions.Success && positions.Data != null)
             {
+                decimal totalFilledQty = 0;
+                decimal weightedPrice = 0;
+                decimal totalFee = 0;
+
                 foreach (var position in positions.Data.List.Where(p => p.Quantity > 0))
                 {
                     var orderSide = position.Side == Bybit.Net.Enums.PositionSide.Buy ? BybitOrderSide.Sell : BybitOrderSide.Buy;
 
-                    await _restClient.V5Api.Trading.PlaceOrderAsync(
+                    var orderResult = await _restClient.V5Api.Trading.PlaceOrderAsync(
                         Category.Linear,
                         symbol,
                         orderSide,
@@ -740,16 +746,64 @@ public class BybitConnector : IExchangeConnector
                         position.Quantity,
                         null
                     );
+
+                    if (orderResult.Success && orderResult.Data != null)
+                    {
+                        result.OrderId = orderResult.Data.OrderId;
+
+                        // Get order details to retrieve fill price
+                        await Task.Delay(500); // Small delay for order to settle
+                        var orderDetails = await _restClient.V5Api.Trading.GetOrdersAsync(
+                            Category.Linear,
+                            symbol: symbol,
+                            orderId: orderResult.Data.OrderId
+                        );
+
+                        if (orderDetails.Success && orderDetails.Data?.List?.Any() == true)
+                        {
+                            var order = orderDetails.Data.List.First();
+                            var filledQty = order.QuantityFilled ?? position.Quantity;
+                            var avgPrice = order.AveragePrice ?? position.MarkPrice ?? 0;
+
+                            totalFilledQty += filledQty;
+                            weightedPrice += avgPrice * filledQty;
+
+                            // Try to get fee from order, estimate if not available
+                            var orderFee = order.ExecutedFee ?? 0;
+                            if (orderFee == 0)
+                            {
+                                // Estimate fee: taker fee is typically 0.055% for Bybit
+                                orderFee = filledQty * avgPrice * 0.00055m;
+                            }
+                            totalFee += orderFee;
+
+                            _logger.LogInformation(
+                                "Bybit ClosePosition: Filled {Qty} @ {Price}, Fee: {Fee}",
+                                filledQty, avgPrice, orderFee);
+                        }
+                    }
                 }
-                return true;
+
+                if (totalFilledQty > 0)
+                {
+                    result.Success = true;
+                    result.ExitPrice = weightedPrice / totalFilledQty;
+                    result.FilledQuantity = totalFilledQty;
+                    result.TradingFee = totalFee;
+                }
+                else
+                {
+                    result.Success = true; // Position might have already been closed
+                }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error closing position on Bybit");
+            result.ErrorMessage = ex.Message;
         }
 
-        return false;
+        return result;
     }
 
     public async Task<List<PositionDto>> GetOpenPositionsAsync()

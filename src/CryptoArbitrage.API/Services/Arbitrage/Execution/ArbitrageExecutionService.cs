@@ -7,6 +7,7 @@ using CryptoArbitrage.API.Services.Exchanges;
 using CryptoArbitrage.API.Services.Notifications;
 using CryptoArbitrage.API.Services.Streaming;
 using Microsoft.EntityFrameworkCore;
+using CryptoArbitrage.API.Services;
 
 namespace CryptoArbitrage.API.Services.Arbitrage.Execution;
 
@@ -20,6 +21,7 @@ public class ArbitrageExecutionService
     private readonly IEncryptionService _encryption;
     private readonly INotificationService _notificationService;
     private readonly ISignalRStreamingService _signalRStreamingService;
+    private readonly IExecutionHistoryService _executionHistoryService;
 
     public ArbitrageExecutionService(
         ILogger<ArbitrageExecutionService> _logger,
@@ -30,7 +32,8 @@ public class ArbitrageExecutionService
         ICurrentUserService currentUser,
         IEncryptionService encryption,
         INotificationService notificationService,
-        ISignalRStreamingService signalRStreamingService)
+        ISignalRStreamingService signalRStreamingService,
+        IExecutionHistoryService executionHistoryService)
     {
         this._logger = _logger;
         _dbContext = dbContext;
@@ -39,6 +42,7 @@ public class ArbitrageExecutionService
         _encryption = encryption;
         _notificationService = notificationService;
         _signalRStreamingService = signalRStreamingService;
+        _executionHistoryService = executionHistoryService;
 
         _exchangeConnectors = new Dictionary<string, IExchangeConnector>
         {
@@ -969,7 +973,8 @@ public class ArbitrageExecutionService
                     else
                     {
                         // For futures, close the position
-                        rollbackSuccess = await longConnector.ClosePositionAsync(request.Symbol);
+                        var closeResult = await longConnector.ClosePositionAsync(request.Symbol);
+                        rollbackSuccess = closeResult.Success;
                         _logger.LogInformation("Rolled back futures position for {Symbol}: Success={Success}",
                             request.Symbol, rollbackSuccess);
                     }
@@ -1363,19 +1368,22 @@ public class ArbitrageExecutionService
             }
 
             // Step 2: Close SHORT perpetual position using ClosePositionAsync
+            ClosePositionResult? perpCloseResult = null;
             try
             {
                 _logger.LogInformation("Closing perpetual short position for {Symbol}", execution.Symbol);
 
-                bool closedSuccessfully = await connector.ClosePositionAsync(execution.Symbol);
+                perpCloseResult = await connector.ClosePositionAsync(execution.Symbol);
 
-                if (closedSuccessfully)
+                if (perpCloseResult.Success)
                 {
-                    _logger.LogInformation("Successfully closed perpetual short position for {Symbol}", execution.Symbol);
+                    _logger.LogInformation("Successfully closed perpetual short position for {Symbol}. ExitPrice: {ExitPrice}, Fee: {Fee}",
+                        execution.Symbol, perpCloseResult.ExitPrice, perpCloseResult.TradingFee);
                 }
                 else
                 {
-                    _logger.LogWarning("ClosePositionAsync returned false for {Symbol}, position may already be closed", execution.Symbol);
+                    _logger.LogWarning("ClosePositionAsync returned failure for {Symbol}: {Error}",
+                        execution.Symbol, perpCloseResult.ErrorMessage);
                 }
             }
             catch (Exception ex)
@@ -1398,27 +1406,104 @@ public class ArbitrageExecutionService
                 ExecutionState.Running,
                 ExecutionState.Stopped);
 
-            // Update Position records to mark them as closed (keep them for history)
+            // Update Position records to mark them as closed and calculate P&L
             var positions = await _dbContext.Positions
                 .Where(p => p.ExecutionId == execution.Id && p.Status == PositionStatus.Open)
                 .ToListAsync();
+
+            // Get spot exit price from recent trades if we have spot sell order
+            decimal? spotExitPrice = null;
+            if (!string.IsNullOrEmpty(spotSellOrderId))
+            {
+                try
+                {
+                    await Task.Delay(500); // Wait for order to settle
+                    var recentTrades = await connector.GetUserTradesAsync(startTime: DateTime.UtcNow.AddMinutes(-5));
+                    var spotTrade = recentTrades.FirstOrDefault(t => t.OrderId == spotSellOrderId);
+                    if (spotTrade != null)
+                    {
+                        spotExitPrice = spotTrade.Price;
+                        _logger.LogInformation("Found spot exit price from trade: {Price}", spotExitPrice);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to get spot exit price from trades");
+                }
+            }
 
             foreach (var position in positions)
             {
                 position.Status = PositionStatus.Closed;
                 position.ClosedAt = DateTime.UtcNow;
 
-                // Store close order ID
-                if (position.Type == PositionType.Spot && !string.IsNullOrEmpty(spotSellOrderId))
+                // Store close order ID and set ExitPrice
+                if (position.Type == PositionType.Spot)
                 {
-                    position.CloseOrderId = spotSellOrderId;
+                    if (!string.IsNullOrEmpty(spotSellOrderId))
+                    {
+                        position.CloseOrderId = spotSellOrderId;
+                    }
+                    // Set exit price for spot position
+                    if (spotExitPrice.HasValue)
+                    {
+                        position.ExitPrice = spotExitPrice.Value;
+                    }
+                    else
+                    {
+                        // Fallback: use perp exit price as approximation
+                        position.ExitPrice = perpCloseResult?.ExitPrice ?? position.EntryPrice;
+                    }
                 }
-                // For perpetual positions, we don't get an order ID from ClosePositionAsync (it's a market close)
+                else if (position.Type == PositionType.Perpetual)
+                {
+                    // Set exit price for perpetual position
+                    if (perpCloseResult?.ExitPrice.HasValue == true)
+                    {
+                        position.ExitPrice = perpCloseResult.ExitPrice.Value;
+                        position.CloseOrderId = perpCloseResult.OrderId;
+                    }
+                    else
+                    {
+                        // Fallback: use entry price (no price change P&L)
+                        position.ExitPrice = position.EntryPrice;
+                    }
 
-                // Set reconciliation status to Preliminary (waiting for transactions)
-                position.ReconciliationStatus = ReconciliationStatus.Preliminary;
+                    // Add exit trading fee
+                    if (perpCloseResult?.TradingFee.HasValue == true)
+                    {
+                        position.TradingFeesUsd += perpCloseResult.TradingFee.Value;
+                    }
+                }
 
-                // ExitPrice will be set by reconciliation service when transactions arrive
+                // Calculate P&L now that we have ExitPrice
+                if (position.ExitPrice.HasValue)
+                {
+                    // Calculate Price P&L
+                    if (position.Side == PositionSide.Long)
+                    {
+                        position.PricePnLUsd = (position.ExitPrice.Value - position.EntryPrice) * position.Quantity;
+                    }
+                    else // Short
+                    {
+                        position.PricePnLUsd = (position.EntryPrice - position.ExitPrice.Value) * position.Quantity;
+                    }
+
+                    // Calculate Realized P&L: FundingEarned + PricePnL - TradingFees
+                    position.RealizedPnLUsd = position.FundingEarnedUsd + position.PricePnLUsd - position.TradingFeesUsd;
+
+                    // Calculate Realized P&L Percentage (relative to initial margin)
+                    position.RealizedPnLPct = position.InitialMargin > 0
+                        ? (position.RealizedPnLUsd / position.InitialMargin) * 100
+                        : 0m;
+
+                    _logger.LogInformation(
+                        "Position {PositionId} P&L calculated: PricePnL=${PricePnL:F4}, Funding=${Funding:F4}, Fees=${Fees:F4}, Realized=${Realized:F4} ({Pct:F2}%)",
+                        position.Id, position.PricePnLUsd, position.FundingEarnedUsd, position.TradingFeesUsd, position.RealizedPnLUsd, position.RealizedPnLPct);
+                }
+
+                // Set reconciliation status - now we have preliminary P&L
+                position.ReconciliationStatus = ReconciliationStatus.PartiallyReconciled;
             }
 
             await _dbContext.SaveChangesAsync();
@@ -1462,6 +1547,11 @@ public class ArbitrageExecutionService
 
                 await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positionDtos);
                 _logger.LogInformation("Broadcasted fresh positions to user {UserId} after stopping execution", userId);
+
+                // Also broadcast updated execution history
+                var executionHistory = await _executionHistoryService.GetExecutionHistoryAsync(userId);
+                await _signalRStreamingService.BroadcastExecutionHistoryToUserAsync(userId, executionHistory);
+                _logger.LogInformation("Broadcasted execution history ({Count} entries) to user {UserId}", executionHistory.Count, userId);
             }
 
             response.Success = true;
@@ -1497,6 +1587,7 @@ public class ArbitrageExecutionService
 
         var closedExchanges = new List<string>();
         var failedExchanges = new List<string>();
+        var closeResults = new Dictionary<string, ClosePositionResult>();
 
         // Close positions on each exchange
         foreach (var exchangeGroup in positionsByExchange)
@@ -1520,19 +1611,21 @@ public class ArbitrageExecutionService
                 await EnsureConnectedAsync(exchangeName, connector);
 
                 // Close all perpetual positions for this exchange/symbol
-                bool closedSuccessfully = await connector.ClosePositionAsync(execution.Symbol);
+                var closeResult = await connector.ClosePositionAsync(execution.Symbol);
 
-                if (closedSuccessfully)
+                if (closeResult.Success)
                 {
-                    _logger.LogInformation("Successfully closed positions on {Exchange} for {Symbol}",
-                        exchangeName, execution.Symbol);
+                    _logger.LogInformation("Successfully closed positions on {Exchange} for {Symbol}. ExitPrice: {ExitPrice}, Fee: {Fee}",
+                        exchangeName, execution.Symbol, closeResult.ExitPrice, closeResult.TradingFee);
                     closedExchanges.Add(exchangeName);
+                    closeResults[exchangeName] = closeResult;
                 }
                 else
                 {
-                    _logger.LogWarning("ClosePositionAsync returned false for {Exchange}/{Symbol}, position may already be closed",
-                        exchangeName, execution.Symbol);
-                    closedExchanges.Add(exchangeName); // Still count as success
+                    _logger.LogWarning("ClosePositionAsync returned failure for {Exchange}/{Symbol}: {Error}",
+                        exchangeName, execution.Symbol, closeResult.ErrorMessage);
+                    closedExchanges.Add(exchangeName); // Still count as success (position may already be closed)
+                    closeResults[exchangeName] = closeResult;
                 }
             }
             catch (Exception ex)
@@ -1565,17 +1658,71 @@ public class ArbitrageExecutionService
             ExecutionState.Running,
             ExecutionState.Stopped);
 
-        // Update Position records to mark them as closed (keep them for history)
+        // Update Position records to mark them as closed and calculate P&L
         foreach (var position in positions)
         {
             position.Status = PositionStatus.Closed;
             position.ClosedAt = DateTime.UtcNow;
 
-            // Set reconciliation status to Preliminary (waiting for transactions)
-            position.ReconciliationStatus = ReconciliationStatus.Preliminary;
+            // Get close result for this position's exchange
+            if (closeResults.TryGetValue(position.Exchange, out var closeResult))
+            {
+                // Set exit price and close order ID
+                if (closeResult.ExitPrice.HasValue)
+                {
+                    position.ExitPrice = closeResult.ExitPrice.Value;
+                }
+                else
+                {
+                    // Fallback: use entry price (no price change P&L)
+                    position.ExitPrice = position.EntryPrice;
+                }
 
-            // ExitPrice and CloseOrderId will be set by reconciliation service when transactions arrive
-            // For cross-exchange, ClosePositionAsync doesn't return order IDs
+                if (!string.IsNullOrEmpty(closeResult.OrderId))
+                {
+                    position.CloseOrderId = closeResult.OrderId;
+                }
+
+                // Add exit trading fee
+                if (closeResult.TradingFee.HasValue)
+                {
+                    position.TradingFeesUsd += closeResult.TradingFee.Value;
+                }
+            }
+            else
+            {
+                // Fallback: use entry price
+                position.ExitPrice = position.EntryPrice;
+            }
+
+            // Calculate P&L now that we have ExitPrice
+            if (position.ExitPrice.HasValue)
+            {
+                // Calculate Price P&L
+                if (position.Side == PositionSide.Long)
+                {
+                    position.PricePnLUsd = (position.ExitPrice.Value - position.EntryPrice) * position.Quantity;
+                }
+                else // Short
+                {
+                    position.PricePnLUsd = (position.EntryPrice - position.ExitPrice.Value) * position.Quantity;
+                }
+
+                // Calculate Realized P&L: FundingEarned + PricePnL - TradingFees
+                position.RealizedPnLUsd = position.FundingEarnedUsd + position.PricePnLUsd - position.TradingFeesUsd;
+
+                // Calculate Realized P&L Percentage (relative to initial margin)
+                position.RealizedPnLPct = position.InitialMargin > 0
+                    ? (position.RealizedPnLUsd / position.InitialMargin) * 100
+                    : 0m;
+
+                _logger.LogInformation(
+                    "Cross-exchange Position {PositionId} ({Exchange}) P&L calculated: PricePnL=${PricePnL:F4}, Funding=${Funding:F4}, Fees=${Fees:F4}, Realized=${Realized:F4} ({Pct:F2}%)",
+                    position.Id, position.Exchange, position.PricePnLUsd, position.FundingEarnedUsd, position.TradingFeesUsd, position.RealizedPnLUsd, position.RealizedPnLPct);
+            }
+
+            // Set reconciliation status - now we have preliminary P&L
+            position.ReconciliationStatus = ReconciliationStatus.PartiallyReconciled;
         }
 
         await _dbContext.SaveChangesAsync();
@@ -1619,6 +1766,11 @@ public class ArbitrageExecutionService
 
             await _signalRStreamingService.BroadcastPositionsToUserAsync(userId, positionDtos);
             _logger.LogInformation("Broadcasted fresh positions to user {UserId} after stopping cross-exchange execution", userId);
+
+            // Also broadcast updated execution history
+            var executionHistory = await _executionHistoryService.GetExecutionHistoryAsync(userId);
+            await _signalRStreamingService.BroadcastExecutionHistoryToUserAsync(userId, executionHistory);
+            _logger.LogInformation("Broadcasted execution history ({Count} entries) to user {UserId}", executionHistory.Count, userId);
         }
 
         response.Success = true;

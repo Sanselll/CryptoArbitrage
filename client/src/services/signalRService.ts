@@ -1,5 +1,5 @@
 import * as signalR from '@microsoft/signalr';
-import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Notification, Order, Trade, Transaction } from '../types/index';
+import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Notification, Order, Trade, Transaction, ExecutionHistory } from '../types/index';
 import { notificationService } from './notificationService.tsx';
 import type { AgentStats, AgentDecision } from './apiService';
 
@@ -49,6 +49,7 @@ class SignalRService {
     onAgentStats: [] as ((data: AgentStats) => void)[],
     onAgentDecision: [] as ((data: AgentDecision) => void)[],
     onAgentError: [] as ((data: AgentErrorEvent) => void)[],
+    onExecutionHistory: [] as ((data: ExecutionHistory[]) => void)[],
   };
 
   async connect() {
@@ -137,6 +138,7 @@ class SignalRService {
     this.connection.off('ReceiveAgentStats');
     this.connection.off('ReceiveAgentDecision');
     this.connection.off('ReceiveAgentError');
+    this.connection.off('ReceiveExecutionHistory');
 
     // Register new handlers
     this.connection.on('ReceiveFundingRates', (data: FundingRate[]) => {
@@ -207,6 +209,10 @@ class SignalRService {
 
     this.connection.on('ReceiveAgentError', (data: AgentErrorEvent) => {
       this.callbacks.onAgentError.forEach(cb => cb(data));
+    });
+
+    this.connection.on('ReceiveExecutionHistory', (data: ExecutionHistory[]) => {
+      this.callbacks.onExecutionHistory.forEach(cb => cb(data));
     });
   }
 
@@ -314,6 +320,13 @@ class SignalRService {
     this.callbacks.onAgentError.push(callback);
     return () => {
       this.callbacks.onAgentError = this.callbacks.onAgentError.filter(cb => cb !== callback);
+    };
+  }
+
+  onExecutionHistory(callback: (data: ExecutionHistory[]) => void) {
+    this.callbacks.onExecutionHistory.push(callback);
+    return () => {
+      this.callbacks.onExecutionHistory = this.callbacks.onExecutionHistory.filter(cb => cb !== callback);
     };
   }
 

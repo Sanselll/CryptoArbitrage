@@ -414,3 +414,38 @@ export interface Transaction {
   createdAt: string;
   updatedAt?: string;
 }
+
+export interface ExecutionHistoryPosition {
+  id: number;
+  exchange: string;
+  type: PositionType;
+  side: PositionSide;
+  entryPrice: number;
+  exitPrice: number;
+  quantity: number;
+  leverage: number;
+  pricePnL: number;
+  fundingEarned: number;
+  tradingFees: number;
+  realizedPnL: number;
+}
+
+export interface ExecutionHistory {
+  id: number;
+  symbol: string;
+  exchange: string;
+  longExchange?: string;
+  shortExchange?: string;
+  strategy: StrategySubType;
+  positionSizeUsd: number;
+  totalPricePnL: number;
+  totalFundingEarned: number;
+  totalTradingFees: number;
+  totalPnL: number;
+  totalPnLPct: number;
+  startedAt: string;
+  closedAt: string;
+  durationSeconds: number;
+  state: ExecutionState;
+  positions: ExecutionHistoryPosition[];
+}

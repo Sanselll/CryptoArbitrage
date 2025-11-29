@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Order, Trade, Transaction } from '../types/index';
+import type { FundingRate, Position, ArbitrageOpportunity, AccountBalance, Order, Trade, Transaction, ExecutionHistory } from '../types/index';
 import { signalRService } from '../services/signalRService';
 import type { AgentStats, AgentDecision, AgentConfig } from '../services/apiService';
 
@@ -15,6 +15,8 @@ interface AgentState {
   decisions: AgentDecision[];
 }
 
+export type ExecutionHistoryFilter = 'today' | '7days' | '30days' | 'all';
+
 interface ArbitrageState {
   fundingRates: FundingRate[];
   positions: Position[];
@@ -24,6 +26,8 @@ interface ArbitrageState {
   orderHistory: Order[];
   tradeHistory: Trade[];
   transactionHistory: Transaction[];
+  executionHistory: ExecutionHistory[];
+  executionHistoryFilter: ExecutionHistoryFilter;
   totalPnL: number;
   todayPnL: number;
   isConnected: boolean;
@@ -40,6 +44,8 @@ interface ArbitrageState {
   setOrderHistory: (orders: Order[]) => void;
   setTradeHistory: (trades: Trade[]) => void;
   setTransactionHistory: (transactions: Transaction[]) => void;
+  setExecutionHistory: (history: ExecutionHistory[]) => void;
+  setExecutionHistoryFilter: (filter: ExecutionHistoryFilter) => void;
   setPnL: (totalPnL: number, todayPnL: number) => void;
   setConnected: (connected: boolean) => void;
   connect: () => Promise<void>;
@@ -64,6 +70,8 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
   orderHistory: [],
   tradeHistory: [],
   transactionHistory: [],
+  executionHistory: [],
+  executionHistoryFilter: 'all',
   totalPnL: 0,
   todayPnL: 0,
   isConnected: false,
@@ -124,6 +132,12 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
     });
     return { transactionHistory: Array.from(existingMap.values()) };
   }),
+
+  // Set execution history (replace entirely since it comes from database)
+  setExecutionHistory: (history) => set({ executionHistory: history }),
+
+  // Set execution history filter
+  setExecutionHistoryFilter: (filter) => set({ executionHistoryFilter: filter }),
 
   setPnL: (totalPnL, todayPnL) => set({ totalPnL, todayPnL }),
   setConnected: (connected) => set({ isConnected: connected }),
@@ -237,6 +251,9 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
         signalRService.onAgentError((data) => {
           useArbitrageStore.getState().setAgentError(data.error);
         }),
+        signalRService.onExecutionHistory((data) => {
+          useArbitrageStore.getState().setExecutionHistory(data);
+        }),
       ];
 
       set({ isConnected: true, unsubscribe: cleanupFunctions });
@@ -276,6 +293,8 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
       orderHistory: [],
       tradeHistory: [],
       transactionHistory: [],
+      executionHistory: [],
+      executionHistoryFilter: 'all',
       totalPnL: 0,
       todayPnL: 0,
       isConnected: false,

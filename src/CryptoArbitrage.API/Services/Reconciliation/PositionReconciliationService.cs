@@ -82,9 +82,11 @@ public class PositionReconciliationService
                 result.FundingFeeReceived = fundingResults.FeesReceived;
             }
 
-            // Step 3: Fees are now calculated on-the-fly from PositionTransaction table (no storage needed)
+            // Step 3: Always update FundingEarnedUsd and TradingFeesUsd from linked transactions
+            // This ensures open positions show accumulated funding fees
+            UpdateFeeFieldsFromTransactions(position, dbContext);
 
-            // Step 4: Calculate and persist P&L breakdown for closed positions
+            // Step 4: Calculate and persist full P&L breakdown for closed positions
             if (position.Status == PositionStatus.Closed && position.ClosedAt.HasValue && position.ExitPrice.HasValue)
             {
                 CalculateAndPersistPnL(position, dbContext);
@@ -344,6 +346,38 @@ public class PositionReconciliationService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Update FundingEarnedUsd and TradingFeesUsd fields from linked transactions
+    /// Called for both open and closed positions to keep fee fields up to date
+    /// </summary>
+    private void UpdateFeeFieldsFromTransactions(Position position, ArbitrageDbContext dbContext)
+    {
+        // Get all linked transactions for this position
+        var linkedTransactions = dbContext.PositionTransactions
+            .Where(pt => pt.PositionId == position.Id)
+            .ToList();
+
+        // Calculate Funding Earned (sum of all funding fees)
+        // Positive SignedFee = received funding (longs receive when funding is positive)
+        // Negative SignedFee = paid funding (shorts pay when funding is positive)
+        var fundingEarnedUsd = linkedTransactions
+            .Where(t => t.TransactionType == TransactionType.FundingFee)
+            .Sum(t => t.SignedFee ?? 0);
+
+        // Calculate Trading Fees (sum of all commissions/trading fees)
+        var tradingFeesUsd = linkedTransactions
+            .Where(t => t.TransactionType == TransactionType.Commission || t.TransactionType == TransactionType.Trade)
+            .Sum(t => t.Fee);
+
+        // Update position fields
+        position.FundingEarnedUsd = fundingEarnedUsd;
+        position.TradingFeesUsd = tradingFeesUsd;
+
+        _logger.LogDebug(
+            "Updated fee fields for Position {PositionId}: FundingEarned=${Funding:F4}, TradingFees=${Fees:F4}",
+            position.Id, fundingEarnedUsd, tradingFeesUsd);
     }
 
     /// <summary>

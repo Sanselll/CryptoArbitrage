@@ -76,4 +76,9 @@ public interface ISignalRStreamingService
     /// Broadcast agent decision to a specific user
     /// </summary>
     Task BroadcastAgentDecisionAsync(string userId, object decision, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcast execution history to a specific user
+    /// </summary>
+    Task BroadcastExecutionHistoryToUserAsync(string userId, List<ExecutionHistoryDto> history, CancellationToken cancellationToken = default);
 }

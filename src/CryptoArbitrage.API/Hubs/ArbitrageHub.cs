@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 using System.Security.Claims;
 using CryptoArbitrage.API.Models;
 using CryptoArbitrage.API.Models.DataCollection;
+using CryptoArbitrage.API.Services;
 using CryptoArbitrage.API.Services.DataCollection.Abstractions;
 
 namespace CryptoArbitrage.API.Hubs;
@@ -24,6 +25,7 @@ public class ArbitrageHub : Hub
     private readonly IDataRepository<List<OrderDto>> _orderRepository;
     private readonly IDataRepository<List<TradeDto>> _tradeRepository;
     private readonly IDataRepository<List<TransactionDto>> _transactionRepository;
+    private readonly IExecutionHistoryService _executionHistoryService;
 
     public ArbitrageHub(
         ILogger<ArbitrageHub> logger,
@@ -32,7 +34,8 @@ public class ArbitrageHub : Hub
         IDataRepository<ArbitrageOpportunityDto> opportunityRepository,
         IDataRepository<List<OrderDto>> orderRepository,
         IDataRepository<List<TradeDto>> tradeRepository,
-        IDataRepository<List<TransactionDto>> transactionRepository)
+        IDataRepository<List<TransactionDto>> transactionRepository,
+        IExecutionHistoryService executionHistoryService)
     {
         _logger = logger;
         _fundingRateRepository = fundingRateRepository;
@@ -41,6 +44,7 @@ public class ArbitrageHub : Hub
         _orderRepository = orderRepository;
         _tradeRepository = tradeRepository;
         _transactionRepository = transactionRepository;
+        _executionHistoryService = executionHistoryService;
     }
 
     /// <summary>
@@ -177,6 +181,14 @@ public class ArbitrageHub : Hub
                 var transactionHistory = transactionHistoryDict.Values.SelectMany(list => list).ToList();
                 await Clients.Caller.SendAsync("ReceiveTransactionHistory", transactionHistory);
                 _logger.LogDebug("Sent {Count} cached transaction history to user {UserId}", transactionHistory.Count, userId);
+            }
+
+            // Broadcast execution history (from database, not cache)
+            var executionHistory = await _executionHistoryService.GetExecutionHistoryAsync(userId);
+            if (executionHistory.Any())
+            {
+                await Clients.Caller.SendAsync("ReceiveExecutionHistory", executionHistory);
+                _logger.LogDebug("Sent {Count} execution history to user {UserId}", executionHistory.Count, userId);
             }
 
             var totalTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
@@ -323,5 +335,18 @@ public class ArbitrageHub : Hub
     {
         await Clients.Group($"user_{userId}").SendAsync("ReceiveAgentError",
             new { error, timestamp = DateTime.UtcNow });
+    }
+
+    // ============================================================================
+    // EXECUTION HISTORY BROADCAST METHODS
+    // ============================================================================
+
+    /// <summary>
+    /// Broadcasts execution history to a SPECIFIC USER ONLY.
+    /// Called when an execution is closed/stopped.
+    /// </summary>
+    public async Task SendExecutionHistory(string userId, List<ExecutionHistoryDto> history)
+    {
+        await Clients.Group($"user_{userId}").SendAsync("ReceiveExecutionHistory", history);
     }
 }

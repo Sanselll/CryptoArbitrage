@@ -761,10 +761,12 @@ public class BinanceConnector : IExchangeConnector
         }
     }
 
-    public async Task<bool> ClosePositionAsync(string symbol)
+    public async Task<ClosePositionResult> ClosePositionAsync(string symbol)
     {
         if (_restClient == null)
             throw new InvalidOperationException("Not connected to Binance");
+
+        var result = new ClosePositionResult();
 
         try
         {
@@ -772,29 +774,77 @@ public class BinanceConnector : IExchangeConnector
 
             if (positions.Success && positions.Data != null)
             {
+                decimal totalFilledQty = 0;
+                decimal weightedPrice = 0;
+                decimal totalFee = 0;
+
                 foreach (var position in positions.Data.Where(p => p.Quantity != 0))
                 {
                     var orderSide = position.Quantity > 0 ? BinanceOrderSide.Sell : BinanceOrderSide.Buy;
                     var quantity = Math.Abs(position.Quantity);
 
-                    await _restClient.UsdFuturesApi.Trading.PlaceOrderAsync(
+                    var orderResult = await _restClient.UsdFuturesApi.Trading.PlaceOrderAsync(
                         symbol,
                         orderSide,
                         FuturesOrderType.Market,
                         quantity,
                         positionSide: position.PositionSide
                     );
+
+                    if (orderResult.Success && orderResult.Data != null)
+                    {
+                        result.OrderId = orderResult.Data.Id.ToString();
+
+                        // Get order details to retrieve fill price
+                        await Task.Delay(500); // Small delay for order to settle
+                        var orderDetails = await _restClient.UsdFuturesApi.Trading.GetOrderAsync(
+                            symbol,
+                            orderResult.Data.Id
+                        );
+
+                        if (orderDetails.Success && orderDetails.Data != null)
+                        {
+                            var order = orderDetails.Data;
+                            var filledQty = order.QuantityFilled;
+                            var avgPrice = order.AveragePrice;
+
+                            if (filledQty > 0 && avgPrice > 0)
+                            {
+                                totalFilledQty += filledQty;
+                                weightedPrice += avgPrice * filledQty;
+
+                                // Estimate fee: taker fee is typically 0.04% for Binance futures
+                                var orderFee = filledQty * avgPrice * 0.0004m;
+                                totalFee += orderFee;
+
+                                _logger.LogInformation(
+                                    "Binance ClosePosition: Filled {Qty} @ {Price}, Fee: {Fee}",
+                                    filledQty, avgPrice, orderFee);
+                            }
+                        }
+                    }
                 }
 
-                return true;
+                if (totalFilledQty > 0)
+                {
+                    result.Success = true;
+                    result.ExitPrice = weightedPrice / totalFilledQty;
+                    result.FilledQuantity = totalFilledQty;
+                    result.TradingFee = totalFee;
+                }
+                else
+                {
+                    result.Success = true; // Position might have already been closed
+                }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error closing position on Binance");
+            result.ErrorMessage = ex.Message;
         }
 
-        return false;
+        return result;
     }
 
     public async Task<List<PositionDto>> GetOpenPositionsAsync()

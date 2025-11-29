@@ -377,6 +377,7 @@ builder.Services.AddSingleton<ConnectorManager>();
 builder.Services.AddScoped<ArbitrageExecutionService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<PositionReconciliationService>();
+builder.Services.AddScoped<IExecutionHistoryService, ExecutionHistoryService>();
 
 // DISABLED: ArbitrageEngineService - Now using event-driven data collection services
 // The new architecture uses FundingRateCollectionBackgroundService, MarketPriceCollectionBackgroundService,
