@@ -15,12 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true
-
-      - name: Pull LFS files
-        run: |
-          git lfs pull
-          git lfs ls-files
+          lfs: false
 
       - name: Free up disk space
         run: |
@@ -49,12 +44,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify LFS files
+      - name: Verify model files
         run: |
-          echo "Checking LFS files..."
-          ls -lh ml_pipeline/trained_models/rl/*.pt
-          echo "Total size of models:"
-          du -sh ml_pipeline/trained_models/
+          echo "Checking model files..."
+          ls -lh ml_pipeline/trained_models/rl/
 
       - name: Build and push ML API image
         uses: docker/build-push-action@v5
