@@ -545,38 +545,15 @@ public class AgentBackgroundService : BackgroundService
 
                         if (execPositions.Any())
                         {
-                            // Calculate total P&L from both long and short positions
-                            // CRITICAL FIX: Include ALL P&L components (price + funding - fees)
-                            // Get funding from PositionTransaction table (same source as frontend)
-                            // Formula: TotalPnL = UnrealizedPnL + NetFunding - TradingFees
-                            var totalPnl = execPositions.Sum(p =>
-                            {
-                                // Calculate net funding from PositionTransaction (single source of truth)
-                                var fundingReceived = p.Transactions
-                                    .Where(t => t.TransactionType == TransactionType.FundingFee && (t.SignedFee ?? 0) > 0)
-                                    .Sum(t => t.SignedFee ?? 0m);
-                                var fundingPaid = p.Transactions
-                                    .Where(t => t.TransactionType == TransactionType.FundingFee && (t.SignedFee ?? 0) < 0)
-                                    .Sum(t => Math.Abs(t.SignedFee ?? 0m));
-                                var netFunding = fundingReceived - fundingPaid;
-
-                                // Use TradingFeesUsd from Position (calculated at open/close)
-                                // For active positions, estimate exit fee (same as entry fee)
-                                decimal takerFeeRate = p.Exchange.ToLower() switch
-                                {
-                                    "binance" => 0.0004m,
-                                    "bybit" => 0.00055m,
-                                    _ => 0.0005m
-                                };
-                                var estimatedExitFee = p.EntryPrice * p.Quantity * takerFeeRate;
-                                var totalFees = p.TradingFeesUsd + estimatedExitFee; // entry + estimated exit
-
-                                return p.UnrealizedPnL + netFunding - totalFees;
-                            });
+                            // After EXIT, positions have RealizedPnLUsd populated by ArbitrageExecutionService
+                            // RealizedPnLUsd = FundingEarnedUsd + PricePnLUsd - TradingFeesUsd
+                            // This is the single source of truth for closed position P&L
+                            var totalPnl = execPositions
+                                .Where(p => p.Status == PositionStatus.Closed)
+                                .Sum(p => p.RealizedPnLUsd);
                             var totalInitialMargin = execPositions.Sum(p => p.InitialMargin);
 
                             result.ProfitUsd = totalPnl;
-                            // Use InitialMargin (capital at risk) as denominator, not entryValue
                             result.ProfitPct = totalInitialMargin > 0 ? (totalPnl / totalInitialMargin) * 100 : 0;
 
                             _logger.LogInformation(

@@ -1616,7 +1616,7 @@ public class BinanceConnector : IExchangeConnector
         return trades;
     }
 
-    public async Task<List<TransactionDto>> GetTransactionsAsync(DateTime? startTime = null, DateTime? endTime = null, int limit = 100)
+    public async Task<List<TransactionDto>> GetTransactionsAsync(DateTime? startTime = null, DateTime? endTime = null, int limit = 1000)
     {
         if (_restClient == null)
             throw new InvalidOperationException("Not connected to Binance");

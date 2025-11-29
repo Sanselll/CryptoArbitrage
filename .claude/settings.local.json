@@ -337,7 +337,8 @@
       "Bash(timeout 10 python:*)",
       "Bash(gtimeout 10 python:*)",
       "Bash(git stash:*)",
-      "Bash(git push)"
+      "Bash(git push)",
+      "WebFetch(domain:developers.binance.com)"
     ],
     "deny": [],
     "ask": []

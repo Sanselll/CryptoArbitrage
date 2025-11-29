@@ -110,8 +110,8 @@ public class TransactionHistoryCollector : IDataCollector<List<TransactionDto>, 
                         return ((string?)null, (List<TransactionDto>?)null);
                     }
 
-                    // Fetch transaction history
-                    List<TransactionDto> transactions = await connector.GetTransactionsAsync(startTime, endTime, 100);
+                    // Fetch transaction history (1000 to ensure we get all transactions including funding fees)
+                    List<TransactionDto> transactions = await connector.GetTransactionsAsync(startTime, endTime, 1000);
 
                     var key = $"transactionhistory:{apiKey.UserId}:{apiKey.ExchangeName}";
 
