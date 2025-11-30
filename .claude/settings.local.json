@@ -338,7 +338,8 @@
       "Bash(gtimeout 10 python:*)",
       "Bash(git stash:*)",
       "Bash(git push)",
-      "WebFetch(domain:developers.binance.com)"
+      "WebFetch(domain:developers.binance.com)",
+      "Bash(ssh root@139.59.153.110 \"docker cp crypto-arbitrage-ml-api-prod:/app/server/ml_decisions.log -\")"
     ],
     "deny": [],
     "ask": []

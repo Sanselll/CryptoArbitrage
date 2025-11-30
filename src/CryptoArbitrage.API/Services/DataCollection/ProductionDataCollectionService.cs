@@ -216,7 +216,11 @@ public class ProductionDataCollectionService : BackgroundService
     }
 
     /// <summary>
-    /// Determines if a funding payment occurs within the collection interval window
+    /// Determines if a funding payment occurs within the NEXT collection interval window.
+    /// We record the funding rate in the interval BEFORE payment so the data is available
+    /// when the payment actually happens.
+    /// Example: At 17:55, NextFundingTime=18:00 → returns TRUE (record rate now, payment in next interval)
+    ///          At 18:04, NextFundingTime=19:00 → returns FALSE (payment is far in future)
     /// </summary>
     private static bool IsFundingPaidInInterval(DateTime nextFundingTime, DateTime collectionTime, int intervalMinutes)
     {
@@ -232,8 +236,12 @@ public class ProductionDataCollectionService : BackgroundService
 
         var intervalEnd = intervalStart.AddMinutes(intervalMinutes);
 
-        // Check if NextFundingTime falls within [intervalStart, intervalEnd)
-        return nextFundingTime >= intervalStart && nextFundingTime < intervalEnd;
+        // Check if NextFundingTime falls within the NEXT interval [intervalEnd, intervalEnd + intervalMinutes)
+        // This records the rate in the interval BEFORE payment occurs
+        var nextIntervalStart = intervalEnd;
+        var nextIntervalEnd = nextIntervalStart.AddMinutes(intervalMinutes);
+
+        return nextFundingTime >= nextIntervalStart && nextFundingTime < nextIntervalEnd;
     }
 
     private static DateTime GetNextIntervalTime(DateTime now, int intervalMinutes)
