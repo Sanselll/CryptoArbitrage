@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 import requests
 import json
+import uuid
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -122,8 +123,13 @@ class MLAPIClient:
         self.session = requests.Session()
         self.session.headers.update({'Content-Type': 'application/json'})
 
+        # Generate session_id for velocity tracking (matches production behavior)
+        # Production sends SessionId via RLPredictionService.cs:83
+        self.session_id = str(uuid.uuid4())
+
         print(f"   ML API Client initialized")
         print(f"   URL: {self.full_url}")
+        print(f"   Session ID: {self.session_id}")
 
     def sanitize_for_json(self, obj):
         """
@@ -288,6 +294,10 @@ class MLAPIClient:
         """
         # Get raw data from environment (CRITICAL: use env's exact internal state)
         raw_data = env.get_raw_state_for_ml_api()
+
+        # Inject session_id for velocity tracking (matches production behavior)
+        # Without session_id, ML API uses default_builder with velocity tracking disabled
+        raw_data['portfolio']['session_id'] = self.session_id
 
         # Sanitize data for JSON serialization (replace inf/nan with safe values)
         raw_data = self.sanitize_for_json(raw_data)

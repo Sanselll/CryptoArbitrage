@@ -46,13 +46,34 @@ public class ProductionDataCollectionService : BackgroundService
         // Wait for initial startup
         await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
 
+        // Track scheduled time to prevent drift
+        DateTime? lastScheduledRun = null;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // Calculate time until next collection interval
+                // Calculate next interval based on last scheduled run (not current time)
+                // This prevents drift caused by collection duration
                 var now = DateTime.UtcNow;
-                var nextRun = GetNextIntervalTime(now, _intervalMinutes);
+                DateTime nextRun;
+
+                if (lastScheduledRun.HasValue)
+                {
+                    // Next run is exactly 5 minutes after last scheduled run
+                    nextRun = lastScheduledRun.Value.AddMinutes(_intervalMinutes);
+
+                    // If we've fallen behind (e.g., after restart), catch up to next future interval
+                    if (nextRun <= now)
+                    {
+                        nextRun = GetNextIntervalTime(now, _intervalMinutes);
+                    }
+                }
+                else
+                {
+                    nextRun = GetNextIntervalTime(now, _intervalMinutes);
+                }
+
                 var delay = nextRun - now;
 
                 if (delay.TotalMilliseconds > 0)
@@ -63,6 +84,9 @@ public class ProductionDataCollectionService : BackgroundService
 
                     await Task.Delay(delay, stoppingToken);
                 }
+
+                // Record the scheduled time BEFORE collection starts
+                lastScheduledRun = nextRun;
 
                 // Collect snapshot
                 await CollectSnapshotAsync(stoppingToken);

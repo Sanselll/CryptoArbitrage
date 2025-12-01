@@ -105,6 +105,14 @@ public class PositionRawData
     // Risk
     [JsonPropertyName("liquidation_distance")]
     public decimal LiquidationDistance { get; set; } = 1.0m;
+
+    // Estimated funding rates (from opportunity data - same source as training)
+    // Used for feature calculation: estimated_funding_8h_pct
+    [JsonPropertyName("estimated_long_funding_rate")]
+    public decimal EstimatedLongFundingRate { get; set; }
+
+    [JsonPropertyName("estimated_short_funding_rate")]
+    public decimal EstimatedShortFundingRate { get; set; }
 }
 
 /// <summary>

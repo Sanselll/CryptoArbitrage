@@ -404,6 +404,13 @@ public class RLPredictionService
 
             var currentApr = currentOpp?.FundApr ?? (longPosition.LastKnownApr != 0 ? longPosition.LastKnownApr : longPosition.EntryApr);
 
+            // Get estimated funding rates from matching opportunity
+            // In training, this comes from opportunity CSV via _get_funding_rates_from_opportunities()
+            // Both sources (opportunity CSV in training, ArbitrageOpportunityDto here) contain
+            // the funding rate at opportunity detection time
+            decimal estimatedLongRate = currentOpp?.LongFundingRate ?? 0m;
+            decimal estimatedShortRate = currentOpp?.ShortFundingRate ?? 0m;
+
             // Get funding interval hours from position data (stored when position was opened)
             var longFundingIntervalHours = (int)longPosition.LongFundingIntervalHours;
             var shortFundingIntervalHours = (int)shortPosition.ShortFundingIntervalHours;
@@ -516,7 +523,11 @@ public class RLPredictionService
                 CurrentPositionApr = currentApr,
 
                 // Risk
-                LiquidationDistance = minLiqDistance
+                LiquidationDistance = minLiqDistance,
+
+                // Estimated funding rates (from opportunity - same as training)
+                EstimatedLongFundingRate = estimatedLongRate,
+                EstimatedShortFundingRate = estimatedShortRate
             });
         }
 
