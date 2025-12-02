@@ -65,7 +65,7 @@ class ModularRLPredictor:
 
     def __init__(
         self,
-        model_path: str = 'trained_models/rl/v4_ep1350.pt',
+        model_path: str = 'trained_models/rl/v5_ep1850.pt',
         feature_scaler_path: str = 'trained_models/rl/feature_scaler_v2.pkl',
         device: str = 'cpu'
     ):

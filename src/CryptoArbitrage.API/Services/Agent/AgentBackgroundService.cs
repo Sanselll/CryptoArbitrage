@@ -147,17 +147,23 @@ public class AgentBackgroundService : BackgroundService
     }
 
     /// <summary>
-    /// Main agent loop for a single user
+    /// Main agent loop for a single user.
+    /// Predictions are aligned to clock boundaries (e.g., 8:00, 8:05, 8:10) to match
+    /// ProductionDataCollectionService timing for consistent data snapshots.
     /// </summary>
     private async Task RunAgentLoopAsync(string userId, AgentConfiguration config, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Agent loop started for user {UserId}", userId);
 
         var predictionIntervalSeconds = config.PredictionIntervalSeconds;
+        var intervalMinutes = predictionIntervalSeconds / 60;
         var predictionCount = 0;
 
-        _logger.LogInformation("Using prediction interval: {Interval} seconds ({Minutes} minutes)",
-            predictionIntervalSeconds, predictionIntervalSeconds / 60.0);
+        _logger.LogInformation("Using prediction interval: {Interval} seconds ({Minutes} minutes), aligned to clock boundaries",
+            predictionIntervalSeconds, intervalMinutes);
+
+        // Track scheduled time to prevent drift (same pattern as ProductionDataCollectionService)
+        DateTime? lastScheduledRun = null;
 
         try
         {
@@ -165,12 +171,42 @@ public class AgentBackgroundService : BackgroundService
             {
                 try
                 {
+                    // Calculate next interval aligned to clock (e.g., 8:00, 8:05, 8:10)
+                    var now = DateTime.UtcNow;
+                    DateTime nextRun;
+
+                    if (lastScheduledRun.HasValue)
+                    {
+                        // Next run is exactly N minutes after last scheduled run
+                        nextRun = lastScheduledRun.Value.AddMinutes(intervalMinutes);
+
+                        // If we've fallen behind (e.g., after restart), catch up to next future interval
+                        if (nextRun <= now)
+                        {
+                            nextRun = GetNextIntervalTime(now, intervalMinutes);
+                        }
+                    }
+                    else
+                    {
+                        nextRun = GetNextIntervalTime(now, intervalMinutes);
+                    }
+
+                    var delay = nextRun - now;
+
+                    if (delay.TotalMilliseconds > 0)
+                    {
+                        _logger.LogDebug("Next prediction at {NextRun} (in {Delay})",
+                            nextRun.ToString("HH:mm:ss"), delay.ToString(@"mm\:ss"));
+
+                        await Task.Delay(delay, cancellationToken);
+                    }
+
+                    // Record the scheduled time BEFORE prediction starts
+                    lastScheduledRun = nextRun;
+
                     // Run one prediction cycle
                     await RunPredictionCycleAsync(userId, config, cancellationToken);
                     predictionCount++;
-
-                    // Wait for next cycle
-                    await Task.Delay(TimeSpan.FromSeconds(predictionIntervalSeconds), cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -888,6 +924,27 @@ public class AgentBackgroundService : BackgroundService
         {
             _logger.LogError(ex, "Error broadcasting agent update for user {UserId}", userId);
         }
+    }
+
+    /// <summary>
+    /// Calculate next interval time aligned to clock boundaries (e.g., 8:00, 8:05, 8:10 for 5-min intervals).
+    /// Matches ProductionDataCollectionService timing to ensure predictions use fresh data snapshots.
+    /// </summary>
+    private static DateTime GetNextIntervalTime(DateTime now, int intervalMinutes)
+    {
+        // Calculate minutes into the current hour (round up if there are seconds)
+        var currentMinute = now.Minute + (now.Second > 0 ? 1 : 0);
+
+        // Find NEXT interval (always future, never current)
+        var nextIntervalMinute = ((currentMinute / intervalMinutes) + 1) * intervalMinutes;
+
+        if (nextIntervalMinute >= 60)
+        {
+            return new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc)
+                .AddHours(1);
+        }
+
+        return new DateTime(now.Year, now.Month, now.Day, now.Hour, nextIntervalMinute, 0, DateTimeKind.Utc);
     }
 
     /// <summary>

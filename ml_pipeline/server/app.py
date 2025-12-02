@@ -87,12 +87,12 @@ def initialize_predictor():
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='trained_models/rl/v4_ep1350.pt',
+                model_path='trained_models/rl/v5_ep1850.pt',
                 device='cpu'
             )
             print("✅ RL predictor initialized successfully")
             print("   Architecture: Unified Feature Builder (203 dims)")
-            print("   Model: trained_models/rl/v4_ep1350.pt")
+            print("   Model: trained_models/rl/v5_ep1850.pt")
             print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
             print("   Features: 5 config + 3 portfolio + 85 executions + 110 opportunities")
             print(f"   Confidence thresholds: ENTER >= {ENTER_CONFIDENCE_THRESHOLD:.0%}, EXIT >= {EXIT_CONFIDENCE_THRESHOLD:.0%}")
