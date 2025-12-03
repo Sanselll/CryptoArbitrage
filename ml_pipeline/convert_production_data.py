@@ -115,11 +115,14 @@ def convert_opportunities_to_csv(snapshots):
     """
     Convert opportunities from snapshots to CSV format matching rl_opportunities.csv
 
+    Filters out opportunities with zero APR values (data quality issue).
+
     Returns:
         list of dict: Opportunities in CSV format
     """
     opportunities = []
     invalid_funding_count = 0
+    zero_apr_count = 0
 
     for snapshot in snapshots:
         timestamp = pd.to_datetime(snapshot['timestamp'])
@@ -197,10 +200,21 @@ def convert_opportunities_to_csv(snapshots):
                 )
                 invalid_funding_count += 1
 
+            # Filter out opportunities with zero APR (data quality issue)
+            # Skip if fund_apr is 0 - this is the primary APR used for decisions
+            fund_apr = row.get('fund_apr', 0.0)
+
+            if fund_apr == 0.0:
+                zero_apr_count += 1
+                continue  # Skip this opportunity
+
             opportunities.append(row)
 
     if invalid_funding_count > 0:
         print(f"  ⚠️  Fixed {invalid_funding_count} invalid funding times")
+
+    if zero_apr_count > 0:
+        print(f"  ⚠️  Filtered out {zero_apr_count} opportunities with zero APR")
 
     return opportunities
 

@@ -255,33 +255,60 @@ class FundingArbitrageEnv(gym.Env):
 
         return apr * quality_multiplier
 
+    def is_in_funding_recalc_window(self) -> bool:
+        """
+        Check if current_time is in funding rate recalculation window.
+
+        Funding rates are unreliable during:
+        - 5 minutes before hour end (XX:55-XX:59)
+        - 10 minutes after hour start (XX:00-XX:10)
+
+        During this window, predictions should be skipped (force HOLD)
+        but P&L calculations should still continue.
+
+        Returns:
+            True if in skip window, False otherwise
+        """
+        if self.current_time is None:
+            return False
+        minute = self.current_time.minute
+        return minute >= 55 or minute <= 10
+
     def _select_top_opportunities(self, all_opps: List[Dict], n: int = 10) -> List[Dict]:
         """
-        Select top N opportunities by raw APR (MATCHES PRODUCTION BEHAVIOR).
+        Select top N opportunities by raw APR, ensuring position opportunities are always included.
 
-        Production (AgentBackgroundService.cs:257) sorts by raw FundApr:
-            .OrderByDescending(o => o.FundApr).Take(7)
+        CRITICAL: Position opportunities MUST be included so current_position_apr lookup works.
+        If a position's symbol is not in top N by APR, we include it anyway by removing
+        the lowest-APR opportunities to make room.
 
-        Training MUST match this to see the same APR distribution!
-        Previously used composite score (APR × quality), which filtered out
-        high-APR low-quality opportunities that production actually sees.
+        Production (AgentBackgroundService.cs) matches this behavior.
 
         Args:
             all_opps: List of all available opportunities
             n: Number of opportunities to select
 
         Returns:
-            Top N opportunities by highest APR (or all if fewer than N available)
+            Top N opportunities with position opportunities guaranteed to be included
         """
         if len(all_opps) == 0:
             return []
 
-        # Sort by raw APR only (matches production exactly)
-        # Use fund_apr directly, not composite score
-        sorted_opps = sorted(all_opps, key=lambda opp: opp.get('fund_apr', 0), reverse=True)
+        # Get symbols from open positions
+        position_symbols = {pos.symbol for pos in self.portfolio.positions}
 
-        # Return top N
-        return sorted_opps[:n]
+        # Separate opportunities: those matching positions vs others
+        position_opps = [opp for opp in all_opps if opp.get('symbol') in position_symbols]
+        other_opps = [opp for opp in all_opps if opp.get('symbol') not in position_symbols]
+
+        # Sort others by APR (descending)
+        other_opps.sort(key=lambda opp: opp.get('fund_apr', 0), reverse=True)
+
+        # Build final list: position opps first, then fill remaining slots
+        remaining_slots = max(0, n - len(position_opps))
+        result = position_opps + other_opps[:remaining_slots]
+
+        return result
 
     def _get_action_mask(self) -> np.ndarray:
         """

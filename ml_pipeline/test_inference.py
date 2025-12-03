@@ -743,8 +743,16 @@ def test_model_inference(args):
             else:
                 action_mask = None
 
+            # Check if we should skip prediction during funding recalculation window
+            # Funding rates are unreliable during XX:55-XX:59 and XX:00-XX:10
+            skip_prediction = env.is_in_funding_recalc_window() if hasattr(env, 'is_in_funding_recalc_window') else False
+
+            if skip_prediction:
+                # Force HOLD during funding recalculation window
+                action = 0
+                confidence = 0.0
             # Select action (deterministic)
-            if args.api_mode:
+            elif args.api_mode:
                 # Use API client (passes env, obs and mask are ignored by API)
                 action, _, _ = predictor.select_action(env, obs, action_mask)
                 # Get confidence from last API response

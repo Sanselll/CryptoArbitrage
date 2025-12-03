@@ -257,23 +257,42 @@ public class AgentBackgroundService : BackgroundService
 
         var allOpportunities = opportunitiesDict.Values.ToList();
 
-        // Simple selection: Sort by raw APR, take top 10 (matches training exactly)
-        var userOpportunities = allOpportunities
-            .OrderByDescending(o => o.FundApr)
-            .Take(10)
+        // 2. Get current positions FIRST (needed to ensure position opportunities are included)
+        var positions = await GetPositionsFromRepositoryAsync(userId, userDataRepository, cancellationToken);
+
+        // Get unique symbols from open positions (group by ExecutionId to get unique symbols)
+        var positionSymbols = positions
+            .Select(p => p.Symbol)
+            .Distinct()
+            .ToHashSet();
+
+        // Find opportunities matching open positions
+        var positionOpportunities = allOpportunities
+            .Where(o => positionSymbols.Contains(o.Symbol))
+            .GroupBy(o => o.Symbol)
+            .Select(g => g.OrderByDescending(o => o.FundApr).First()) // Best APR per symbol
             .ToList();
 
-        _logger.LogInformation("Selected top 10 opportunities by FundApr (matches test_inference.py): {Total} total → {Selected} selected",
-            allOpportunities.Count, userOpportunities.Count);
+        // Get remaining opportunities (excluding position symbols) sorted by APR
+        var otherOpportunities = allOpportunities
+            .Where(o => !positionSymbols.Contains(o.Symbol))
+            .OrderByDescending(o => o.FundApr)
+            .ToList();
+
+        // Build final list: position opportunities first, then fill remaining slots with top APR opportunities
+        var remainingSlots = Math.Max(0, 10 - positionOpportunities.Count);
+        var userOpportunities = positionOpportunities
+            .Concat(otherOpportunities.Take(remainingSlots))
+            .ToList();
+
+        _logger.LogInformation("Selected opportunities: {Total} total → {Selected} selected ({PositionOpps} for positions, {OtherOpps} top APR)",
+            allOpportunities.Count, userOpportunities.Count, positionOpportunities.Count, Math.Min(remainingSlots, otherOpportunities.Count));
 
         if (userOpportunities.Count == 0)
         {
             _logger.LogDebug("No CFFF opportunities available for user {UserId}", userId);
             return;
         }
-
-        // 2. Get current positions from repository (real-time positions from UserDataCollector)
-        var positions = await GetPositionsFromRepositoryAsync(userId, userDataRepository, cancellationToken);
 
         var numExecutionsForLogging = positions.Select(p => p.ExecutionId).Distinct().Count();
 

@@ -87,12 +87,12 @@ def initialize_predictor():
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='trained_models/rl/v5_ep1850.pt',
+                model_path='trained_models/rl/v5.3_ep1850.pt',
                 device='cpu'
             )
             print("✅ RL predictor initialized successfully")
             print("   Architecture: Unified Feature Builder (203 dims)")
-            print("   Model: trained_models/rl/v5_ep1850.pt")
+            print("   Model: trained_models/rl/v5.3_ep1850.pt")
             print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
             print("   Features: 5 config + 3 portfolio + 85 executions + 110 opportunities")
             print(f"   Confidence thresholds: ENTER >= {ENTER_CONFIDENCE_THRESHOLD:.0%}, EXIT >= {EXIT_CONFIDENCE_THRESHOLD:.0%}")
@@ -585,6 +585,26 @@ def predict():
     try:
         if rl_predictor is None:
             return jsonify({'error': 'RL predictor not initialized'}), 503
+
+        # Check if we should skip prediction during funding recalculation window
+        # Funding rates are unreliable during XX:55-XX:59 and XX:00-XX:10
+        now = datetime.utcnow()
+        minute = now.minute
+        if minute >= 55 or minute <= 10:
+            skip_response = {
+                'action': 'HOLD',
+                'action_id': 0,
+                'confidence': 0.0,
+                'state_value': 0.0,
+                'reason': f'Skipped prediction during funding recalculation window (minute={minute})',
+                'model_info': {
+                    'skipped': True,
+                    'skip_reason': 'funding_recalc_window'
+                }
+            }
+            # Log the skip decision
+            log_raw_decision({}, skip_response, user_id=None)
+            return jsonify(skip_response)
 
         data = request.get_json()
 
