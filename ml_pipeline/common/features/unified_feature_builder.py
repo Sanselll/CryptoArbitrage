@@ -1,15 +1,19 @@
 """
-Unified Feature Builder for RL Inference (V3)
+Unified Feature Builder for RL Inference (V5.4)
 
 This module provides the SINGLE SOURCE OF TRUTH for all feature engineering
 used in the modular RL arbitrage system. All components (backend inference,
 ML API server, training, and testing) must use this class to ensure consistency.
 
-Architecture V3: 203-dimensional observation space
+Architecture V5.4: 213-dimensional observation space
 - Config: 5 dims
 - Portfolio: 3 dims
 - Executions: 85 dims (5 slots × 17 features)
-- Opportunities: 110 dims (10 slots × 11 features)
+- Opportunities: 120 dims (10 slots × 12 features)
+
+V5.4 Changes:
+- Added opportunity feature #12: spread_mean_reversion_potential (sign-agnostic spread profitability)
+- Execution feature #9 spread_change_from_entry now active (was disabled in v3)
 
 Key Principles:
 1. All feature calculation logic lives HERE and only here
@@ -108,7 +112,7 @@ class UnifiedFeatureBuilder:
                 - 'opportunities': List of opportunity dicts
 
         Returns:
-            203-dimensional observation array (5 + 3 + 85 + 110)
+            213-dimensional observation array (5 + 3 + 85 + 120)
         """
         trading_config = raw_data.get('trading_config', {})
         portfolio = raw_data.get('portfolio', {})
@@ -238,7 +242,7 @@ class UnifiedFeatureBuilder:
         6. estimated_funding_8h_pct: expected funding profit in next 8h
         7. funding_velocity: change in 8h funding estimate (currently disabled)
         8. spread_pct: current price spread
-        9. spread_velocity: change in spread (currently disabled)
+        9. spread_change_from_entry: entry_spread - current_spread (+ = profit from spread narrowing)
         10. liquidation_distance_pct
         11. apr_ratio: current_apr / entry_apr (clipped to [0,3])
         12. current_position_apr (normalized to ±5000%)
@@ -342,12 +346,13 @@ class UnifiedFeatureBuilder:
                 avg_price = (current_long_price + current_short_price) / 2
                 spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
 
-                # 9. spread_velocity (change per step)
-                spread_velocity = 0.0
-                if self.enable_velocity_tracking:
-                    prev_spread = self._prev_spread.get(slot_idx, spread_pct)
-                    spread_velocity = np.clip(spread_pct - prev_spread, -0.01, 0.01)  # Clip to ±1%
-                    self._prev_spread[slot_idx] = spread_pct
+                # 9. spread_change_from_entry = entry_spread - current_spread
+                # Positive = spread narrowed since entry = PROFIT from spread convergence
+                # Negative = spread widened since entry = LOSS from spread divergence
+                entry_avg = (entry_long_price + entry_short_price) / 2
+                entry_spread = abs(entry_short_price - entry_long_price) / entry_avg if entry_avg > 0 else 0.0
+                spread_change_from_entry = entry_spread - spread_pct
+                spread_change_from_entry = np.clip(spread_change_from_entry, -0.05, 0.05)  # Clip to ±5%
 
                 # 10. liquidation_distance_pct
                 liquidation_distance_pct = pos.get('liquidation_distance', 1.0)
@@ -414,7 +419,7 @@ class UnifiedFeatureBuilder:
                     estimated_funding_8h_pct,
                     funding_velocity,
                     spread_pct,
-                    spread_velocity,
+                    spread_change_from_entry,
                     liquidation_distance_pct,
                     apr_ratio,
                     current_position_apr,
@@ -434,13 +439,14 @@ class UnifiedFeatureBuilder:
 
     def build_opportunity_features(self, opportunities: List[Dict]) -> np.ndarray:
         """
-        Build opportunity features for up to 10 slots (110 dimensions total).
+        Build opportunity features for up to 10 slots (120 dimensions total).
 
-        Each opportunity has 11 features:
+        Each opportunity has 12 features (V5.4):
         1-6: fund_profit_8h, fund_profit_8h_24h_proj, fund_profit_8h_3d_proj,
              fund_apr, fund_apr_24h_proj, fund_apr_3d_proj
         7-10: spread_30_sample_avg, price_spread_24h_avg, price_spread_3d_avg, spread_volatility_stddev
         11: apr_velocity (fund_profit_8h - fund_profit_8h_24h_proj)
+        12: spread_mean_reversion_potential = |spread_30| - |spread_3d| (sign-agnostic)
 
         CRITICAL: Feature scaler is applied to ALL slots (including empty ones)
         to match training behavior. Empty slots are padded with zeros BEFORE scaling.
@@ -449,7 +455,7 @@ class UnifiedFeatureBuilder:
             opportunities: List of up to 10 opportunity dicts
 
         Returns:
-            110-dimensional array (10 slots × 11 features)
+            120-dimensional array (10 slots × 12 features)
         """
         all_features = []
 
@@ -459,6 +465,14 @@ class UnifiedFeatureBuilder:
 
                 fund_profit_8h = opp.get('fund_profit_8h', 0)
                 fund_profit_8h_24h_proj = opp.get('fund_profit_8h_24h_proj', 0)
+                spread_30_sample_avg = opp.get('spread_30_sample_avg', 0)
+                price_spread_3d_avg = opp.get('price_spread_3d_avg', 0)
+
+                # V5.4: Sign-agnostic spread mean-reversion potential
+                # Positive = spread wider than 3d avg = mean-reversion opportunity
+                # Works regardless of spread sign (+/-)
+                spread_mean_reversion_potential = abs(spread_30_sample_avg) - abs(price_spread_3d_avg)
+                spread_mean_reversion_potential = np.clip(spread_mean_reversion_potential, -0.05, 0.05)
 
                 features = [
                     # Profit projections (6 features)
@@ -469,12 +483,14 @@ class UnifiedFeatureBuilder:
                     opp.get('fund_apr_24h_proj', 0),
                     opp.get('fund_apr_3d_proj', 0),
                     # Spread metrics (4 features)
-                    opp.get('spread_30_sample_avg', 0),
+                    spread_30_sample_avg,
                     opp.get('price_spread_24h_avg', 0),
-                    opp.get('price_spread_3d_avg', 0),
+                    price_spread_3d_avg,
                     opp.get('spread_volatility_stddev', 0),
                     # Velocity (1 feature)
                     fund_profit_8h - fund_profit_8h_24h_proj,  # apr_velocity
+                    # V5.4: Spread mean-reversion potential (1 feature)
+                    spread_mean_reversion_potential,
                 ]
 
                 # Convert to float32 and ensure no NaN/inf

@@ -755,13 +755,18 @@ class Portfolio:
                            best_available_apr: float = 0.0,
                            current_opportunities: Optional[List[Dict]] = None) -> np.ndarray:
         """
-        Get state features for a single execution slot (17 dimensions - V3 refactoring).
+        Get state features for a single execution slot (17 dimensions - V5.4).
+
+        V5.4 Changes (203→213 total dims):
+        - Execution features unchanged (17 per slot)
+        - spread_change_from_entry now active (was disabled, always 0.0)
+        - Added opportunity feature: spread_mean_reversion_potential (12 per slot)
 
         V3 Changes (301→203 total dims):
         - Removed: net_funding_ratio, net_funding_rate, funding_efficiency, entry_spread_pct,
                    long/short_pnl_pct, old pnl_velocity, peak_drawdown, is_old_loser
         - Added: estimated_pnl_pct, estimated_pnl_velocity, estimated_funding_8h_pct,
-                 funding_velocity, spread_velocity, pnl_imbalance
+                 funding_velocity, spread_change_from_entry, pnl_imbalance
         - Updated: hours_held (log norm), APR (clip ±5000%)
 
         Args:
@@ -836,9 +841,13 @@ class Portfolio:
         avg_price = (current_long_price + current_short_price) / 2
         spread_pct = abs(current_long_price - current_short_price) / avg_price if avg_price > 0 else 0.0
 
-        # 9. spread_velocity = change in spread
-        # V3: DISABLED - removed to eliminate state tracking complexity
-        spread_velocity = 0.0  # spread_pct - pos.prev_spread_pct
+        # 9. spread_change_from_entry = entry_spread - current_spread
+        # Positive = spread narrowed since entry = PROFIT from spread convergence
+        # Negative = spread widened since entry = LOSS from spread divergence
+        entry_avg = (pos.entry_long_price + pos.entry_short_price) / 2
+        entry_spread = abs(pos.entry_short_price - pos.entry_long_price) / entry_avg if entry_avg > 0 else 0.0
+        spread_change_from_entry = entry_spread - spread_pct
+        spread_change_from_entry = np.clip(spread_change_from_entry, -0.05, 0.05)  # Clip to ±5%
 
         # 10. liquidation_distance_pct
         liquidation_distance_pct = pos.get_liquidation_distance(current_long_price, current_short_price)
@@ -886,7 +895,7 @@ class Portfolio:
             estimated_funding_8h_pct,   # 6 (NEW)
             funding_velocity,           # 7 (NEW)
             spread_pct,                 # 8
-            spread_velocity,            # 9 (NEW)
+            spread_change_from_entry,   # 9
             liquidation_distance_pct,   # 10
             apr_ratio,                  # 11
             current_position_apr,       # 12

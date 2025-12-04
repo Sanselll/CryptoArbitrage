@@ -87,14 +87,14 @@ def initialize_predictor():
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='trained_models/rl/v5.3_ep1850.pt',
+                model_path='trained_models/rl/v5.4_ep1800.pt',
                 device='cpu'
             )
             print("✅ RL predictor initialized successfully")
-            print("   Architecture: Unified Feature Builder (203 dims)")
-            print("   Model: trained_models/rl/v5.3_ep1850.pt")
+            print("   Architecture: Unified Feature Builder (213 dims)")
+            print("   Model: trained_models/rl/v5.4_ep1800.pt")
             print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
-            print("   Features: 5 config + 3 portfolio + 85 executions + 110 opportunities")
+            print("   Features: 5 config + 3 portfolio + 85 executions + 120 opportunities")
             print(f"   Confidence thresholds: ENTER >= {ENTER_CONFIDENCE_THRESHOLD:.0%}, EXIT >= {EXIT_CONFIDENCE_THRESHOLD:.0%}")
         except Exception as e:
             print(f"⚠️  Warning: Could not initialize RL predictor: {e}")
@@ -586,26 +586,6 @@ def predict():
         if rl_predictor is None:
             return jsonify({'error': 'RL predictor not initialized'}), 503
 
-        # Check if we should skip prediction during funding recalculation window
-        # Funding rates are unreliable during XX:55-XX:59 and XX:00-XX:10
-        now = datetime.utcnow()
-        minute = now.minute
-        if minute >= 55 or minute <= 10:
-            skip_response = {
-                'action': 'HOLD',
-                'action_id': 0,
-                'confidence': 0.0,
-                'state_value': 0.0,
-                'reason': f'Skipped prediction during funding recalculation window (minute={minute})',
-                'model_info': {
-                    'skipped': True,
-                    'skip_reason': 'funding_recalc_window'
-                }
-            }
-            # Log the skip decision
-            log_raw_decision({}, skip_response, user_id=None)
-            return jsonify(skip_response)
-
         data = request.get_json()
 
         if not data:
@@ -708,6 +688,89 @@ def predict():
 
     except Exception as e:
         print(f"Error in /rl/predict: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/rl/predict_obs', methods=['POST'])
+def predict_from_observation():
+    """
+    RL Prediction from pre-computed observation vector.
+
+    This endpoint accepts the observation vector directly (computed by environment),
+    bypassing the server's feature builder. Used for testing to ensure direct mode
+    and API mode use identical observations.
+
+    Expects JSON body:
+    {
+        "observation": [0.1, 0.2, ...],  # DIMS.TOTAL-dim observation vector (213 for V5.4)
+        "action_mask": [true, false, ...],  # DIMS.TOTAL_ACTIONS-dim action mask (36)
+        "opportunities": [...]  # For response metadata only
+    }
+    """
+    import numpy as np
+    import torch
+    from common.features import DIMS
+
+    try:
+        if rl_predictor is None:
+            return jsonify({'error': 'RL predictor not initialized'}), 503
+
+        data = request.get_json()
+
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        obs = np.array(data.get('observation', []), dtype=np.float32)
+        action_mask = np.array(data.get('action_mask', []), dtype=bool)
+        opportunities = data.get('opportunities', [])
+
+        if len(obs) != DIMS.TOTAL:
+            return jsonify({'error': f'Invalid observation size: {len(obs)}, expected {DIMS.TOTAL}'}), 400
+
+        if len(action_mask) != DIMS.TOTAL_ACTIONS:
+            return jsonify({'error': f'Invalid action_mask size: {len(action_mask)}, expected {DIMS.TOTAL_ACTIONS}'}), 400
+
+        # Select action using trainer directly
+        action, value, log_prob = rl_predictor.trainer.select_action(
+            obs, action_mask, deterministic=True
+        )
+
+        # Get full probability distribution
+        with torch.no_grad():
+            obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
+            mask_tensor = torch.BoolTensor(action_mask).unsqueeze(0)
+            action_logits, _ = rl_predictor.trainer.network(obs_tensor, mask_tensor)
+            probs = torch.softmax(action_logits, dim=1).cpu().numpy()[0]
+
+        # Decode action
+        action_info = rl_predictor._decode_action(action)
+
+        result = {
+            'action': action_info['type'],
+            'action_id': int(action),
+            'confidence': float(probs[action]),
+            'state_value': float(value),
+            'action_probabilities': probs.tolist(),
+        }
+
+        # Add specific fields based on action type
+        if action_info['type'] == 'ENTER':
+            opp_idx = action_info['opportunity_index']
+            if opp_idx < len(opportunities):
+                result['opportunity_index'] = opp_idx
+                result['opportunity_symbol'] = opportunities[opp_idx].get('symbol', 'UNKNOWN')
+            result['position_size'] = action_info['size']
+        elif action_info['type'] == 'EXIT':
+            result['position_index'] = action_info['position_index']
+
+        result['valid_actions'] = int(action_mask.sum())
+
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"Error in /rl/predict_obs: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

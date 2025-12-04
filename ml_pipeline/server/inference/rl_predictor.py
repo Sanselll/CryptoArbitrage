@@ -65,8 +65,8 @@ class ModularRLPredictor:
 
     def __init__(
         self,
-        model_path: str = 'trained_models/rl/v5.3_ep1850.pt',
-        feature_scaler_path: str = 'trained_models/rl/feature_scaler_v2.pkl',
+        model_path: str = 'trained_models/rl/v5.4_ep1800.pt',
+        feature_scaler_path: str = 'trained_models/rl/feature_scaler_v3.pkl',
         device: str = 'cpu'
     ):
         """
@@ -74,7 +74,7 @@ class ModularRLPredictor:
 
         Args:
             model_path: Path to trained PPOTrainer checkpoint (.pt file)
-            feature_scaler_path: Path to fitted feature scaler pickle (V3: StandardScaler)
+            feature_scaler_path: Path to fitted feature scaler pickle (V5.4: StandardScaler with 12 features)
             device: Device to use ('cpu' or 'cuda')
         """
         print(f"Loading Modular RL model from: {model_path}")

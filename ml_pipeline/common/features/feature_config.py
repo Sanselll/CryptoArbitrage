@@ -2,7 +2,7 @@
 Feature configuration constants for RL model.
 
 Defines all feature dimensions and configuration for the modular RL architecture.
-Version: V3 (203 dimensions total)
+Version: V5.4 (213 dimensions total)
 """
 
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ from typing import Final
 
 @dataclass(frozen=True)
 class FeatureDimensions:
-    """Feature dimensions for V3 modular architecture."""
+    """Feature dimensions for V5.4 modular architecture."""
 
     # Component dimensions
     CONFIG: Final[int] = 5
@@ -19,12 +19,12 @@ class FeatureDimensions:
     EXECUTIONS_PER_SLOT: Final[int] = 17
     EXECUTIONS_SLOTS: Final[int] = 5
     EXECUTIONS_TOTAL: Final[int] = EXECUTIONS_PER_SLOT * EXECUTIONS_SLOTS  # 85
-    OPPORTUNITIES_PER_SLOT: Final[int] = 11
+    OPPORTUNITIES_PER_SLOT: Final[int] = 12  # V5.4: Added spread_mean_reversion_potential
     OPPORTUNITIES_SLOTS: Final[int] = 10
-    OPPORTUNITIES_TOTAL: Final[int] = OPPORTUNITIES_PER_SLOT * OPPORTUNITIES_SLOTS  # 110
+    OPPORTUNITIES_TOTAL: Final[int] = OPPORTUNITIES_PER_SLOT * OPPORTUNITIES_SLOTS  # 120
 
     # Total observation dimension
-    TOTAL: Final[int] = CONFIG + PORTFOLIO + EXECUTIONS_TOTAL + OPPORTUNITIES_TOTAL  # 203
+    TOTAL: Final[int] = CONFIG + PORTFOLIO + EXECUTIONS_TOTAL + OPPORTUNITIES_TOTAL  # 213
 
     # Action space
     ACTION_HOLD: Final[int] = 0
@@ -49,8 +49,8 @@ class FeatureConfig:
     RETURN_EFFICIENCY_CLIP_MAX: Final[float] = 50.0
 
     # Feature scaler path (relative to ml_pipeline/)
-    # V3: StandardScaler (11 features)
-    FEATURE_SCALER_PATH: Final[str] = "trained_models/rl/feature_scaler_v2.pkl"
+    # V5.4: StandardScaler (12 features)
+    FEATURE_SCALER_PATH: Final[str] = "trained_models/rl/feature_scaler_v3.pkl"
 
     # Feature names for execution slots (17 features)
     EXECUTION_FEATURE_NAMES: Final[tuple] = (
@@ -62,7 +62,7 @@ class FeatureConfig:
         "estimated_funding_8h_pct",
         "funding_velocity",
         "spread_pct",
-        "spread_velocity",
+        "spread_change_from_entry",
         "liquidation_distance_pct",
         "apr_ratio",
         "current_position_apr",
@@ -73,7 +73,7 @@ class FeatureConfig:
         "pnl_imbalance"
     )
 
-    # Feature names for opportunity slots (11 features)
+    # Feature names for opportunity slots (12 features - V5.4)
     OPPORTUNITY_FEATURE_NAMES: Final[tuple] = (
         "fund_profit_8h",
         "fund_profit_8h_24h_proj",
@@ -85,7 +85,8 @@ class FeatureConfig:
         "price_spread_24h_avg",
         "price_spread_3d_avg",
         "spread_volatility_stddev",
-        "apr_velocity"
+        "apr_velocity",
+        "spread_mean_reversion_potential",  # V5.4: Sign-agnostic spread profitability
     )
 
 

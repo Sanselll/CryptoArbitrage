@@ -86,8 +86,8 @@ def parse_args():
                         help='Output CSV file for trade records (default: trades_inference.csv)')
     parser.add_argument('--price-history-path', type=str, default='data/symbol_data',
                         help='Path to price history directory for hourly funding rate updates (default: data/symbol_data)')
-    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler_v2.pkl',
-                        help='Path to fitted feature scaler pickle (V3: StandardScaler, default: trained_models/rl/feature_scaler_v2.pkl)')
+    parser.add_argument('--feature-scaler-path', type=str, default='trained_models/rl/feature_scaler_v3.pkl',
+                        help='Path to fitted feature scaler pickle (V5.4: StandardScaler with 12 features)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducible results (default: 42)')
     parser.add_argument('--force-zero-pnl', action='store_true',
@@ -279,12 +279,14 @@ class MLAPIClient:
             'opportunities': opportunities
         }
 
-    def predict(self, env: FundingArbitrageEnv) -> Dict[str, Any]:
+    def predict(self, env: FundingArbitrageEnv, obs: np.ndarray = None, action_mask: np.ndarray = None) -> Dict[str, Any]:
         """
         Get prediction from ML API.
 
         Args:
             env: FundingArbitrageEnv instance
+            obs: Pre-computed observation vector (optional, for exact match with direct mode)
+            action_mask: Pre-computed action mask (optional)
 
         Returns:
             Dict with action, confidence, etc.
@@ -292,21 +294,29 @@ class MLAPIClient:
         Raises:
             requests.RequestException: If API call fails
         """
-        # Get raw data from environment (CRITICAL: use env's exact internal state)
-        raw_data = env.get_raw_state_for_ml_api()
-
-        # Inject session_id for velocity tracking (matches production behavior)
-        # Without session_id, ML API uses default_builder with velocity tracking disabled
-        raw_data['portfolio']['session_id'] = self.session_id
-
-        # Sanitize data for JSON serialization (replace inf/nan with safe values)
-        raw_data = self.sanitize_for_json(raw_data)
+        # Use /rl/predict_obs endpoint with pre-computed observation for exact match
+        if obs is not None and action_mask is not None:
+            # Send observation directly - bypasses server's feature builder
+            request_data = {
+                'observation': obs.tolist(),
+                'action_mask': action_mask.tolist(),
+                'opportunities': env.current_opportunities if hasattr(env, 'current_opportunities') else []
+            }
+            # Sanitize entire request (handles inf/nan in observation and opportunities)
+            request_data = self.sanitize_for_json(request_data)
+            url = f"{self.base_url}/rl/predict_obs"
+        else:
+            # Fallback to raw data mode (has velocity tracking mismatch)
+            raw_data = env.get_raw_state_for_ml_api()
+            raw_data['portfolio']['session_id'] = self.session_id
+            request_data = self.sanitize_for_json(raw_data)
+            url = self.full_url
 
         # Make request
         try:
             response = self.session.post(
-                self.full_url,
-                json=raw_data,
+                url,
+                json=request_data,
                 timeout=10.0
             )
             response.raise_for_status()
@@ -317,7 +327,7 @@ class MLAPIClient:
         except requests.exceptions.Timeout:
             raise RuntimeError(f"ML API timeout after 10 seconds")
         except requests.exceptions.ConnectionError:
-            raise RuntimeError(f"Failed to connect to ML API at {self.full_url}. Is the server running?")
+            raise RuntimeError(f"Failed to connect to ML API at {url}. Is the server running?")
         except requests.exceptions.HTTPError as e:
             raise RuntimeError(f"ML API error: {e.response.status_code} - {e.response.text}")
         except Exception as e:
@@ -329,13 +339,14 @@ class MLAPIClient:
 
         Args:
             env: Environment instance
-            obs: Observation (not used in API mode, we use env state)
-            action_mask: Action mask (not used in API mode, server generates it)
+            obs: Observation vector (passed to API for exact match with direct mode)
+            action_mask: Action mask (passed to API for exact match with direct mode)
 
         Returns:
             (action, value, log_prob) - value and log_prob are dummy values
         """
-        result = self.predict(env)
+        # Pass obs and action_mask for exact match with direct mode
+        result = self.predict(env, obs=obs, action_mask=action_mask)
 
         action = result.get('action_id', 0)
         value = result.get('state_value', 0.0)

@@ -1,5 +1,8 @@
 """
-Fit and save a StandardScaler for opportunity features (V3 Refactoring).
+Fit and save a StandardScaler for opportunity features (V5.4).
+
+V5.4 Changes: 11→12 features
+- Added: spread_mean_reversion_potential = |spread_30| - |spread_3d| (sign-agnostic)
 
 V3 Changes: 19→11 features
 - Removed: raw funding rates/intervals, market quality features (9 features)
@@ -18,10 +21,17 @@ from pathlib import Path
 
 def extract_opportunity_features(row):
     """
-    Extract the 11 features from a single opportunity (V3 refactoring).
+    Extract the 12 features from a single opportunity (V5.4).
 
-    V3: Removed market quality features (assume pre-filtered upstream)
+    V5.4: Added spread_mean_reversion_potential (sign-agnostic spread profitability)
     """
+    spread_30 = row.get('spread_30_sample_avg', 0)
+    spread_3d = row.get('price_spread_3d_avg', 0)
+
+    # V5.4: Sign-agnostic spread mean-reversion potential
+    spread_mean_reversion_potential = abs(spread_30) - abs(spread_3d)
+    spread_mean_reversion_potential = np.clip(spread_mean_reversion_potential, -0.05, 0.05)
+
     features = [
         # Profit projections (6 features)
         row.get('fund_profit_8h', 0),
@@ -31,12 +41,14 @@ def extract_opportunity_features(row):
         row.get('fund_apr_24h_proj', 0),
         row.get('fund_apr_3d_proj', 0),
         # Spread statistics (4 features)
-        row.get('spread_30_sample_avg', 0),
+        spread_30,
         row.get('price_spread_24h_avg', 0),
-        row.get('price_spread_3d_avg', 0),
+        spread_3d,
         row.get('spread_volatility_stddev', 0),
-        # Velocity (1 feature - NEW in V3)
+        # Velocity (1 feature)
         row.get('fund_profit_8h', 0) - row.get('fund_profit_8h_24h_proj', 0),  # apr_velocity
+        # V5.4: Spread mean-reversion potential (1 feature)
+        spread_mean_reversion_potential,
     ]
 
     # Convert to float and handle NaN/inf
@@ -46,12 +58,12 @@ def extract_opportunity_features(row):
 
 def main():
     print("="*80)
-    print("FITTING FEATURE SCALER FOR RL ENVIRONMENT (V3 - StandardScaler)")
+    print("FITTING FEATURE SCALER FOR RL ENVIRONMENT (V5.4 - StandardScaler)")
     print("="*80)
 
     # Paths
     train_data_path = "data/rl_train.csv"
-    scaler_output_path = "trained_models/rl/feature_scaler_v2.pkl"  # V3: StandardScaler
+    scaler_output_path = "trained_models/rl/feature_scaler_v3.pkl"  # V5.4: 12 features
 
     # Create output directory
     Path(scaler_output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -62,7 +74,7 @@ def main():
     print(f"   Loaded {len(df):,} opportunities")
 
     # Extract all features
-    print("\nExtracting 11 features from each opportunity (V3 refactoring: 19→11)...")
+    print("\nExtracting 12 features from each opportunity (V5.4: 11→12)...")
     all_features = []
     for idx, row in df.iterrows():
         features = extract_opportunity_features(row)
@@ -73,7 +85,7 @@ def main():
 
     # Convert to numpy array
     X = np.array(all_features, dtype=np.float32)
-    print(f"\nFeature matrix shape: {X.shape} (expected: [N, 11])")
+    print(f"\nFeature matrix shape: {X.shape} (expected: [N, 12])")
 
     # Display feature statistics before scaling
     print("\n" + "-"*80)
@@ -84,7 +96,8 @@ def main():
         'fund_apr', 'fund_apr_24h_proj', 'fund_apr_3d_proj',
         'spread_30_sample_avg', 'price_spread_24h_avg', 'price_spread_3d_avg',
         'spread_volatility_stddev',
-        'apr_velocity',  # NEW in V3
+        'apr_velocity',
+        'spread_mean_reversion_potential',  # NEW in V5.4
     ]
 
     for i, name in enumerate(feature_names):
@@ -125,11 +138,11 @@ def main():
 
     print("✅ Scaler saved successfully")
     print("="*80)
-    print("\nV3 SCALER USAGE:")
+    print("\nV5.4 SCALER USAGE:")
     print(f"   1. Load scaler: scaler = pickle.load(open('{scaler_output_path}', 'rb'))")
-    print("   2. Transform features: X_scaled = scaler.transform(X)  # X must be shape [N, 11]")
-    print("\nNOTE: This is V3 scaler (11 features, StandardScaler).")
-    print("      Use --feature-scaler-path trained_models/rl/feature_scaler_v2.pkl in training scripts")
+    print("   2. Transform features: X_scaled = scaler.transform(X)  # X must be shape [N, 12]")
+    print("\nNOTE: This is V5.4 scaler (12 features, StandardScaler).")
+    print("      Update FEATURE_SCALER_PATH in feature_config.py to 'trained_models/rl/feature_scaler_v3.pkl'")
     print("="*80)
 
 
