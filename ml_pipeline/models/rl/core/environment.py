@@ -128,6 +128,7 @@ class FundingArbitrageEnv(gym.Env):
         self.price_reward_scale = reward_config.price_reward_scale
         self.liquidation_penalty_scale = reward_config.liquidation_penalty_scale
         self.opportunity_cost_scale = reward_config.opportunity_cost_scale
+        self.negative_funding_exit_reward_scale = reward_config.negative_funding_exit_reward_scale
 
         # Load historical data
         self.data = self._load_data(data_path)
@@ -282,7 +283,9 @@ class FundingArbitrageEnv(gym.Env):
         If a position's symbol is not in top N by APR, we include it anyway by removing
         the lowest-APR opportunities to make room.
 
-        Production (AgentBackgroundService.cs) matches this behavior.
+        Production (AgentBackgroundService.cs) matches this behavior:
+        - Deduplicates by symbol (keeps highest APR per symbol)
+        - Then selects top N
 
         Args:
             all_opps: List of all available opportunities
@@ -294,12 +297,25 @@ class FundingArbitrageEnv(gym.Env):
         if len(all_opps) == 0:
             return []
 
+        # STEP 1: Deduplicate by symbol - keep only the highest APR per symbol
+        # This matches production backend behavior
+        best_by_symbol: Dict[str, Dict] = {}
+        for opp in all_opps:
+            symbol = opp.get('symbol', '')
+            if not symbol:
+                continue
+            current_apr = opp.get('fund_apr', 0)
+            if symbol not in best_by_symbol or current_apr > best_by_symbol[symbol].get('fund_apr', 0):
+                best_by_symbol[symbol] = opp
+
+        deduplicated_opps = list(best_by_symbol.values())
+
         # Get symbols from open positions
         position_symbols = {pos.symbol for pos in self.portfolio.positions}
 
         # Separate opportunities: those matching positions vs others
-        position_opps = [opp for opp in all_opps if opp.get('symbol') in position_symbols]
-        other_opps = [opp for opp in all_opps if opp.get('symbol') not in position_symbols]
+        position_opps = [opp for opp in deduplicated_opps if opp.get('symbol') in position_symbols]
+        other_opps = [opp for opp in deduplicated_opps if opp.get('symbol') not in position_symbols]
 
         # Sort others by APR (descending)
         other_opps.sort(key=lambda opp: opp.get('fund_apr', 0), reverse=True)
@@ -930,6 +946,22 @@ class FundingArbitrageEnv(gym.Env):
                 price_pnl_pct = (position_price_pnl / self.episode_capital_for_normalization) * 100
                 exit_reward = price_pnl_pct * self.price_reward_scale
                 self.agent_closes += 1
+
+                # BONUS: Reward for exiting positions with negative funding
+                # This incentivizes the agent to recognize and exit losing positions quickly
+                if self.negative_funding_exit_reward_scale > 0:
+                    # Look up current fund_apr for this symbol from opportunities
+                    current_fund_apr = 0.0
+                    for opp in self.current_opportunities:
+                        if opp.get('symbol') == position.symbol:
+                            current_fund_apr = opp.get('fund_apr', 0.0)
+                            break
+
+                    # If funding is negative, give bonus for exiting
+                    # Bonus proportional to how negative: -100% APR → 1.0 * scale
+                    if current_fund_apr < 0:
+                        negative_funding_bonus = abs(current_fund_apr) / 100.0 * self.negative_funding_exit_reward_scale
+                        exit_reward += negative_funding_bonus
 
             elif exit_type == ExitType.STOP_LOSS:
                 # Stop-loss triggered - still reward price P&L (natural penalty)

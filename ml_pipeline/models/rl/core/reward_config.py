@@ -70,12 +70,13 @@ class RewardConfig:
     opportunity_cost_scale: float = 0.0
 
     # Negative funding exit reward: Bonus for exiting positions with negative estimated funding
-    # When estimated_funding_8h_pct < 0, the position is paying funding (losing money)
+    # When fund_apr < 0, the position is paying funding (losing money)
     # Reward agent for recognizing and exiting these losing positions quickly
-    # Scale: reward = abs(estimated_funding_8h_pct) * scale (applied on EXIT action)
-    # Recommended: 1.0-5.0 (1.0 = neutral, 5.0 = strong incentive)
+    # Scale: reward = abs(fund_apr) / 100.0 * scale (applied on EXIT action)
+    # Example: fund_apr = -1000% with scale=5.0 → bonus = 10.0 * 5.0 = 50.0
+    # Recommended: 1.0-5.0 (1.0 = weak incentive, 5.0 = strong incentive)
     # Set to 0.0 to disable
-    negative_funding_exit_reward_scale: float = 0.0
+    negative_funding_exit_reward_scale: float = 5.0
 
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary for serialization."""

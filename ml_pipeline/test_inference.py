@@ -279,14 +279,12 @@ class MLAPIClient:
             'opportunities': opportunities
         }
 
-    def predict(self, env: FundingArbitrageEnv, obs: np.ndarray = None, action_mask: np.ndarray = None) -> Dict[str, Any]:
+    def predict(self, env: FundingArbitrageEnv) -> Dict[str, Any]:
         """
-        Get prediction from ML API.
+        Get prediction from ML API using /rl/predict endpoint (same as production).
 
         Args:
             env: FundingArbitrageEnv instance
-            obs: Pre-computed observation vector (optional, for exact match with direct mode)
-            action_mask: Pre-computed action mask (optional)
 
         Returns:
             Dict with action, confidence, etc.
@@ -294,23 +292,11 @@ class MLAPIClient:
         Raises:
             requests.RequestException: If API call fails
         """
-        # Use /rl/predict_obs endpoint with pre-computed observation for exact match
-        if obs is not None and action_mask is not None:
-            # Send observation directly - bypasses server's feature builder
-            request_data = {
-                'observation': obs.tolist(),
-                'action_mask': action_mask.tolist(),
-                'opportunities': env.current_opportunities if hasattr(env, 'current_opportunities') else []
-            }
-            # Sanitize entire request (handles inf/nan in observation and opportunities)
-            request_data = self.sanitize_for_json(request_data)
-            url = f"{self.base_url}/rl/predict_obs"
-        else:
-            # Fallback to raw data mode (has velocity tracking mismatch)
-            raw_data = env.get_raw_state_for_ml_api()
-            raw_data['portfolio']['session_id'] = self.session_id
-            request_data = self.sanitize_for_json(raw_data)
-            url = self.full_url
+        # Use env.get_raw_state_for_ml_api() for parity with direct mode (same raw data)
+        raw_data = env.get_raw_state_for_ml_api()
+        raw_data['portfolio']['session_id'] = self.session_id
+        request_data = self.sanitize_for_json(raw_data)
+        url = self.full_url
 
         # Make request
         try:
@@ -333,20 +319,20 @@ class MLAPIClient:
         except Exception as e:
             raise RuntimeError(f"ML API request failed: {e}")
 
-    def select_action(self, env: FundingArbitrageEnv, obs: np.ndarray, action_mask: np.ndarray) -> tuple:
+    def select_action(self, env: FundingArbitrageEnv, obs: np.ndarray = None, action_mask: np.ndarray = None) -> tuple:
         """
         Select action using ML API (compatible with trainer.select_action interface).
 
         Args:
             env: Environment instance
-            obs: Observation vector (passed to API for exact match with direct mode)
-            action_mask: Action mask (passed to API for exact match with direct mode)
+            obs: Observation vector (unused - kept for interface compatibility)
+            action_mask: Action mask (unused - kept for interface compatibility)
 
         Returns:
             (action, value, log_prob) - value and log_prob are dummy values
         """
-        # Pass obs and action_mask for exact match with direct mode
-        result = self.predict(env, obs=obs, action_mask=action_mask)
+        # Use /rl/predict endpoint (obs/action_mask are ignored - server builds features)
+        result = self.predict(env)
 
         action = result.get('action_id', 0)
         value = result.get('state_value', 0.0)
@@ -754,16 +740,8 @@ def test_model_inference(args):
             else:
                 action_mask = None
 
-            # Check if we should skip prediction during funding recalculation window
-            # Funding rates are unreliable during XX:55-XX:59 and XX:00-XX:10
-            skip_prediction = env.is_in_funding_recalc_window() if hasattr(env, 'is_in_funding_recalc_window') else False
-
-            if skip_prediction:
-                # Force HOLD during funding recalculation window
-                action = 0
-                confidence = 0.0
             # Select action (deterministic)
-            elif args.api_mode:
+            if args.api_mode:
                 # Use API client (passes env, obs and mask are ignored by API)
                 action, _, _ = predictor.select_action(env, obs, action_mask)
                 # Get confidence from last API response
