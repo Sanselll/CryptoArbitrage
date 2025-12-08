@@ -37,17 +37,17 @@ class RewardConfig:
     All parameters are multiplicative scales applied to normalized reward components.
     """
 
-    # Funding P&L reward: 10x scale to overcome entropy noise
-    # V3.1: Increased from 1.0 to 10.0 to provide stronger learning signal
+    # Funding P&L reward: 15x scale for stronger learning signal
+    # V6: Increased from 10.0 to 15.0 with higher final entropy (0.05) for balance
     # Funding fees are paid every 1-8 hours and are the actual arbitrage profit
     # Equal weights let agent learn natural balance between funding and price
-    funding_reward_scale: float = 10.0
+    funding_reward_scale: float = 15.0
 
-    # Price P&L reward: 10x scale to overcome entropy noise
-    # V3.1: Increased from 1.0 to 10.0 to provide stronger learning signal
+    # Price P&L reward: 15x scale for stronger learning signal
+    # V6: Increased from 10.0 to 15.0 with higher final entropy (0.05) for balance
     # Both components matter for total P&L outcome
     # Equal weights prevent over-optimization on either component
-    price_reward_scale: float = 10.0
+    price_reward_scale: float = 15.0
 
     # Liquidation risk penalty: Critical safety mechanism
     # Applied when position approaches liquidation threshold
@@ -56,27 +56,54 @@ class RewardConfig:
     # Set to 10 for trained agents (less conservative), 0 to disable
     liquidation_penalty_scale: float = 10.0
 
-    # Opportunity cost penalty: DISABLED BY DEFAULT
-    # ISSUE: Cumulative penalties over long episodes (3088 steps) overwhelm P&L signal
-    # Example: -0.0125 per step × 3088 steps = -38.6 total (vs ~7% P&L)
-    # Result: Agent overtrades desperately to avoid accumulation (1545 trades, 12-min holds)
+    # Opportunity cost penalty: V6 ENABLED (was disabled)
+    # V6 CHANGES: Now uses 200% APR threshold (was 10%) to avoid overtrading
+    # Only penalizes when holding SIGNIFICANTLY inferior positions (e.g., 0% vs 1239%)
     #
-    # RECOMMENDED APPROACH: Rely on APR comparison features (Phase 2) for rotation learning
-    # - Features already in observation: current_position_apr, best_available_apr, apr_advantage
-    # - Agent learns rotation from P&L outcomes (RL-v2: "Reward what you want, not how to get it")
+    # Previous issue: -0.0125 per step × 3088 steps = -38.6 total (vs ~7% P&L)
+    # V6 fix: Only penalize for gaps > 200%, with /1000 scaling
+    # Example: 1239% gap → -0.03 * 1.039 * 0.3 ≈ -0.01 per step (much smaller)
     #
-    # If rotation learning is insufficient, consider one-time entry penalty instead
-    # Set to 0.0 to disable (recommended), 0.03-0.10 for experimentation only
-    opportunity_cost_scale: float = 0.0
+    # Features already in observation: current_position_apr, best_available_apr, apr_advantage
+    # V6 also improved apr_advantage with log scale for large gaps
+    #
+    # Set to 0.03 for V6 (balanced), 0.0 to disable
+    opportunity_cost_scale: float = 0.03
 
-    # Negative funding exit reward: Bonus for exiting positions with negative estimated funding
-    # When fund_apr < 0, the position is paying funding (losing money)
-    # Reward agent for recognizing and exiting these losing positions quickly
-    # Scale: reward = abs(fund_apr) / 100.0 * scale (applied on EXIT action)
-    # Example: fund_apr = -1000% with scale=5.0 → bonus = 10.0 * 5.0 = 50.0
-    # Recommended: 1.0-5.0 (1.0 = weak incentive, 5.0 = strong incentive)
+    # Negative funding exit reward: Bonus for exiting positions to rotate to better opportunities
+    # Triggers when: fund_apr < 0 OR fund_apr << best_available_apr
+    # V6.1: Increased to 2.0 (was 0.5) to encourage rotation behavior
+    # Combined with /500 divisor in environment.py for stronger signal
     # Set to 0.0 to disable
-    negative_funding_exit_reward_scale: float = 5.0
+    negative_funding_exit_reward_scale: float = 2.0
+
+    # Trade diversity bonus: V6.1 - Encourage exploration through trading
+    # Small bonus for each completed trade to prevent "hold forever" strategy
+    # Also includes inactivity penalty for holding same positions too long
+    # WARNING: Too high causes overtrading (400 trades/ep at 0.5)
+    # Set to 0.0 to disable
+    trade_diversity_bonus: float = 0.1  # V6.2: Reduced from 0.5 to 0.1 to prevent overtrading
+    inactivity_penalty_hours: float = 48.0  # V6.2: Increased from 24 to 48 hours
+    inactivity_penalty_scale: float = 0.005  # V6.2: Reduced from 0.01 to 0.005
+
+    # V7: Negative APR penalty - Hourly penalty for holding positions with negative APR
+    # Applied each step when position has current_position_apr < 0
+    # Encourages faster exit when funding rate flips against position
+    # Example: -100% APR → penalty = 100/1000 * 0.02 = 0.002 per step
+    # Set to 0.0 to disable
+    negative_apr_penalty_scale: float = 0.02
+
+    # V7: APR flip exit bonus - Extra reward for exiting positions when APR flipped
+    # Applied when EXIT action is taken and entry_apr > 0 but current_apr < 0
+    # Reinforces learning to exit when funding direction changes
+    # Example: +687% entry → -105% current = flip_bonus up to 2.0 * scale
+    # Set to 0.0 to disable
+    apr_flip_exit_bonus_scale: float = 1.5
+
+    # V7: Opportunity cost threshold - Lower threshold for opportunity cost penalty
+    # Original was 100% APR gap, reduced to 50% to be more sensitive
+    # Penalizes holding inferior positions more aggressively
+    opportunity_cost_threshold: float = 50.0  # V7: Lowered from 100 (was 200 in V6)
 
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary for serialization."""
@@ -86,6 +113,13 @@ class RewardConfig:
             'liquidation_penalty_scale': self.liquidation_penalty_scale,
             'opportunity_cost_scale': self.opportunity_cost_scale,
             'negative_funding_exit_reward_scale': self.negative_funding_exit_reward_scale,
+            'trade_diversity_bonus': self.trade_diversity_bonus,
+            'inactivity_penalty_hours': self.inactivity_penalty_hours,
+            'inactivity_penalty_scale': self.inactivity_penalty_scale,
+            # V7 parameters
+            'negative_apr_penalty_scale': self.negative_apr_penalty_scale,
+            'apr_flip_exit_bonus_scale': self.apr_flip_exit_bonus_scale,
+            'opportunity_cost_threshold': self.opportunity_cost_threshold,
         }
 
     @classmethod
@@ -147,7 +181,9 @@ class RewardConfig:
             f"price={self.price_reward_scale:.2f}, "
             f"liq={self.liquidation_penalty_scale:.0f}, "
             f"opp_cost={self.opportunity_cost_scale:.2f}, "
-            f"neg_fund_exit={self.negative_funding_exit_reward_scale:.2f})"
+            f"neg_fund_exit={self.negative_funding_exit_reward_scale:.2f}, "
+            f"neg_apr_pen={self.negative_apr_penalty_scale:.2f}, "
+            f"flip_exit={self.apr_flip_exit_bonus_scale:.2f})"
         )
 
 

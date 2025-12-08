@@ -19,6 +19,7 @@ from .portfolio import Portfolio, Position
 from .config import TradingConfig
 from .reward_config import RewardConfig
 from common.data.price_history_loader import PriceHistoryLoader
+from common.features.feature_config import DIMS
 
 
 class ExitType(Enum):
@@ -129,6 +130,14 @@ class FundingArbitrageEnv(gym.Env):
         self.liquidation_penalty_scale = reward_config.liquidation_penalty_scale
         self.opportunity_cost_scale = reward_config.opportunity_cost_scale
         self.negative_funding_exit_reward_scale = reward_config.negative_funding_exit_reward_scale
+        self.trade_diversity_bonus = reward_config.trade_diversity_bonus
+        self.inactivity_penalty_hours = reward_config.inactivity_penalty_hours
+        self.inactivity_penalty_scale = reward_config.inactivity_penalty_scale
+
+        # V7: New reward parameters for APR direction flip detection
+        self.negative_apr_penalty_scale = reward_config.negative_apr_penalty_scale
+        self.apr_flip_exit_bonus_scale = reward_config.apr_flip_exit_bonus_scale
+        self.opportunity_cost_threshold = reward_config.opportunity_cost_threshold
 
         # Load historical data
         self.data = self._load_data(data_path)
@@ -174,21 +183,16 @@ class FundingArbitrageEnv(gym.Env):
         # 31-35 = EXIT_POS_0-4
         self.action_space = spaces.Discrete(36)
 
-        # Observation space dimensions (V3 Refactoring: 301→203 dims)
-        # Config: 5 dims (unchanged)
-        # Portfolio: 3 dims (was 6: removed 3 historical metrics)
-        # Executions: 5 slots × 17 features = 85 dims (was 100: removed 8, added 6)
-        # Opportunities: 10 slots × 11 features = 110 dims (was 190: removed 9 market quality, added 1)
-        config_dim = 5
-        portfolio_dim = 3  # V3: 6→3 (removed avg_position_pnl_pct, total_pnl_pct, max_drawdown_pct)
-        executions_dim = 5 * 17  # V3: 85 (was 100)
-        opportunities_dim = 10 * 11  # V3: 110 (was 190)
-        total_dim = config_dim + portfolio_dim + executions_dim + opportunities_dim  # 203
-
+        # Observation space dimensions (V7: 229 dims)
+        # Config: 5 dims
+        # Portfolio: 4 dims (V6: +1 time_to_next_funding_norm)
+        # Executions: 5 slots × 20 features = 100 dims (V7: +2 apr_sign_match, apr_velocity per slot)
+        # Opportunities: 10 slots × 12 features = 120 dims
+        # Uses DIMS from feature_config.py as single source of truth
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(total_dim,),
+            shape=(DIMS.TOTAL,),
             dtype=np.float32
         )
 
@@ -506,6 +510,11 @@ class FundingArbitrageEnv(gym.Env):
         self.forced_closes = 0
         self.stop_loss_closes = 0
 
+        # V6.1: Track rotation for rotation bonus
+        # Stores APR of last exited position to reward ENTER with higher APR
+        self._last_exited_apr = None
+        self._rotation_count = 0
+
         # Track episode capital for reward normalization (constant throughout episode)
         # This prevents reward inflation when positions close
         self.episode_capital_for_normalization = self.initial_capital
@@ -584,6 +593,8 @@ class FundingArbitrageEnv(gym.Env):
             'price_reward': 0.0,  # Only set on exit now
             'liquidation_penalty': 0.0,
             'opportunity_cost_penalty': 0.0,
+            'inactivity_penalty': 0.0,  # V6.1: Penalty for holding too long
+            'negative_apr_penalty': 0.0,  # V7: Penalty for holding negative APR positions
         }
 
         # Component 1: Funding P&L Reward (hourly - actual cash flow)
@@ -618,8 +629,8 @@ class FundingArbitrageEnv(gym.Env):
             reward_breakdown['liquidation_penalty'] = liquidation_penalty
 
         # Component 3: Opportunity Cost Penalty (Incentivizes rotation to better opportunities)
-        # Applied when holding positions with SIGNIFICANTLY lower APR than best available
-        # Uses a threshold to avoid constant churning on minor differences
+        # Applied when holding positions with lower APR than best available
+        # V7: Configurable threshold (default 50%, lowered from 100%)
         if self.opportunity_cost_scale > 0.0 and len(self.portfolio.positions) > 0:
             # Find best available APR from current opportunities
             best_available_apr = 0.0
@@ -628,7 +639,7 @@ class FundingArbitrageEnv(gym.Env):
 
             # Calculate opportunity cost for each position
             opportunity_cost_total = 0.0
-            apr_threshold = 10.0  # Only penalize if APR gap > 10% (e.g., 25% vs 35%+)
+            apr_threshold = self.opportunity_cost_threshold  # V7: Configurable threshold
 
             for pos in self.portfolio.positions:
                 # Look up current APR for this symbol from opportunities
@@ -642,13 +653,52 @@ class FundingArbitrageEnv(gym.Env):
 
                 # Only apply penalty if gap exceeds threshold (significantly better opportunity exists)
                 if apr_gap > apr_threshold:
-                    # Penalty proportional to APR gap beyond threshold and capital in this position
+                    # V6.1: Increased penalty using /500 (was /1000) for stronger rotation signal
+                    # Example: 500% gap → -0.03 * 1.0 * capital_ratio ≈ -0.03 per step
                     position_capital_ratio = (pos.position_size_usd * 2) / self.episode_capital_for_normalization
-                    opportunity_cost = -(apr_gap - apr_threshold) * position_capital_ratio * self.opportunity_cost_scale
+                    opportunity_cost = -(apr_gap / 500) * position_capital_ratio * self.opportunity_cost_scale
                     opportunity_cost_total += opportunity_cost
 
             reward += opportunity_cost_total
             reward_breakdown['opportunity_cost_penalty'] = opportunity_cost_total
+
+        # Component 4: Inactivity penalty - penalize holding positions too long
+        # V6.1: Encourages rotation and exploration
+        if self.inactivity_penalty_scale > 0 and len(self.portfolio.positions) > 0:
+            inactivity_penalty_total = 0.0
+            for pos in self.portfolio.positions:
+                hours_held = pos.hours_held
+                if hours_held > self.inactivity_penalty_hours:
+                    # Penalty increases with time beyond threshold
+                    excess_hours = hours_held - self.inactivity_penalty_hours
+                    inactivity_penalty = -excess_hours * self.inactivity_penalty_scale
+                    inactivity_penalty_total += inactivity_penalty
+            reward += inactivity_penalty_total
+            reward_breakdown['inactivity_penalty'] = inactivity_penalty_total
+
+        # Component 5 (V7): Negative APR penalty - penalize holding positions with negative APR
+        # This is CRITICAL for learning to exit when funding rate flips direction
+        # Example: AIAUSDT entry +687% → current -105% should trigger exit, not HOLD
+        if self.negative_apr_penalty_scale > 0 and len(self.portfolio.positions) > 0:
+            negative_apr_penalty_total = 0.0
+            for pos in self.portfolio.positions:
+                # Look up current APR for this position
+                current_pos_apr = 0.0
+                for opp in self.current_opportunities:
+                    if opp['symbol'] == pos.symbol:
+                        current_pos_apr = opp.get('fund_apr', 0.0)
+                        break
+
+                # Apply penalty only for negative APR (funding working against us)
+                if current_pos_apr < 0:
+                    # Penalty proportional to how negative the APR is
+                    # Example: -100% APR → penalty = 100/1000 * 0.02 = 0.002 per step
+                    # Over 24h (24 steps): 0.002 * 24 = 0.048 cumulative penalty
+                    penalty = (abs(current_pos_apr) / 1000.0) * self.negative_apr_penalty_scale
+                    negative_apr_penalty_total -= penalty
+
+            reward += negative_apr_penalty_total
+            reward_breakdown['negative_apr_penalty'] = negative_apr_penalty_total
 
         # Check termination
         terminated = False
@@ -704,6 +754,7 @@ class FundingArbitrageEnv(gym.Env):
             info['agent_closes'] = self.agent_closes
             info['forced_closes'] = self.forced_closes
             info['stop_loss_closes'] = self.stop_loss_closes
+            info['rotation_count'] = self._rotation_count  # V6.1: Track successful rotations
             info['episode_length_hours'] = self.current_episode_length_hours
 
         return observation, reward, terminated, truncated, info
@@ -885,10 +936,34 @@ class FundingArbitrageEnv(gym.Env):
         success = self.portfolio.open_position(position)
 
         if success:
-            # Pure RL-v2: No entry penalty
-            # Entry fees are naturally deducted from P&L, which reduces cumulative reward
-            # Agent learns selectivity through outcomes, not artificial penalties
-            return 0.0
+            # V7.1: Realistic round-trip fee penalty at entry
+            # Previous 0.25% was too conservative, causing model to under-trade (2 trades/episode)
+            # Real fees: ~0.04% per side × 2 sides × 2 (entry+exit) = 0.16%
+            # Reduced to 0.12% to encourage more trading while still preventing overtrading
+            round_trip_fee_pct = 0.12  # Realistic fee estimate
+            # Normalize by episode capital and apply price reward scale for consistency
+            entry_fee_penalty = -(round_trip_fee_pct / 100) * (position_size * 2) / self.episode_capital_for_normalization * 100 * self.price_reward_scale
+
+            # V7.1: Re-enable rotation bonus with higher threshold
+            # Only reward rotation when new position has SIGNIFICANTLY better APR (>200% improvement)
+            # This encourages switching to much better opportunities without causing overtrading
+            rotation_bonus = 0.0
+            new_apr = opp.get('fund_apr', 0.0)
+
+            if self._last_exited_apr is not None:
+                apr_improvement = new_apr - self._last_exited_apr
+
+                # Only reward if new APR is >200% better (e.g., 100% → 350%)
+                if apr_improvement > 200:
+                    # Moderate bonus: scale by improvement magnitude, capped at 1.0
+                    # Example: exited 100% APR, entered 500% APR → min(400/400, 1.0) * 0.5 = 0.5 bonus
+                    rotation_bonus = min(apr_improvement / 400.0, 1.0) * 0.5
+
+                # Clear the tracker after processing
+                self._last_exited_apr = None
+
+            # Return entry fee penalty + rotation bonus
+            return entry_fee_penalty + rotation_bonus
         else:
             # Could not open (insufficient capital or position limit - masked, shouldn't happen)
             # No penalty - rely on action masking to prevent invalid actions
@@ -947,21 +1022,44 @@ class FundingArbitrageEnv(gym.Env):
                 exit_reward = price_pnl_pct * self.price_reward_scale
                 self.agent_closes += 1
 
-                # BONUS: Reward for exiting positions with negative funding
-                # This incentivizes the agent to recognize and exit losing positions quickly
-                if self.negative_funding_exit_reward_scale > 0:
-                    # Look up current fund_apr for this symbol from opportunities
-                    current_fund_apr = 0.0
-                    for opp in self.current_opportunities:
-                        if opp.get('symbol') == position.symbol:
-                            current_fund_apr = opp.get('fund_apr', 0.0)
-                            break
+                # Look up current fund_apr and best available APR (needed for rotation tracking)
+                current_fund_apr = 0.0
+                best_available_apr = 0.0
+                for opp in self.current_opportunities:
+                    if opp.get('symbol') == position.symbol:
+                        current_fund_apr = opp.get('fund_apr', 0.0)
+                    best_available_apr = max(best_available_apr, opp.get('fund_apr', 0.0))
 
-                    # If funding is negative, give bonus for exiting
-                    # Bonus proportional to how negative: -100% APR → 1.0 * scale
-                    if current_fund_apr < 0:
-                        negative_funding_bonus = abs(current_fund_apr) / 100.0 * self.negative_funding_exit_reward_scale
-                        exit_reward += negative_funding_bonus
+                # BONUS: Reward for exiting positions with NEGATIVE funding ONLY
+                # V7 SIMPLIFIED: Removed "inferior position" bonus - it caused overtrading!
+                # The model was getting rewarded for every exit because there's usually
+                # a better opportunity available. This led to 380 trades/episode.
+                # Now ONLY reward exiting when funding rate is actually negative.
+                if self.negative_funding_exit_reward_scale > 0 and current_fund_apr < 0:
+                    # Bonus proportional to how negative the APR is
+                    # Example: -100% APR → 100/100 * 2.0 = 2.0 bonus
+                    negative_funding_bonus = abs(current_fund_apr) / 100.0 * self.negative_funding_exit_reward_scale
+                    exit_reward += negative_funding_bonus
+
+                # V7: APR FLIP EXIT BONUS - Extra reward for exiting when APR direction flipped
+                # This is CRITICAL for the AIAUSDT case: +687% entry → -105% current
+                # The model must learn that an APR flip is a strong EXIT signal
+                if self.apr_flip_exit_bonus_scale > 0:
+                    entry_apr = position.entry_apr  # APR at position entry
+                    # Check for direction flip: entered positive, now negative
+                    if entry_apr > 0 and current_fund_apr < 0:
+                        # Bonus proportional to severity of the flip
+                        # Example: +687% entry → -105% current = 792% swing
+                        apr_swing = entry_apr - current_fund_apr  # Always positive when flip occurs
+                        flip_bonus = min(apr_swing / 500.0, 2.0) * self.apr_flip_exit_bonus_scale
+                        exit_reward += flip_bonus
+
+                # V6.1: Store exited position's APR for rotation tracking
+                self._last_exited_apr = current_fund_apr
+
+                # V6.1: Trade diversity bonus - reward completing trades to encourage activity
+                if self.trade_diversity_bonus > 0:
+                    exit_reward += self.trade_diversity_bonus
 
             elif exit_type == ExitType.STOP_LOSS:
                 # Stop-loss triggered - still reward price P&L (natural penalty)
@@ -1425,7 +1523,8 @@ class FundingArbitrageEnv(gym.Env):
         raw_data = {
             'trading_config': trading_config,
             'portfolio': portfolio_dict,
-            'opportunities': opportunities_with_flags
+            'opportunities': opportunities_with_flags,
+            'current_time': self.current_time,  # V6: For time_to_next_funding feature
         }
 
         # CRITICAL: Cache raw_data for ML API mode (deep copy to avoid mutation)

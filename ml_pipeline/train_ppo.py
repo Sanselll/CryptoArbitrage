@@ -43,14 +43,14 @@ def parse_args():
     # Environment (V3: 301→203 dimensions)
     parser.add_argument('--initial-capital', type=float, default=10000.0,
                         help='Initial capital in USD')
-    parser.add_argument('--episode-length-days', type=int, default=5,
+    parser.add_argument('--episode-length-days', type=int, default=3,
                         help='Episode length in days (for training episodes)')
     parser.add_argument('--step-minutes', type=int, default=5,
                         help='Minutes per prediction step (default: 5 = 5-minute intervals)')
     parser.add_argument('--sample-random-config', action='store_true',
                         help='Sample random TradingConfig each episode for diversity')
-    parser.add_argument('--eval-full-test', action='store_true', default=True,
-                        help='Use entire test dataset for evaluation (default: True)')
+    parser.add_argument('--eval-full-test', action='store_true', default=False,
+                        help='Use entire test dataset for evaluation (V6 default: False = random 3-day windows)')
     parser.add_argument('--no-eval-full-test', action='store_false', dest='eval_full_test',
                         help='Use episode-length-days for evaluation instead of full test dataset')
 
@@ -62,22 +62,36 @@ def parse_args():
     parser.add_argument('--max-positions', type=int, default=2,
                         help='Maximum concurrent positions (1-5)')
 
-    # Reward config (Balanced RL-v2 approach + Negative Funding Exit Reward)
-    parser.add_argument('--funding-reward-scale', type=float, default=1.0,
-                        help='Scale for funding P&L reward (equal weight with price)')
-    parser.add_argument('--price-reward-scale', type=float, default=1.0,
-                        help='Scale for price P&L reward (equal weight with funding)')
+    # Reward config (V7: Balanced RL approach with APR flip detection)
+    parser.add_argument('--funding-reward-scale', type=float, default=15.0,
+                        help='Scale for funding P&L reward (V6: 15.0 for stronger learning signal)')
+    parser.add_argument('--price-reward-scale', type=float, default=15.0,
+                        help='Scale for price P&L reward (V6: 15.0 for stronger learning signal)')
     parser.add_argument('--liquidation-penalty-scale', type=float, default=10.0,
                         help='Penalty scale for approaching liquidation (10 for less conservative, 0 to disable)')
     parser.add_argument('--opportunity-cost-scale', type=float, default=0.0,
-                        help='Opportunity cost penalty (DISABLED by default - causes overtrading, use 0.0)')
-    parser.add_argument('--negative-funding-exit-reward-scale', type=float, default=0.0,
-                        help='Exit reward scale for positions with negative funding (0.0=disabled, 2.0=moderate incentive)')
+                        help='Opportunity cost penalty (DISABLED by default - can cause overtrading, use 0.0)')
+    parser.add_argument('--negative-funding-exit-reward-scale', type=float, default=2.0,
+                        help='Exit reward scale for positions with negative funding (V6: 2.0 for rotation)')
+    # V7: New reward parameters for APR direction flip detection
+    parser.add_argument('--negative-apr-penalty-scale', type=float, default=0.02,
+                        help='Hourly penalty for holding positions with negative APR (V7: 0.02)')
+    parser.add_argument('--apr-flip-exit-bonus-scale', type=float, default=1.5,
+                        help='Bonus for exiting positions when APR direction flipped (V7: 1.5)')
+    parser.add_argument('--opportunity-cost-threshold', type=float, default=50.0,
+                        help='APR gap threshold for opportunity cost penalty (V7: 50%%)')
+    # V6.1: Trade diversity (DISABLED by default - causes overtrading)
+    parser.add_argument('--trade-diversity-bonus', type=float, default=0.0,
+                        help='Bonus per completed trade (WARNING: >0.1 causes overtrading, use 0.0)')
+    parser.add_argument('--inactivity-penalty-hours', type=float, default=48.0,
+                        help='Hours after which inactivity penalty starts (V6.2: 48h)')
+    parser.add_argument('--inactivity-penalty-scale', type=float, default=0.005,
+                        help='Scale for inactivity penalty (V6.2: 0.005)')
 
     # PPO hyperparameters
     parser.add_argument('--learning-rate', type=float, default=3e-4,
                         help='Learning rate')
-    parser.add_argument('--lr-schedule', type=str, default='constant',
+    parser.add_argument('--lr-schedule', type=str, default='cosine',
                         choices=['constant', 'linear', 'cosine'],
                         help='Learning rate schedule (default: constant)')
     parser.add_argument('--final-learning-rate', type=float, default=None,
@@ -90,14 +104,14 @@ def parse_args():
                         help='PPO clip range')
     parser.add_argument('--value-coef', type=float, default=0.5,
                         help='Value loss coefficient')
-    parser.add_argument('--entropy-coef', type=float, default=0.05,
-                        help='Entropy coefficient (balanced to maintain exploration without over-trading)')
-    parser.add_argument('--initial-entropy-coef', type=float, default=None,
-                        help='Initial entropy coefficient for decay schedule (V3.1). If set, enables entropy decay.')
-    parser.add_argument('--final-entropy-coef', type=float, default=None,
-                        help='Final entropy coefficient for decay schedule (V3.1). Requires --initial-entropy-coef.')
+    parser.add_argument('--entropy-coef', type=float, default=0.20,
+                        help='Entropy coefficient (used if no decay schedule)')
+    parser.add_argument('--initial-entropy-coef', type=float, default=0.20,
+                        help='Initial entropy coefficient for decay schedule (V7: 0.20 for better exploration)')
+    parser.add_argument('--final-entropy-coef', type=float, default=0.10,
+                        help='Final entropy coefficient for decay schedule (V7: 0.10 to maintain exploration)')
     parser.add_argument('--entropy-decay-episodes', type=int, default=2000,
-                        help='Number of episodes over which to decay entropy (V3.1). Default: 2000')
+                        help='Number of episodes over which to decay entropy (V7: 2000 slower decay)')
     parser.add_argument('--n-epochs', type=int, default=4,
                         help='Number of epochs per update')
     parser.add_argument('--batch-size', type=int, default=256,
@@ -108,8 +122,8 @@ def parse_args():
                         help='Number of training episodes')
     parser.add_argument('--eval-every', type=int, default=50,
                         help='Evaluate every N episodes')
-    parser.add_argument('--eval-episodes', type=int, default=5,
-                        help='Number of episodes to average for evaluation (default: 5)')
+    parser.add_argument('--eval-episodes', type=int, default=10,
+                        help='Number of episodes to average for evaluation (V6: 10 random 3-day windows)')
     parser.add_argument('--save-every', type=int, default=50,
                         help='Save checkpoint every N episodes')
     parser.add_argument('--device', type=str, default='cpu',
@@ -165,13 +179,21 @@ def create_environment(args, data_path: str, is_test_env: bool = False, verbose:
             max_positions=args.max_positions,
         )
 
-    # Create RewardConfig (RL-v2 + Negative Funding Exit Reward)
+    # Create RewardConfig (V7: APR flip detection + balanced rewards)
     reward_config = RewardConfig(
         funding_reward_scale=args.funding_reward_scale,
         price_reward_scale=args.price_reward_scale,
         liquidation_penalty_scale=args.liquidation_penalty_scale,
         opportunity_cost_scale=args.opportunity_cost_scale,
         negative_funding_exit_reward_scale=args.negative_funding_exit_reward_scale,
+        # V7: New parameters for APR direction flip detection
+        negative_apr_penalty_scale=args.negative_apr_penalty_scale,
+        apr_flip_exit_bonus_scale=args.apr_flip_exit_bonus_scale,
+        opportunity_cost_threshold=args.opportunity_cost_threshold,
+        # V6.1: Trade diversity (DISABLED by default to prevent overtrading)
+        trade_diversity_bonus=args.trade_diversity_bonus,
+        inactivity_penalty_hours=args.inactivity_penalty_hours,
+        inactivity_penalty_scale=args.inactivity_penalty_scale,
     )
 
     # Convert step minutes to hours for the environment

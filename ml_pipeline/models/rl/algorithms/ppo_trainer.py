@@ -381,8 +381,19 @@ class PPOTrainer:
                 # Entropy bonus
                 entropy_loss = -entropy.mean()
 
+                # V7: Entropy floor penalty - prevent policy collapse
+                # If entropy drops below threshold, add extra penalty to encourage exploration
+                # Minimum entropy ~0.5 corresponds to ~60% certainty on best action
+                entropy_floor = 0.5
+                current_entropy = entropy.mean()
+                if current_entropy < entropy_floor:
+                    # Quadratic penalty when below floor: (floor - entropy)^2 * scale
+                    entropy_floor_penalty = ((entropy_floor - current_entropy) ** 2) * 2.0
+                else:
+                    entropy_floor_penalty = 0.0
+
                 # Total loss (V3.1: use current_entropy_coef instead of self.entropy_coef)
-                loss = policy_loss + self.value_coef * value_loss + current_entropy_coef * entropy_loss
+                loss = policy_loss + self.value_coef * value_loss + current_entropy_coef * entropy_loss + entropy_floor_penalty
 
                 # Backward pass
                 self.optimizer.zero_grad()

@@ -1,19 +1,19 @@
 """
-Unified Feature Builder for RL Inference (V5.4)
+Unified Feature Builder for RL Inference (V6)
 
 This module provides the SINGLE SOURCE OF TRUTH for all feature engineering
 used in the modular RL arbitrage system. All components (backend inference,
 ML API server, training, and testing) must use this class to ensure consistency.
 
-Architecture V5.4: 213-dimensional observation space
+Architecture V6: 219-dimensional observation space
 - Config: 5 dims
-- Portfolio: 3 dims
-- Executions: 85 dims (5 slots × 17 features)
+- Portfolio: 4 dims (V6: +1 time_to_next_funding_norm)
+- Executions: 90 dims (5 slots × 18 features, V6: +1 pnl_vs_peak_pct per slot)
 - Opportunities: 120 dims (10 slots × 12 features)
 
-V5.4 Changes:
-- Added opportunity feature #12: spread_mean_reversion_potential (sign-agnostic spread profitability)
-- Execution feature #9 spread_change_from_entry now active (was disabled in v3)
+V6 Changes:
+- Added portfolio feature: time_to_next_funding_norm (minutes until next funding / 480)
+- Added execution feature #18: pnl_vs_peak_pct (current P&L / peak P&L, signals profit-taking)
 
 Key Principles:
 1. All feature calculation logic lives HERE and only here
@@ -27,6 +27,7 @@ import numpy as np
 import pickle
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 import sys
 
 # Add parent directory to path for imports
@@ -66,6 +67,13 @@ class UnifiedFeatureBuilder:
         self._prev_funding_8h = {}     # slot_idx -> previous value
         self._prev_spread = {}         # slot_idx -> previous value
 
+        # V6: Peak P&L tracking (per position slot) for pnl_vs_peak_pct feature
+        self._peak_pnl = {}  # slot_idx -> peak P&L value
+        self._slot_symbols = {}  # slot_idx -> symbol (for detecting position changes)
+
+        # V7: APR velocity tracking (per position slot) for apr_velocity feature
+        self._prev_position_apr = {}  # slot_idx -> previous APR value
+
         if feature_scaler_path is None:
             feature_scaler_path = CONFIG.FEATURE_SCALER_PATH
 
@@ -94,33 +102,35 @@ class UnifiedFeatureBuilder:
         self._prev_estimated_pnl.clear()
         self._prev_funding_8h.clear()
         self._prev_spread.clear()
+        self._peak_pnl.clear()  # V6: Reset peak P&L tracking
+        self._slot_symbols.clear()  # V6: Reset symbol tracking
+        self._prev_position_apr.clear()  # V7: Reset APR velocity tracking
 
     def build_observation_from_raw_data(self, raw_data: Dict[str, Any], log_file: Optional[str] = None) -> np.ndarray:
         """
-        Build complete 203-dim observation vector from raw backend data.
+        Build complete 219-dim observation vector from raw backend data (V6).
 
         This is the main entry point for converting raw data to model features.
-
-        Args:
-            raw_data: Dictionary with trading_config, portfolio, opportunities
-            log_file: Optional path to log features for debugging
 
         Args:
             raw_data: Dict containing:
                 - 'trading_config': Dict with max_leverage, target_utilization, etc.
                 - 'portfolio': Dict with positions, total_capital, capital_utilization
                 - 'opportunities': List of opportunity dicts
+                - 'current_time': Optional datetime for time_to_next_funding calculation
+            log_file: Optional path to log features for debugging
 
         Returns:
-            213-dimensional observation array (5 + 3 + 85 + 120)
+            219-dimensional observation array (5 + 4 + 90 + 120)
         """
         trading_config = raw_data.get('trading_config', {})
         portfolio = raw_data.get('portfolio', {})
         opportunities = raw_data.get('opportunities', [])
+        current_time = raw_data.get('current_time', None)  # V6: For time_to_next_funding
 
         # Build each component
         config_features = self.build_config_features(trading_config)
-        portfolio_features = self.build_portfolio_features(portfolio, trading_config)
+        portfolio_features = self.build_portfolio_features(portfolio, trading_config, current_time)
 
         # Calculate best available APR for execution features
         best_available_apr = 0.0
@@ -183,23 +193,23 @@ class UnifiedFeatureBuilder:
             float(trading_config.get('liquidation_buffer', 0.15)),
         ], dtype=np.float32)
 
-    def build_portfolio_features(self, portfolio: Dict, trading_config: Dict) -> np.ndarray:
+    def build_portfolio_features(self, portfolio: Dict, trading_config: Dict, current_time: Optional[datetime] = None) -> np.ndarray:
         """
-        Build portfolio features (V3: 3 dimensions).
+        Build portfolio features (V6: 4 dimensions).
 
         Features:
         1. num_positions_ratio: Active positions / max_positions
         2. min_liq_distance: Minimum liquidation distance across all positions
         3. capital_utilization: Used capital / total capital
-
-        V3 Changes: Removed historical metrics (avg_position_pnl_pct, total_pnl_pct, max_drawdown_pct)
+        4. time_to_next_funding_norm: V6 - Minutes until next funding payment / 480 (0-1)
 
         Args:
             portfolio: Portfolio state dict
             trading_config: Trading configuration dict
+            current_time: Optional datetime for funding time calculation
 
         Returns:
-            3-dimensional array
+            4-dimensional array
         """
         # Count only ACTIVE positions, not empty padded slots
         positions = portfolio.get('positions', [])
@@ -223,17 +233,57 @@ class UnifiedFeatureBuilder:
 
         capital_utilization = portfolio.get('capital_utilization', 0.0) / 100.0
 
+        # V6: Calculate time to next funding payment
+        time_to_next_funding_norm = self._calc_time_to_next_funding(current_time)
+
         return np.array([
             num_positions_ratio,
             min_liq_distance,
             capital_utilization,
+            time_to_next_funding_norm,  # V6: New feature
         ], dtype=np.float32)
+
+    def _calc_time_to_next_funding(self, current_time: Optional[datetime]) -> float:
+        """
+        Calculate normalized time until next funding payment (V6).
+
+        Funding payments occur at 00:00, 08:00, 16:00 UTC.
+        Returns minutes until next payment / 480 (8 hours max).
+
+        Args:
+            current_time: Current datetime (UTC)
+
+        Returns:
+            Normalized value 0-1 (0 = funding imminent, 1 = just passed)
+        """
+        if current_time is None:
+            return 0.5  # Default to middle if no time available
+
+        # Funding hours: 00, 08, 16 UTC
+        funding_hours = [0, 8, 16, 24]  # 24 = midnight next day
+        current_hour = current_time.hour
+        current_minute = current_time.minute
+
+        # Find next funding hour
+        next_funding_hour = 24  # Default to midnight
+        for fh in funding_hours:
+            if fh > current_hour or (fh == current_hour and current_minute == 0):
+                next_funding_hour = fh
+                break
+
+        # Calculate minutes until next funding
+        minutes_until = (next_funding_hour - current_hour) * 60 - current_minute
+        if minutes_until < 0:
+            minutes_until += 24 * 60  # Wrap to next day
+
+        # Normalize by 480 minutes (8 hours)
+        return min(minutes_until / 480.0, 1.0)
 
     def build_execution_features(self, portfolio: Dict, best_available_apr: float = 0.0) -> np.ndarray:
         """
-        Build execution features for up to 5 position slots (85 dimensions total).
+        Build execution features for up to 5 position slots (90 dimensions total, V6).
 
-        Each position has 17 features:
+        Each position has 18 features:
         1. is_active
         2. net_pnl_pct (price P&L + funding - fees) / capital
         3. hours_held_norm: log(hours + 1) / log(73)
@@ -251,13 +301,14 @@ class UnifiedFeatureBuilder:
         15. return_efficiency: P&L per hour held (clipped to ±50)
         16. value_to_capital_ratio: capital allocated to this position
         17. pnl_imbalance: (long_pnl - short_pnl) / 200
+        18. pnl_vs_peak_pct: V6 - current P&L / peak P&L (signals profit-taking opportunity)
 
         Args:
             portfolio: Portfolio state dict with positions list
             best_available_apr: Maximum APR among current opportunities
 
         Returns:
-            85-dimensional array (5 slots × 17 features)
+            90-dimensional array (5 slots × 18 features)
         """
         positions = portfolio.get('positions', [])
         capital = portfolio.get('total_capital', 10000.0)
@@ -270,6 +321,20 @@ class UnifiedFeatureBuilder:
 
                 # Check if position is ACTUALLY active
                 is_active = pos.get('is_active', False)
+
+                # V6/V7: Detect position change and reset tracking for this slot
+                pos_symbol = pos.get('symbol', '')
+                if slot_idx in self._slot_symbols and self._slot_symbols[slot_idx] != pos_symbol:
+                    # Different symbol in this slot - reset tracking
+                    if slot_idx in self._peak_pnl:
+                        del self._peak_pnl[slot_idx]
+                    if slot_idx in self._prev_estimated_pnl:
+                        del self._prev_estimated_pnl[slot_idx]
+                    if slot_idx in self._prev_funding_8h:
+                        del self._prev_funding_8h[slot_idx]
+                    if slot_idx in self._prev_position_apr:  # V7: Reset APR tracking
+                        del self._prev_position_apr[slot_idx]
+                self._slot_symbols[slot_idx] = pos_symbol
 
                 if not is_active:
                     # Empty/inactive slot - all zeros
@@ -311,7 +376,7 @@ class UnifiedFeatureBuilder:
 
                     long_price_pnl = position_size * ((effective_current_long - entry_long_price) / entry_long_price)
                     short_price_pnl = position_size * ((entry_short_price - effective_current_short) / entry_short_price)
-                estimated_pnl_pct = ((long_price_pnl + short_price_pnl) / total_capital_used) / 100 if total_capital_used > 0 else 0.0
+                estimated_pnl_pct = (long_price_pnl + short_price_pnl) / total_capital_used if total_capital_used > 0 else 0.0
 
                 # 5. estimated_pnl_velocity (change per step)
                 estimated_pnl_velocity = 0.0
@@ -332,8 +397,7 @@ class UnifiedFeatureBuilder:
                 short_payments_8h = 8.0 / short_interval if short_interval > 0 else 1.0
                 long_funding_8h = -long_rate * long_payments_8h
                 short_funding_8h = short_rate * short_payments_8h
-                # Convert to percentage then back to decimal to match original implementation
-                estimated_funding_8h_pct = ((long_funding_8h + short_funding_8h) * 100) / 100
+                estimated_funding_8h_pct = long_funding_8h + short_funding_8h
 
                 # 7. funding_velocity (change per step)
                 funding_velocity = 0.0
@@ -367,11 +431,11 @@ class UnifiedFeatureBuilder:
                     else:
                         liquidation_distance_pct = 1.0
 
-                # 11. apr_ratio
+                # 11. apr_ratio (V7: Allow negative values to signal direction flip)
                 current_position_apr_value = pos.get('current_position_apr', 0.0)
                 entry_apr = pos.get('entry_apr', 0.0)
                 apr_ratio_raw = current_position_apr_value / entry_apr if entry_apr > 0 else 1.0
-                apr_ratio = np.clip(apr_ratio_raw, 0, 3) / 3
+                apr_ratio = np.clip(apr_ratio_raw, -3, 3) / 3  # V7: Changed from [0,3] to [-3,3]
 
                 # 12. current_position_apr
                 current_position_apr = np.clip(
@@ -387,8 +451,21 @@ class UnifiedFeatureBuilder:
                     CONFIG.APR_CLIP_MAX
                 ) / CONFIG.APR_CLIP_MAX
 
-                # 14. apr_advantage
-                apr_advantage = current_position_apr - best_available_apr_norm
+                # 14. apr_advantage (V6: Log scale for large gaps to amplify signal)
+                # Problem: /5000 normalization makes 1239% gap only -0.25 (too weak!)
+                # Solution: Use log scale for large gaps to create stronger exit signal
+                raw_current_apr = current_position_apr_value  # Raw APR (not normalized)
+                raw_best_apr = best_available_apr  # Raw APR (not normalized)
+                apr_gap = raw_best_apr - raw_current_apr  # Positive = better opportunity exists
+
+                if apr_gap > 100:  # Significant gap (>100% APR)
+                    # Log scale: 100% gap → -0.3, 1000% gap → -1.0, 10000% gap → -2.0
+                    apr_advantage = -np.log10(apr_gap / 100 + 1)
+                else:
+                    # Linear for small gaps (preserves sensitivity for normal differences)
+                    apr_advantage = -apr_gap / 500
+
+                apr_advantage = np.clip(apr_advantage, -2.0, 0.5)  # Allow slight positive when current > best
 
                 # 15. return_efficiency (P&L per hour - use raw percentage, not divided by 100)
                 if raw_hours_held > 0:
@@ -409,6 +486,41 @@ class UnifiedFeatureBuilder:
                 short_pnl_pct = pos.get('short_pnl_pct', 0.0)
                 pnl_imbalance = (long_pnl_pct - short_pnl_pct) / 200
 
+                # 18. pnl_vs_peak_pct (V6: signals profit-taking opportunity)
+                # Track peak P&L for this slot and calculate ratio
+                current_pnl = unrealized_pnl_pct_raw  # Use raw percentage
+                if slot_idx not in self._peak_pnl:
+                    self._peak_pnl[slot_idx] = current_pnl
+                else:
+                    # Update peak if current P&L is higher
+                    if current_pnl > self._peak_pnl[slot_idx]:
+                        self._peak_pnl[slot_idx] = current_pnl
+
+                peak_pnl = self._peak_pnl[slot_idx]
+                if peak_pnl > 0.001:  # Avoid division by zero, only meaningful when peak is positive
+                    pnl_vs_peak_pct = current_pnl / peak_pnl
+                    pnl_vs_peak_pct = np.clip(pnl_vs_peak_pct, 0.0, 1.0)  # Clip to 0-1
+                else:
+                    pnl_vs_peak_pct = 1.0  # Default: at peak or no meaningful peak yet
+
+                # 19. apr_sign_match (V7: Explicit APR direction flip indicator)
+                # 1.0 = same sign as entry (good), -1.0 = sign flipped (bad - exit signal!)
+                if entry_apr > 0 and current_position_apr_value < 0:
+                    apr_sign_match = -1.0  # CRITICAL: Flipped from positive to negative!
+                elif entry_apr < 0 and current_position_apr_value > 0:
+                    apr_sign_match = -1.0  # Flipped from negative to positive
+                else:
+                    apr_sign_match = 1.0   # Same sign or both zero
+
+                # 20. apr_velocity (V7: Rate of APR change - signals deterioration)
+                # Negative = APR getting worse, positive = APR improving
+                apr_velocity = 0.0
+                if self.enable_velocity_tracking:
+                    prev_apr = self._prev_position_apr.get(slot_idx, current_position_apr_value)
+                    apr_velocity = (current_position_apr_value - prev_apr) / 100  # Normalize by 100% APR
+                    apr_velocity = np.clip(apr_velocity, -1.0, 1.0)  # Clip to ±1
+                    self._prev_position_apr[slot_idx] = current_position_apr_value
+
                 # CRITICAL: Feature order must match exactly across all components
                 slot_features = [
                     is_active_feat,
@@ -428,6 +540,9 @@ class UnifiedFeatureBuilder:
                     return_efficiency,
                     value_to_capital_ratio,
                     pnl_imbalance,
+                    pnl_vs_peak_pct,  # V6: New feature
+                    apr_sign_match,   # V7: APR direction flip indicator
+                    apr_velocity,     # V7: APR deterioration rate
                 ]
             else:
                 # Empty slot - all zeros

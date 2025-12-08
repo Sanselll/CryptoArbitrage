@@ -295,6 +295,9 @@ class MLAPIClient:
         # Use env.get_raw_state_for_ml_api() for parity with direct mode (same raw data)
         raw_data = env.get_raw_state_for_ml_api()
         raw_data['portfolio']['session_id'] = self.session_id
+        # Pass current_time to API for backtesting (V6: time_to_next_funding feature)
+        if 'current_time' in raw_data:
+            raw_data['portfolio']['current_time'] = raw_data['current_time']
         request_data = self.sanitize_for_json(raw_data)
         url = self.full_url
 

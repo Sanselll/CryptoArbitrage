@@ -4,11 +4,11 @@ Modular RL Predictor V2 - Simplified with UnifiedFeatureBuilder
 This version uses the UnifiedFeatureBuilder for all feature preparation,
 eliminating code duplication and ensuring consistency across all components.
 
-Architecture V3: 203-dimensional observation space
+Architecture V7: 229-dimensional observation space
 - Config: 5 dims
-- Portfolio: 3 dims
-- Executions: 85 dims (5 slots × 17 features)
-- Opportunities: 110 dims (10 slots × 11 features)
+- Portfolio: 4 dims (V6: +1 time_to_next_funding_norm)
+- Executions: 100 dims (5 slots × 20 features, V7: +2 apr_sign_match, apr_velocity per slot)
+- Opportunities: 120 dims (10 slots × 12 features)
 
 Action space: 36 actions
 - 0: HOLD
@@ -212,10 +212,22 @@ class ModularRLPredictor:
         feature_builder = self._get_feature_builder(session_id)
 
         # Build observation using session-specific feature builder
+        from datetime import datetime
+        import pandas as pd
+
+        # Use current_time from portfolio if provided (for backtesting), else use real time
+        current_time = portfolio.get('current_time')
+        if current_time is None:
+            current_time = datetime.utcnow()
+        elif isinstance(current_time, str):
+            # Parse timestamp string (handles various formats including nanoseconds)
+            current_time = pd.Timestamp(current_time).to_pydatetime()
+
         raw_data = {
             'trading_config': trading_config,
             'portfolio': portfolio,
-            'opportunities': opportunities
+            'opportunities': opportunities,
+            'current_time': current_time,  # V6: For time_to_next_funding feature
         }
         obs = feature_builder.build_observation_from_raw_data(raw_data)
 

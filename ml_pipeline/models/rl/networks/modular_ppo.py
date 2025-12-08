@@ -1,11 +1,11 @@
 """
-Modular PPO Network Architecture for Multi-Opportunity, Multi-Position Trading (V3)
+Modular PPO Network Architecture for Multi-Opportunity, Multi-Position Trading (V6)
 
-V3 Refactoring (301→203 dimensions):
+V6 Architecture (219 dimensions):
 - ConfigEncoder: 5 → 16 (unchanged)
-- PortfolioEncoder: 3 → 32 (was 6, removed historical metrics)
-- ExecutionEncoder: 5×17 → 64 (was 5×20, removed 8 features, added 6)
-- OpportunityEncoder: 10×11 → 128 (was 10×20, removed 9 market quality, added 1)
+- PortfolioEncoder: 4 → 32 (V6: +1 time_to_next_funding_norm)
+- ExecutionEncoder: 5×18 → 64 (V6: +1 pnl_vs_peak_pct per slot)
+- OpportunityEncoder: 10×12 → 128 (unchanged)
 - FusionLayer: Cross-attention → 256
 - Actor/Critic heads with action masking support
 """
@@ -48,14 +48,14 @@ class ConfigEncoder(nn.Module):
 
 class PortfolioEncoder(nn.Module):
     """
-    Encodes portfolio state into a dense representation (V3: 3 features).
+    Encodes portfolio state into a dense representation (V6: 4 features).
 
-    V3: 10→3 features (removed avg_position_pnl_pct, total_pnl_pct, max_drawdown_pct)
-    Input: 3 features (num_positions_ratio, min_liquidation_distance, capital_utilization)
+    V6: 3→4 features (added time_to_next_funding_norm)
+    Input: 4 features (num_positions_ratio, min_liquidation_distance, capital_utilization, time_to_next_funding_norm)
     Output: 32-dimensional embedding
     """
 
-    def __init__(self, input_dim: int = 3, hidden_dim: int = 32, output_dim: int = 32):
+    def __init__(self, input_dim: int = 4, hidden_dim: int = 32, output_dim: int = 32):
         super().__init__()
 
         self.net = nn.Sequential(
@@ -69,7 +69,7 @@ class PortfolioEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: (batch_size, 3) portfolio features (V3: was 10)
+            x: (batch_size, 4) portfolio features (V6: was 3)
         Returns:
             (batch_size, 32) portfolio embedding
         """
@@ -78,16 +78,16 @@ class PortfolioEncoder(nn.Module):
 
 class ExecutionEncoder(nn.Module):
     """
-    Encodes execution states with self-attention over position slots (V3: 17 features per slot).
+    Encodes execution states with self-attention over position slots (V6: 18 features per slot).
 
-    V3: 5×12→5×17 (removed 8 features, added 6)
-    Input: 85 features (5 positions × 17 features each)
+    V6: 5×17→5×18 (added pnl_vs_peak_pct)
+    Input: 90 features (5 positions × 18 features each)
     Output: 64-dimensional embedding
     """
 
     def __init__(self,
                  num_slots: int = 5,
-                 features_per_slot: int = 17,  # V3: was 12, then 20, now 17
+                 features_per_slot: int = 18,  # V6: was 17, now 18
                  embedding_dim: int = 32,
                  num_heads: int = 2,
                  output_dim: int = 64):
@@ -122,7 +122,7 @@ class ExecutionEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: (batch_size, 85) execution features (5 slots × 17 features, V3: was 5×20)
+            x: (batch_size, 90) execution features (5 slots × 18 features, V6: was 5×17)
         Returns:
             (batch_size, 64) execution embedding
         """
@@ -149,16 +149,16 @@ class ExecutionEncoder(nn.Module):
 
 class OpportunityEncoder(nn.Module):
     """
-    Encodes opportunity states with self-attention over opportunity slots (V3: 11 features per slot).
+    Encodes opportunity states with self-attention over opportunity slots (V5.4: 12 features per slot).
 
-    V3: 10×20→10×11 (removed 9 market quality features, added 1 velocity)
-    Input: 110 features (10 opportunities × 11 features each)
+    V5.4: 10×11→10×12 (added spread_mean_reversion_potential)
+    Input: 120 features (10 opportunities × 12 features each)
     Output: 128-dimensional embedding
     """
 
     def __init__(self,
                  num_slots: int = 10,
-                 features_per_slot: int = 11,  # V3: was 20, now 11
+                 features_per_slot: int = 12,  # V5.4: was 11, now 12
                  embedding_dim: int = 64,
                  num_heads: int = 4,
                  output_dim: int = 128):
@@ -371,13 +371,13 @@ class CriticHead(nn.Module):
 
 class ModularPPONetwork(nn.Module):
     """
-    Complete modular PPO network combining all components (V3 Refactoring).
+    Complete modular PPO network combining all components (V6).
 
-    Processes 203-dim observation (V3: 301→203 dimensions):
-    - Config (5) → ConfigEncoder → 16  # unchanged
-    - Portfolio (3) → PortfolioEncoder → 32  # V3: was 6
-    - Executions (85) → ExecutionEncoder → 64  # V3: 5×17 (was 5×20)
-    - Opportunities (110) → OpportunityEncoder → 128  # V3: 10×11 (was 10×20)
+    Processes 219-dim observation:
+    - Config (5) → ConfigEncoder → 16
+    - Portfolio (4) → PortfolioEncoder → 32 (V6: +1 time_to_next_funding)
+    - Executions (90) → ExecutionEncoder → 64 (5×18, V6: +1 pnl_vs_peak per slot)
+    - Opportunities (120) → OpportunityEncoder → 128 (10×12)
     - Fusion → 256
     - Actor → 36 action logits
     - Critic → 1 value
@@ -386,19 +386,19 @@ class ModularPPONetwork(nn.Module):
     def __init__(self):
         super().__init__()
 
-        # Encoders (V3: Updated dimensions)
+        # Encoders (V6: Updated dimensions)
         self.config_encoder = ConfigEncoder(input_dim=5, output_dim=16)
-        self.portfolio_encoder = PortfolioEncoder(input_dim=3, output_dim=32)  # V3: was 6
+        self.portfolio_encoder = PortfolioEncoder(input_dim=4, output_dim=32)  # V6: was 3, now 4
         self.execution_encoder = ExecutionEncoder(
             num_slots=5,
-            features_per_slot=17,  # V3: was 20
+            features_per_slot=18,  # V6: was 17, now 18
             embedding_dim=32,
             num_heads=2,
             output_dim=64
         )
         self.opportunity_encoder = OpportunityEncoder(
             num_slots=10,
-            features_per_slot=11,  # V3: was 19
+            features_per_slot=12,
             embedding_dim=64,
             num_heads=4,
             output_dim=128
@@ -421,21 +421,21 @@ class ModularPPONetwork(nn.Module):
                 obs: torch.Tensor,
                 action_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass through entire network (V3 Refactoring).
+        Forward pass through entire network (V5.4).
 
         Args:
-            obs: (batch_size, 203) observation (V3: was 301)
+            obs: (batch_size, 213) observation
             action_mask: (batch_size, 36) boolean mask (optional)
 
         Returns:
             action_logits: (batch_size, 36) masked action logits
             value: (batch_size, 1) state value estimate
         """
-        # Split observation into components (V3: 203 dims total)
+        # Split observation into components (V6: 219 dims total)
         config = obs[:, 0:5]            # (batch, 5) - unchanged
-        portfolio = obs[:, 5:8]         # (batch, 3) - V3: was 5:11
-        executions = obs[:, 8:93]       # (batch, 85) - V3: was 11:111
-        opportunities = obs[:, 93:203]  # (batch, 110) - V3: was 111:301
+        portfolio = obs[:, 5:9]         # (batch, 4) - V6: was 5:8, now 5:9
+        executions = obs[:, 9:99]       # (batch, 90) - V6: was 8:93, now 9:99 (5×18)
+        opportunities = obs[:, 99:219]  # (batch, 120) - V6: was 93:213, now 99:219
 
         # Encode each component
         config_emb = self.config_encoder(config)
@@ -459,7 +459,7 @@ class ModularPPONetwork(nn.Module):
         Get action distribution for sampling.
 
         Args:
-            obs: (batch_size, 203) observation (V3: was 301)
+            obs: (batch_size, 213) observation
             action_mask: (batch_size, 36) boolean mask (optional)
 
         Returns:
@@ -476,7 +476,7 @@ class ModularPPONetwork(nn.Module):
         Evaluate actions for PPO training.
 
         Args:
-            obs: (batch_size, 203) observations (V3: was 301)
+            obs: (batch_size, 213) observations
             actions: (batch_size,) actions taken
             action_mask: (batch_size, 36) boolean mask (optional)
 
@@ -509,7 +509,7 @@ if __name__ == "__main__":
 
     # Test forward pass
     batch_size = 4
-    obs = torch.randn(batch_size, 301)  # Phase 2: APR comparison features (was 286)
+    obs = torch.randn(batch_size, 219)  # V6: 219 dims total
 
     # Create action mask (all valid)
     action_mask = torch.ones(batch_size, 36, dtype=torch.bool)

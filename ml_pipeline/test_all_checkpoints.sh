@@ -14,7 +14,7 @@ TEST_DATA="data/production/rl_opportunities.csv"
 PRICE_HISTORY="data/production/price_history"
 LEVERAGE=2
 START_TIME="2025-11-28 08:05:00"
-END_TIME="2025-12-03 07:00:00"
+END_TIME="2025-12-08 07:00:00"
 INITIAL_CAPITAL=400
 
 echo "========================================================================"
