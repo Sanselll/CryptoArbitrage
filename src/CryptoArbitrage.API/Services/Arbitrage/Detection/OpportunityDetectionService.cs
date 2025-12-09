@@ -600,9 +600,11 @@ public class OpportunityDetectionService : IOpportunityDetectionService
                     // === VALIDATION: Skip invalid funding rate data ===
                     // Filter out opportunities with missing/invalid funding rates or times
 
-                    // 1. Check both funding rates are not zero (no arbitrage opportunity)
-                    if (rate1.Rate == 0 && rate2.Rate == 0)
+                    // 1. Skip if EITHER funding rate is zero (symbol not listed on exchange)
+                    if (rate1.Rate == 0 || rate2.Rate == 0)
                     {
+                        _logger.LogDebug("Skipping {Symbol} ({Ex1}/{Ex2}): Zero funding rate (Rate1={Rate1}, Rate2={Rate2})",
+                            symbol, exchange1, exchange2, rate1.Rate, rate2.Rate);
                         continue;
                     }
 
