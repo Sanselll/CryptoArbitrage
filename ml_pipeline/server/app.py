@@ -671,6 +671,10 @@ def predict():
         print(f"Opportunity Index: {prediction.get('opportunity_index', 'N/A')}")
         print(f"Confidence: {prediction.get('confidence', 'N/A')}")
         print(f"State Value: {prediction.get('state_value', 'N/A')}")
+        time_to_funding = prediction.get('time_to_next_funding_norm')
+        if time_to_funding is not None:
+            print(f"Time to Next Funding: {time_to_funding:.3f}")
+        print(f"Current Time UTC: {prediction.get('current_time_utc', 'N/A')}")
         print(f"====================================\n")
 
         # Get model info

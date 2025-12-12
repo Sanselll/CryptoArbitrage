@@ -762,18 +762,29 @@ public class AgentBackgroundService : BackgroundService
         ArbitrageDbContext context)
     {
         // Query closed positions that belong to this agent session
+        // Include ExecutionId to group positions by execution for trade counting
         var closedPositions = await context.Positions
             .Where(p => p.AgentSessionId == sessionId && p.Status == PositionStatus.Closed)
-            .Select(p => new { p.RealizedPnLUsd, p.InitialMargin })
+            .Select(p => new { p.ExecutionId, p.RealizedPnLUsd, p.InitialMargin })
             .ToListAsync();
 
         if (!closedPositions.Any())
             return (0, 0, 0, 0);
 
+        // P&L is calculated from all positions (sum of both legs of each execution)
         var totalPnlUsd = closedPositions.Sum(p => p.RealizedPnLUsd);
         var totalInitialMargin = closedPositions.Sum(p => p.InitialMargin);
-        var winningTrades = closedPositions.Count(p => p.RealizedPnLUsd > 0);
-        var losingTrades = closedPositions.Count(p => p.RealizedPnLUsd < 0);
+
+        // FIX: Group by ExecutionId to count EXECUTIONS, not POSITIONS
+        // Each execution = 1 trade (even though it has 2 positions: long + short legs)
+        // This fixes the doubled trade count issue
+        var executionPnL = closedPositions
+            .GroupBy(p => p.ExecutionId)
+            .Select(g => g.Sum(p => p.RealizedPnLUsd))
+            .ToList();
+
+        var winningTrades = executionPnL.Count(pnl => pnl > 0);
+        var losingTrades = executionPnL.Count(pnl => pnl < 0);
 
         // Calculate weighted P&L percentage (correct formula, not simple average)
         // This ensures larger positions have proportionally more weight

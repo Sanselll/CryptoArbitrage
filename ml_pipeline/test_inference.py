@@ -986,10 +986,12 @@ def test_model_inference(args):
         print(f"   Saved to: {funding_output_path}")
 
         # Show top 5 positions by funding earned
-        top_funding = funding_df.nlargest(5, 'net_funding_usd')[['symbol', 'hours_held', 'net_funding_usd', 'net_funding_pct', 'realized_pnl_usd']]
+        top_funding = funding_df.nlargest(5, 'net_funding_usd')[['symbol', 'hours_held', 'net_funding_usd', 'net_funding_pct', 'realized_pnl_usd', 'entry_time', 'exit_time']]
         print(f"\n   Top 5 by Funding Earned:")
         for idx, row in top_funding.iterrows():
-            print(f"     {row['symbol']:12s}: ${row['net_funding_usd']:6.2f} ({row['net_funding_pct']:.2f}%) over {row['hours_held']:.1f}h, Total P&L: ${row['realized_pnl_usd']:6.2f}")
+            entry_str = row['entry_time'].strftime('%m-%d %H:%M') if pd.notna(row['entry_time']) else 'N/A'
+            exit_str = row['exit_time'].strftime('%m-%d %H:%M') if pd.notna(row['exit_time']) else 'N/A'
+            print(f"     {row['symbol']:12s}: ${row['net_funding_usd']:6.2f} ({row['net_funding_pct']:.2f}%) over {row['hours_held']:.1f}h, Total P&L: ${row['realized_pnl_usd']:6.2f}  [{entry_str} → {exit_str}]")
     else:
         print(f"\n⚠️  No funding details collected (no closed positions)")
 

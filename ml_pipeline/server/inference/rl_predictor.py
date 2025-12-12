@@ -285,6 +285,10 @@ class ModularRLPredictor:
         result['valid_actions'] = int(action_mask.sum())
         result['masked_actions'] = int((~action_mask).sum())
 
+        # Add timing info for debugging (V6 feature verification)
+        result['current_time_utc'] = current_time.isoformat() + 'Z'
+        result['time_to_next_funding_norm'] = float(obs[8])  # Index: 5 config + 3 portfolio features
+
         return result
 
     def _decode_action(self, action: int) -> Dict[str, Any]:
