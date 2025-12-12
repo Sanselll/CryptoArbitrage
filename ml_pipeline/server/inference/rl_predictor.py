@@ -279,7 +279,12 @@ class ModularRLPredictor:
             result['position_size'] = action_info['size']
             result['size_multiplier'] = SIZE_MULTIPLIERS[action_info['size']]
         elif action_info['type'] == 'EXIT':
-            result['position_index'] = action_info['position_index']
+            pos_idx = action_info['position_index']
+            result['position_index'] = pos_idx
+            # Add symbol for EXIT actions (fixes index mismatch between ML API and backend)
+            positions = portfolio.get('positions', [])
+            if pos_idx < len(positions):
+                result['exit_symbol'] = positions[pos_idx].get('symbol', 'UNKNOWN')
 
         # Add mask info
         result['valid_actions'] = int(action_mask.sum())

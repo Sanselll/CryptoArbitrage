@@ -235,6 +235,7 @@ public class RLPredictionService
                 StateValue = (double?)prediction.StateValue,
                 OpportunityIndex = prediction.OpportunityIndex,
                 OpportunitySymbol = prediction.OpportunitySymbol,
+                ExitSymbol = prediction.ExitSymbol,  // Symbol for EXIT actions (fixes index mismatch bug)
                 PositionSize = prediction.PositionSize,
                 SizeMultiplier = (double?)prediction.SizeMultiplier,
                 PositionIndex = prediction.PositionIndex
@@ -574,9 +575,10 @@ public class AgentPrediction
     public string Action { get; set; } = "HOLD";
     public int? OpportunityIndex { get; set; }
     public string? OpportunitySymbol { get; set; }
+    public string? ExitSymbol { get; set; }  // For EXIT actions - symbol to exit (fixes index mismatch bug)
     public string? PositionSize { get; set; }  // "SMALL", "MEDIUM", "LARGE"
     public double? SizeMultiplier { get; set; }  // 0.10, 0.20, 0.30
-    public int? PositionIndex { get; set; }  // For EXIT actions
+    public int? PositionIndex { get; set; }  // For EXIT actions (legacy - use ExitSymbol instead)
     public string Confidence { get; set; } = "LOW";
     public double? EnterProbability { get; set; }
     public double? StateValue { get; set; }

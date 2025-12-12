@@ -251,6 +251,9 @@ public class RLPredictionResponseV2
     [JsonPropertyName("position_index")]
     public int? PositionIndex { get; set; }
 
+    [JsonPropertyName("exit_symbol")]
+    public string? ExitSymbol { get; set; }  // Symbol to exit (fixes index mismatch bug)
+
     // Mask info
     [JsonPropertyName("valid_actions")]
     public int ValidActions { get; set; }

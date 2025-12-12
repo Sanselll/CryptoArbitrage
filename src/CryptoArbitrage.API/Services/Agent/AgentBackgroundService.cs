@@ -424,19 +424,34 @@ public class AgentBackgroundService : BackgroundService
         {
             _logger.LogDebug("Agent acquired execution lock for user {UserId}", userId);
 
-            if (prediction.Action == "ENTER" && prediction.OpportunityIndex.HasValue)
+            if (prediction.Action == "ENTER")
             {
-                var oppIndex = prediction.OpportunityIndex.Value;
-                if (oppIndex >= 0 && oppIndex < opportunities.Count)
+                // Find opportunity BY SYMBOL (required - no fallback to avoid entering wrong position)
+                if (string.IsNullOrEmpty(prediction.OpportunitySymbol))
                 {
-                    var opportunity = opportunities[oppIndex];
+                    result.Success = false;
+                    result.ErrorMessage = "ENTER action missing opportunity_symbol from ML API";
+                    _logger.LogError("ENTER action rejected: ML API did not provide opportunity_symbol");
+                    return result;
+                }
 
-                    _logger.LogInformation(
-                        "Agent executing ENTER for user {UserId}: {Symbol} (Strategy: {Strategy}, Exchange: {Exchange}, Confidence: {Confidence})",
-                        userId, opportunity.Symbol, opportunity.Strategy, opportunity.Exchange, prediction.Confidence);
+                // Use symbol to find opportunity (fixes index mismatch between ML API and backend)
+                var opportunity = opportunities.FirstOrDefault(o => o.Symbol == prediction.OpportunitySymbol);
 
-                    try
-                    {
+                if (opportunity == null)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = $"Opportunity not found for symbol: {prediction.OpportunitySymbol}";
+                    _logger.LogError("ENTER action rejected: No opportunity found for symbol {Symbol}", prediction.OpportunitySymbol);
+                    return result;
+                }
+
+                _logger.LogInformation(
+                    "Agent executing ENTER for user {UserId}: {Symbol} (Strategy: {Strategy}, Exchange: {Exchange}, Confidence: {Confidence})",
+                    userId, opportunity.Symbol, opportunity.Strategy, opportunity.Exchange, prediction.Confidence);
+
+                try
+                {
                         // Get user's agent config for position sizing (include AgentConfiguration)
                         var session = await context.AgentSessions
                             .Include(s => s.AgentConfiguration)
@@ -522,33 +537,41 @@ public class AgentBackgroundService : BackgroundService
                         else
                         {
                             result.ErrorMessage = response.ErrorMessage;
-                            _logger.LogWarning(
-                                "Agent failed to execute ENTER for {Symbol}: {Error}",
-                                opportunity.Symbol, response.ErrorMessage);
-                        }
+                        _logger.LogWarning(
+                            "Agent failed to execute ENTER for {Symbol}: {Error}",
+                            opportunity.Symbol, response.ErrorMessage);
                     }
-                    catch (Exception ex)
-                    {
-                        result.Success = false;
-                        result.ErrorMessage = ex.Message;
-                        _logger.LogError(ex, "Error executing ENTER action for user {UserId}, symbol {Symbol}",
-                            userId, opportunity.Symbol);
-                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = ex.Message;
+                    _logger.LogError(ex, "Error executing ENTER action for user {UserId}, symbol {Symbol}",
+                        userId, opportunity.Symbol);
                 }
             }
             else if (prediction.Action == "EXIT" && positions.Count > 0)
         {
-            // Find the position to exit (use prediction.PositionIndex if available)
+            // Find the position to exit BY SYMBOL (required - no fallback to avoid closing wrong position)
             PositionDto? positionToExit = null;
 
-            if (prediction.PositionIndex.HasValue && prediction.PositionIndex.Value < positions.Count)
+            if (string.IsNullOrEmpty(prediction.ExitSymbol))
             {
-                positionToExit = positions[prediction.PositionIndex.Value];
+                result.Success = false;
+                result.ErrorMessage = "EXIT action missing exit_symbol from ML API";
+                _logger.LogError("EXIT action rejected: ML API did not provide exit_symbol");
+                return result;
             }
-            else
+
+            // Use symbol to find position (fixes index mismatch between ML API and backend)
+            positionToExit = positions.FirstOrDefault(p => p.Symbol == prediction.ExitSymbol);
+
+            if (positionToExit == null)
             {
-                // Default to first position if no index specified
-                positionToExit = positions.First();
+                result.Success = false;
+                result.ErrorMessage = $"Position not found for symbol: {prediction.ExitSymbol}";
+                _logger.LogError("EXIT action rejected: No position found for symbol {Symbol}", prediction.ExitSymbol);
+                return result;
             }
 
             _logger.LogInformation(
@@ -828,12 +851,10 @@ public class AgentBackgroundService : BackgroundService
                 return;
             }
 
-            // Get symbol - for EXIT decisions, try to get from positions if not in prediction
-            var symbol = prediction.OpportunitySymbol;
-            if (prediction.Action == "EXIT" && string.IsNullOrEmpty(symbol) && positions.Any())
-            {
-                symbol = positions.First().Symbol;
-            }
+            // Get symbol - use ExitSymbol for EXIT, OpportunitySymbol for ENTER
+            var symbol = prediction.Action == "EXIT"
+                ? prediction.ExitSymbol
+                : prediction.OpportunitySymbol;
 
             var timestamp = DateTime.UtcNow;
             var executionStatus = executionResult.Success ? "success" : "failed";
