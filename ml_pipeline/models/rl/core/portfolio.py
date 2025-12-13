@@ -48,7 +48,7 @@ class Position:
     leverage: float = 1.0      # Leverage multiplier (1-10x)
     maker_fee: float = 0.0002  # 0.02% maker fee (realistic rate)
     taker_fee: float = 0.00055  # 0.055% taker fee (Bybit rate)
-    slippage_pct: float = 0  # 0% slippage
+    slippage_pct: float = 0.0015  # 0.15% slippage per side
     entry_fee_pct: float = field(init=False)  # Calculated from maker/taker
     exit_fee_pct: float = field(init=False)
 
@@ -199,22 +199,17 @@ class Position:
         # Update time held
         self.hours_held = (current_time - self.entry_time).total_seconds() / 3600
 
-        # === LONG POSITION P&L (with slippage) ===
-        # Slippage: applied ONLY on exit (receive less when selling)
+        # === LONG POSITION P&L (unrealized - NO slippage) ===
+        # Slippage is only applied at actual exit in close_position()
         # Price change on long (profit if price goes up)
-        effective_entry_long = self.entry_long_price  # No slippage on entry
-        effective_current_long = current_long_price * (1 + self.slippage_pct)  # Receive less at exit
-        long_price_change_pct = ((effective_current_long - effective_entry_long) /
-                                 effective_entry_long)
+        long_price_change_pct = ((current_long_price - self.entry_long_price) /
+                                 self.entry_long_price)
         long_price_pnl_usd = self.position_size_usd * long_price_change_pct
 
-        # === SHORT POSITION P&L (with slippage) ===
-        # Slippage: applied ONLY on exit (pay more when buying back)
+        # === SHORT POSITION P&L (unrealized - NO slippage) ===
         # Price change on short (profit if price goes down)
-        effective_entry_short = self.entry_short_price  # No slippage on entry
-        effective_current_short = current_short_price * (1 - self.slippage_pct)  # Pay more at exit
-        short_price_change_pct = ((effective_entry_short - effective_current_short) /
-                                  effective_entry_short)
+        short_price_change_pct = ((self.entry_short_price - current_short_price) /
+                                  self.entry_short_price)
         short_price_pnl_usd = self.position_size_usd * short_price_change_pct
 
         # === FUNDING PAYMENTS ===
@@ -223,15 +218,22 @@ class Position:
         short_funding_this_step = self._process_short_funding(current_time)
 
         # === TOTAL P&L ===
-        # Net P&L = Long price P&L + Short price P&L + Funding - Entry fees
+        # Net P&L = Long price P&L + Short price P&L + Funding - Entry fees - Exit fees - Slippage
+        # This shows the "true" P&L if position were closed now
         # New format: funding values are already net (positive = received, negative = paid)
         net_funding_usd = self.long_net_funding_usd + self.short_net_funding_usd
+
+        # Exit costs (fees + slippage) - estimated if position were closed now
+        estimated_exit_fees_usd = self.position_size_usd * 2 * self.taker_fee
+        estimated_slippage_usd = self.position_size_usd * 2 * self.slippage_pct
 
         self.unrealized_pnl_usd = (
             long_price_pnl_usd +
             short_price_pnl_usd +
             net_funding_usd -
-            self.entry_fees_paid_usd
+            self.entry_fees_paid_usd -
+            estimated_exit_fees_usd -
+            estimated_slippage_usd
         )
 
         # Calculate percentage (relative to total capital used = 2x position size)
@@ -336,11 +338,11 @@ class Position:
         # Final update to get latest P&L and funding
         self.update_hourly(exit_time, exit_long_price, exit_short_price)
 
-        # Calculate exit fees (market orders = taker fees)
+        # Record exit fees for logging (already included in unrealized P&L)
         self.exit_fees_paid_usd = self.position_size_usd * 2 * self.taker_fee
 
-        # Realized P&L = Unrealized P&L - Exit fees
-        self.realized_pnl_usd = self.unrealized_pnl_usd - self.exit_fees_paid_usd
+        # Realized P&L = Unrealized P&L (already includes entry fees, exit fees, slippage)
+        self.realized_pnl_usd = self.unrealized_pnl_usd
 
         # Percentage relative to total capital used
         total_capital_used = self.position_size_usd * 2
@@ -811,16 +813,11 @@ class Portfolio:
         # V3: Changed from linear /72 to log normalization
         hours_held_norm = np.log(pos.hours_held + 1) / np.log(73)
 
-        # 4. estimated_pnl_pct = price P&L only (no fees, no funding, WITH slippage)
+        # 4. estimated_pnl_pct = price P&L only (no fees, no funding, no slippage)
         # V3: NEW FEATURE - isolates price risk from funding profit
-        # Apply slippage ONLY on exit (not entry)
-        effective_entry_long = pos.entry_long_price  # No slippage on entry
-        effective_current_long = current_long_price * (1 + pos.slippage_pct)  # Slippage on exit
-        long_price_pnl = pos.position_size_usd * ((effective_current_long - effective_entry_long) / effective_entry_long)
-
-        effective_entry_short = pos.entry_short_price  # No slippage on entry
-        effective_current_short = current_short_price * (1 - pos.slippage_pct)  # Slippage on exit
-        short_price_pnl = pos.position_size_usd * ((effective_entry_short - effective_current_short) / effective_entry_short)
+        # Slippage is only applied at actual exit, not in estimates
+        long_price_pnl = pos.position_size_usd * ((current_long_price - pos.entry_long_price) / pos.entry_long_price)
+        short_price_pnl = pos.position_size_usd * ((pos.entry_short_price - current_short_price) / pos.entry_short_price)
 
         estimated_pnl_pct = ((long_price_pnl + short_price_pnl) / total_capital) / 100 if total_capital > 0 else 0.0
 
@@ -954,14 +951,10 @@ class Portfolio:
             # Calculate and store current values as "previous" for next step
             total_capital = pos.position_size_usd * 2
 
-            # estimated_pnl_pct (price P&L only, no fees/funding, WITH slippage on exit only)
-            effective_entry_long = pos.entry_long_price  # No slippage on entry
-            effective_current_long = current_long_price * (1 + pos.slippage_pct)  # Slippage on exit
-            long_price_pnl = pos.position_size_usd * ((effective_current_long - effective_entry_long) / effective_entry_long)
-
-            effective_entry_short = pos.entry_short_price  # No slippage on entry
-            effective_current_short = current_short_price * (1 - pos.slippage_pct)  # Slippage on exit
-            short_price_pnl = pos.position_size_usd * ((effective_entry_short - effective_current_short) / effective_entry_short)
+            # estimated_pnl_pct (price P&L only, no fees/funding, no slippage)
+            # Slippage is only applied at actual exit, not in estimates
+            long_price_pnl = pos.position_size_usd * ((current_long_price - pos.entry_long_price) / pos.entry_long_price)
+            short_price_pnl = pos.position_size_usd * ((pos.entry_short_price - current_short_price) / pos.entry_short_price)
 
             pos.prev_estimated_pnl_pct = ((long_price_pnl + short_price_pnl) / total_capital) / 100 if total_capital > 0 else 0.0
 
