@@ -380,6 +380,9 @@ class FundingArbitrageEnv(gym.Env):
         """
         Calculate position size based on action and current config.
 
+        IMPORTANT: This formula must match production backend (AgentBackgroundService.cs:474):
+            positionSizeUsd = availableCapital * sizeMultiplier
+
         Args:
             action: Action index (1-30 for ENTER actions)
 
@@ -388,36 +391,35 @@ class FundingArbitrageEnv(gym.Env):
         """
         # Determine size multiplier based on action
         if 1 <= action <= 10:
-            # SMALL: 10% of max allowed
+            # SMALL: 10% of available capital
             size_multiplier = 0.10
         elif 11 <= action <= 20:
-            # MEDIUM: 20% of max allowed
+            # MEDIUM: 20% of available capital
             size_multiplier = 0.20
         elif 21 <= action <= 30:
-            # LARGE: 30% of max allowed
+            # LARGE: 30% of available capital
             size_multiplier = 0.30
         else:
             raise ValueError(f"Invalid action for position sizing: {action}")
 
-        # Calculate max allowed size based on config
-        # max_allowed = (available_margin × target_utilization) / max_positions
-        available_margin = self.portfolio.available_margin
+        # Get available capital and config
+        available_capital = self.portfolio.available_margin  # Same as total_capital after margin deduction
         target_util = self.current_config.target_utilization
-        max_positions = self.current_config.max_positions
         leverage = self.current_config.max_leverage
 
-        # With leverage, we can control more capital with less margin
-        # max_allowed_size = (available_margin × leverage × target_util) / max_positions
-        max_allowed_size = (available_margin * leverage * target_util) / max_positions
+        # Match production formula: positionSize = availableCapital × sizeMultiplier
+        position_size = available_capital * size_multiplier
 
-        # Apply size multiplier
-        position_size = max_allowed_size * size_multiplier
+        # Apply min/max limits (matching production)
+        min_position_size = 10.0  # $10 minimum
+        max_position_size = available_capital * target_util  # Don't exceed target utilization
+        position_size = max(min_position_size, min(position_size, max_position_size))
 
-        # Ensure we don't exceed available margin
+        # Ensure we don't exceed available margin after leverage
         margin_needed = (position_size * 2) / leverage
-        if margin_needed > available_margin:
+        if margin_needed > available_capital:
             # Scale down to fit available margin
-            position_size = (available_margin * leverage) / 2
+            position_size = (available_capital * leverage) / 2
 
         return position_size
 
@@ -907,9 +909,11 @@ class FundingArbitrageEnv(gym.Env):
                 entry_short_price = actual_short_price
 
             # Use actual funding rates if available, otherwise fall back to CSV
-            if actual_long_rate is not None:
+            # CRITICAL FIX: Check for both None AND 0.0 since price_loader returns 0.0
+            # when funding rate data is not available in parquet files
+            if actual_long_rate is not None and actual_long_rate != 0.0:
                 entry_long_rate = actual_long_rate
-            if actual_short_rate is not None:
+            if actual_short_rate is not None and actual_short_rate != 0.0:
                 entry_short_rate = actual_short_rate
 
         # Create position
@@ -1264,34 +1268,21 @@ class FundingArbitrageEnv(gym.Env):
                     fallback=True
                 )
 
-                if for_pnl:
-                    # P&L calculation: Use parquet data, but 0.0 means "no payment this hour"
-                    # Funding rates persist between payments - use last known rate from position
+                # CRITICAL FIX: Parquet only has funding rates at payment timestamps (0 otherwise)
+                # Position's current rate should reflect the CURRENT MARKET rate from opportunities CSV
+                # Fallback chain: parquet (if non-zero) → CSV opportunities → position's stored rate
+                if long_rate is None or long_rate == 0.0 or short_rate is None or short_rate == 0.0:
+                    # Fallback to CSV rates from current opportunities
+                    csv_rates = self._get_funding_rates_from_opportunities(symbol)
                     if long_rate is None or long_rate == 0.0:
-                        long_rate = position.long_funding_rate  # Keep current rate
+                        long_rate = csv_rates.get('long_rate', position.long_funding_rate)
                     if short_rate is None or short_rate == 0.0:
-                        short_rate = position.short_funding_rate  # Keep current rate
+                        short_rate = csv_rates.get('short_rate', position.short_funding_rate)
 
-                    funding_rates[symbol] = {
-                        'long_rate': long_rate,
-                        'short_rate': short_rate,
-                    }
-                else:
-                    # Feature estimation: Use fallback chain for better estimates
-                    # parquet → opportunity CSV → last known position rate
-                    # Check for None OR 0.0 (parquet returns 0.0 when no funding payment)
-                    if long_rate is None or long_rate == 0.0 or short_rate is None or short_rate == 0.0:
-                        # Fallback to CSV rates from opportunities
-                        csv_rates = self._get_funding_rates_from_opportunities(symbol)
-                        if long_rate is None or long_rate == 0.0:
-                            long_rate = csv_rates.get('long_rate', position.long_funding_rate)
-                        if short_rate is None or short_rate == 0.0:
-                            short_rate = csv_rates.get('short_rate', position.short_funding_rate)
-
-                    funding_rates[symbol] = {
-                        'long_rate': long_rate,
-                        'short_rate': short_rate,
-                    }
+                funding_rates[symbol] = {
+                    'long_rate': long_rate,
+                    'short_rate': short_rate,
+                }
             else:
                 # No price_loader available: Keep current rates
                 funding_rates[symbol] = {

@@ -218,22 +218,22 @@ class Position:
         short_funding_this_step = self._process_short_funding(current_time)
 
         # === TOTAL P&L ===
-        # Net P&L = Long price P&L + Short price P&L + Funding - Entry fees - Exit fees - Slippage
+        # Net P&L = Long price P&L + Short price P&L + Funding - Entry fees - Exit fees
         # This shows the "true" P&L if position were closed now
+        # NOTE: Slippage is NOT included here to match production behavior
+        #       Slippage is only applied at actual close in close() method
         # New format: funding values are already net (positive = received, negative = paid)
         net_funding_usd = self.long_net_funding_usd + self.short_net_funding_usd
 
-        # Exit costs (fees + slippage) - estimated if position were closed now
+        # Exit costs (fees only, no slippage) - estimated if position were closed now
         estimated_exit_fees_usd = self.position_size_usd * 2 * self.taker_fee
-        estimated_slippage_usd = self.position_size_usd * 2 * self.slippage_pct
 
         self.unrealized_pnl_usd = (
             long_price_pnl_usd +
             short_price_pnl_usd +
             net_funding_usd -
             self.entry_fees_paid_usd -
-            estimated_exit_fees_usd -
-            estimated_slippage_usd
+            estimated_exit_fees_usd
         )
 
         # Calculate percentage (relative to total capital used = 2x position size)
@@ -341,8 +341,11 @@ class Position:
         # Record exit fees for logging (already included in unrealized P&L)
         self.exit_fees_paid_usd = self.position_size_usd * 2 * self.taker_fee
 
-        # Realized P&L = Unrealized P&L (already includes entry fees, exit fees, slippage)
-        self.realized_pnl_usd = self.unrealized_pnl_usd
+        # Calculate slippage cost at actual close
+        slippage_usd = self.position_size_usd * 2 * self.slippage_pct
+
+        # Realized P&L = Unrealized P&L - Slippage (slippage only applied at close)
+        self.realized_pnl_usd = self.unrealized_pnl_usd - slippage_usd
 
         # Percentage relative to total capital used
         total_capital_used = self.position_size_usd * 2
@@ -641,37 +644,38 @@ class Portfolio:
 
     @property
     def available_capital(self) -> float:
-        """Capital not allocated to open positions."""
-        # Each position uses 2x position_size_usd (long + short)
-        allocated = sum(pos.position_size_usd * 2 for pos in self.positions)
-        return self.total_capital - allocated
+        """Capital available for new positions.
+
+        Since margin is deducted from total_capital when opening positions,
+        this now returns total_capital directly.
+        """
+        return self.total_capital
 
     @property
     def available_margin(self) -> float:
         """
-        Margin not currently locked in positions.
+        Margin available for new positions.
 
-        With leverage, margin_used < position_size.
-        This represents the actual capital we need to keep locked.
+        Since margin is deducted from total_capital when opening positions,
+        this now returns total_capital directly.
         """
-        margin_used = self.get_total_margin_used()
-        return self.total_capital - margin_used
+        return self.total_capital
 
     @property
     def capital_utilization(self) -> float:
-        """Percentage of capital currently in use."""
-        if self.total_capital == 0:
+        """Percentage of initial capital currently in use (as margin)."""
+        if self.initial_capital == 0:
             return 0.0
-        allocated = sum(pos.position_size_usd * 2 for pos in self.positions)
-        return (allocated / self.total_capital) * 100
+        margin_used = self.get_total_margin_used()
+        return (margin_used / self.initial_capital) * 100
 
     @property
     def margin_utilization(self) -> float:
-        """Percentage of capital locked as margin."""
-        if self.total_capital == 0:
+        """Percentage of initial capital locked as margin."""
+        if self.initial_capital == 0:
             return 0.0
         margin_used = self.get_total_margin_used()
-        return (margin_used / self.total_capital) * 100
+        return (margin_used / self.initial_capital) * 100
 
     @property
     def unrealized_pnl_usd(self) -> float:
@@ -876,8 +880,8 @@ class Portfolio:
         return_efficiency_raw = pos.get_return_efficiency()
         return_efficiency = np.clip(return_efficiency_raw, -50, 50) / 50
 
-        # 16. value_to_capital_ratio = capital allocated to this position
-        value_to_capital_ratio = total_capital / self.total_capital if self.total_capital > 0 else 0.0
+        # 16. value_to_capital_ratio = capital allocated to this position (relative to initial)
+        value_to_capital_ratio = total_capital / self.initial_capital if self.initial_capital > 0 else 0.0
 
         # 17. pnl_imbalance = (long_pnl - short_pnl) / 200
         # V3: NEW FEATURE - detects directional exposure (arbitrage breaking down)
@@ -988,8 +992,8 @@ class Portfolio:
         # REMOVED: Capital availability check (replaced by margin check above)
         # With leverage, we don't need full capital, just margin
 
-        # Position size limit per side
-        max_size_per_side = self.total_capital * (self.max_position_size_pct / 100)
+        # Position size limit per side (based on initial capital, not current)
+        max_size_per_side = self.initial_capital * (self.max_position_size_pct / 100)
         if size_per_side_usd > max_size_per_side:
             return False
 
@@ -1006,6 +1010,14 @@ class Portfolio:
             return False
 
         self.positions.append(position)
+
+        # Deduct margin for SINGLE EXCHANGE (one leg only)
+        # Production queries individual exchange balances, each exchange only has one leg
+        # margin_used_usd is for BOTH legs, so we deduct half to match single-exchange reporting
+        # Formula: (position_size_usd * 2 / leverage) / 2 = position_size_usd / leverage
+        single_exchange_margin = position.position_size_usd / position.leverage
+        self.total_capital -= single_exchange_margin
+
         return True
 
     def close_position(self, position_idx: int,
@@ -1027,9 +1039,9 @@ class Portfolio:
         realized_pnl_usd = position.close(exit_time, exit_long_price, exit_short_price)
 
         # Update portfolio capital
-        # Return capital (2x position size) + P&L
-        capital_returned = (position.position_size_usd * 2) + realized_pnl_usd
-        self.total_capital += realized_pnl_usd  # Only add P&L, capital already tracked
+        # Return single-exchange margin (was deducted in open_position) + realized P&L
+        single_exchange_margin = position.position_size_usd / position.leverage
+        self.total_capital += single_exchange_margin + realized_pnl_usd
 
         self.total_pnl_usd += realized_pnl_usd
         self.total_pnl_pct = ((self.total_capital - self.initial_capital) /

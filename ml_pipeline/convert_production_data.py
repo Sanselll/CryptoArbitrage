@@ -56,7 +56,7 @@ def convert_snapshots_to_symbol_data(snapshots):
     symbol_data = defaultdict(list)
 
     for snapshot in snapshots:
-        timestamp = pd.to_datetime(snapshot['timestamp'])
+        timestamp = round_to_5min(pd.to_datetime(snapshot['timestamp']))
 
         # Group market data by symbol
         symbol_exchange_data = defaultdict(dict)
@@ -88,6 +88,23 @@ def convert_snapshots_to_symbol_data(snapshots):
                 symbol_data[symbol].append(row)
 
     return symbol_data
+
+
+def round_to_5min(timestamp: pd.Timestamp) -> pd.Timestamp:
+    """
+    Round timestamp to nearest 5-minute boundary (:00, :05, :10, etc.)
+
+    This ensures entry_time aligns with production ML API timing which runs
+    at 5-minute intervals aligned to clock boundaries.
+
+    Examples:
+        20:54:59.999 -> 20:55:00
+        21:00:00.035 -> 21:00:00
+        21:02:30.000 -> 21:00:00 (rounds down)
+        21:03:00.000 -> 21:05:00 (rounds up)
+    """
+    # Round to nearest 5 minutes
+    return timestamp.round('5min')
 
 
 def is_valid_funding_time(time_str):
@@ -125,7 +142,7 @@ def convert_opportunities_to_csv(snapshots):
     zero_apr_count = 0
 
     for snapshot in snapshots:
-        timestamp = pd.to_datetime(snapshot['timestamp'])
+        timestamp = round_to_5min(pd.to_datetime(snapshot['timestamp']))
 
         for opp in snapshot['opportunities']:
             # Map JSON camelCase to CSV snake_case
@@ -177,7 +194,7 @@ def convert_opportunities_to_csv(snapshots):
                 'isExistingPosition': opp.get('isExistingPosition', False),
                 'uniqueKey': opp.get('uniqueKey', ''),
                 'hourly_timestamp': timestamp.floor('h').isoformat() + 'Z',
-                'entry_time': timestamp.isoformat()
+                'entry_time': round_to_5min(timestamp).isoformat()
             }
 
             # Validate and fix funding times
