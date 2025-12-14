@@ -109,6 +109,9 @@ class PriceHistoryLoader:
         # Try exact match first
         if timestamp in df.index:
             price = df.loc[timestamp, price_col]
+            # Handle case where duplicate timestamps return a Series
+            if isinstance(price, pd.Series):
+                price = price.iloc[0]
             if pd.notna(price):
                 return float(price)
 
@@ -167,6 +170,9 @@ class PriceHistoryLoader:
         # Try exact match first
         if timestamp in df.index:
             rate = df.loc[timestamp, rate_col]
+            # Handle case where duplicate timestamps return a Series
+            if isinstance(rate, pd.Series):
+                rate = rate.iloc[0]
             if pd.notna(rate):
                 return float(rate)
 
