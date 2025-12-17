@@ -139,6 +139,13 @@ class FundingArbitrageEnv(gym.Env):
         self.apr_flip_exit_bonus_scale = reward_config.apr_flip_exit_bonus_scale
         self.opportunity_cost_threshold = reward_config.opportunity_cost_threshold
 
+        # V8: New reward parameters for profit protection and entry quality
+        self.peak_drawdown_threshold = reward_config.peak_drawdown_threshold
+        self.peak_drawdown_penalty_scale = reward_config.peak_drawdown_penalty_scale
+        self.entry_quality_penalty_scale = reward_config.entry_quality_penalty_scale
+        self.apr_decline_threshold = reward_config.apr_decline_threshold
+        self.apr_decline_penalty_scale = reward_config.apr_decline_penalty_scale
+
         # Load historical data
         self.data = self._load_data(data_path)
         self.data_start = self.data['entry_time'].min()
@@ -597,6 +604,8 @@ class FundingArbitrageEnv(gym.Env):
             'opportunity_cost_penalty': 0.0,
             'inactivity_penalty': 0.0,  # V6.1: Penalty for holding too long
             'negative_apr_penalty': 0.0,  # V7: Penalty for holding negative APR positions
+            'peak_drawdown_penalty': 0.0,  # V8: Penalty for giving back profits
+            'apr_decline_penalty': 0.0,  # V8: Penalty for holding declining APR positions
         }
 
         # Component 1: Funding P&L Reward (hourly - actual cash flow)
@@ -701,6 +710,52 @@ class FundingArbitrageEnv(gym.Env):
 
             reward += negative_apr_penalty_total
             reward_breakdown['negative_apr_penalty'] = negative_apr_penalty_total
+
+        # Component 6 (V8): Peak Drawdown Penalty - Protect accumulated profits
+        # Penalizes watching profits evaporate (e.g., PIPPINUSDT: 5.4% → 0.99%)
+        # This teaches the model to exit when giving back too much profit
+        if self.peak_drawdown_penalty_scale > 0 and len(self.portfolio.positions) > 0:
+            peak_drawdown_penalty_total = 0.0
+            for pos in self.portfolio.positions:
+                # Only apply if position was profitable at some point
+                if pos.peak_pnl_pct > 0:
+                    drawdown_ratio = pos.get_peak_drawdown()  # 0-1 ratio
+                    if drawdown_ratio >= self.peak_drawdown_threshold:
+                        # Penalty proportional to drawdown severity
+                        # Example: 50% drawdown with 30% threshold → 0.2 * 0.5 = 0.1 penalty per step
+                        excess_drawdown = drawdown_ratio - self.peak_drawdown_threshold
+                        penalty = excess_drawdown * self.peak_drawdown_penalty_scale
+                        peak_drawdown_penalty_total -= penalty
+
+            reward += peak_drawdown_penalty_total
+            reward_breakdown['peak_drawdown_penalty'] = peak_drawdown_penalty_total
+
+        # Component 7 (V8): APR Decline Penalty - Proactive exit signal
+        # Penalizes holding positions with significantly declining APR (before it goes negative)
+        # This catches PIPPINUSDT case: 11961% → 6000% = 50% decline (should exit)
+        if self.apr_decline_penalty_scale > 0 and len(self.portfolio.positions) > 0:
+            apr_decline_penalty_total = 0.0
+            for pos in self.portfolio.positions:
+                # Look up current APR for this position
+                current_pos_apr = 0.0
+                for opp in self.current_opportunities:
+                    if opp['symbol'] == pos.symbol:
+                        current_pos_apr = opp.get('fund_apr', 0.0)
+                        break
+
+                # Calculate APR decline from entry (only for positions that were positive)
+                entry_apr = pos.entry_apr
+                if entry_apr > 0 and current_pos_apr > 0:  # Both still positive
+                    decline_ratio = 1 - (current_pos_apr / entry_apr)
+                    if decline_ratio >= self.apr_decline_threshold:
+                        # Penalty proportional to decline severity
+                        # Example: 60% decline with 50% threshold → 0.1 * 0.015 = 0.0015 per step
+                        excess_decline = decline_ratio - self.apr_decline_threshold
+                        penalty = excess_decline * self.apr_decline_penalty_scale
+                        apr_decline_penalty_total -= penalty
+
+            reward += apr_decline_penalty_total
+            reward_breakdown['apr_decline_penalty'] = apr_decline_penalty_total
 
         # Check termination
         terminated = False
@@ -966,8 +1021,33 @@ class FundingArbitrageEnv(gym.Env):
                 # Clear the tracker after processing
                 self._last_exited_apr = None
 
-            # Return entry fee penalty + rotation bonus
-            return entry_fee_penalty + rotation_bonus
+            # V8: Entry quality penalty - Discourage low-quality entries
+            # Quality indicators:
+            # 1. APR consistency: current APR vs 24h/3d projections
+            # 2. Spread stability: low spread volatility
+            entry_quality_penalty = 0.0
+
+            if self.entry_quality_penalty_scale > 0:
+                current_apr = opp.get('fund_apr', 0)
+                apr_24h_proj = opp.get('fund_apr_24h_proj', 0)
+                apr_3d_proj = opp.get('fund_apr_3d_proj', 0)
+                spread_volatility = opp.get('spread_volatility_stddev', 0)
+
+                # Quality check 1: APR projection disagreement
+                # High current APR but negative projections = unreliable/temporary spike
+                if current_apr > 500 and (apr_24h_proj < 0 or apr_3d_proj < 0):
+                    # Penalty proportional to disagreement severity
+                    # Example: current 1000%, 24h proj -200% → disagreement = 1200
+                    disagreement = abs(current_apr - min(apr_24h_proj, apr_3d_proj))
+                    entry_quality_penalty -= (disagreement / 1000) * self.entry_quality_penalty_scale
+
+                # Quality check 2: High spread volatility = risky entry
+                # Spread volatility > 15% indicates unstable arbitrage conditions
+                if spread_volatility > 0.15:
+                    entry_quality_penalty -= spread_volatility * self.entry_quality_penalty_scale
+
+            # Return entry fee penalty + rotation bonus + quality penalty
+            return entry_fee_penalty + rotation_bonus + entry_quality_penalty
         else:
             # Could not open (insufficient capital or position limit - masked, shouldn't happen)
             # No penalty - rely on action masking to prevent invalid actions
@@ -1372,9 +1452,12 @@ class FundingArbitrageEnv(gym.Env):
                 'entry_short_price': float(pos.entry_short_price),
                 'current_long_price': float(current_long_price),
                 'current_short_price': float(current_short_price),
-                'unrealized_pnl_pct': float(pos.unrealized_pnl_pct),
-                'long_pnl_pct': float(pos.long_pnl_pct),
-                'short_pnl_pct': float(pos.short_pnl_pct),
+                'slippage_pct': float(pos.slippage_pct),
+                # Raw funding and fees (Python calculates P&L)
+                'long_funding_earned_usd': float(pos.long_net_funding_usd),
+                'short_funding_earned_usd': float(pos.short_net_funding_usd),
+                'long_fees_usd': float(pos.entry_fees_paid_usd / 2),  # Split entry fees between legs
+                'short_fees_usd': float(pos.entry_fees_paid_usd / 2),
                 'long_funding_rate': float(pos.long_funding_rate),
                 'short_funding_rate': float(pos.short_funding_rate),
                 'long_funding_interval_hours': int(pos.long_funding_interval_hours),
@@ -1382,7 +1465,6 @@ class FundingArbitrageEnv(gym.Env):
                 'entry_apr': float(pos.entry_apr),
                 'current_position_apr': float(current_position_apr),
                 'liquidation_distance': float(pos.get_liquidation_distance(current_long_price, current_short_price)),
-                'slippage_pct': float(pos.slippage_pct),
             })
 
         portfolio = {
@@ -1474,19 +1556,21 @@ class FundingArbitrageEnv(gym.Env):
                 'entry_short_price': float(pos.entry_short_price),
                 'current_long_price': float(current_long_price),
                 'current_short_price': float(current_short_price),
-                'unrealized_pnl_pct': float(pos.unrealized_pnl_pct),
-                'long_pnl_pct': float(pos.long_pnl_pct),  # Direct from Position object
-                'short_pnl_pct': float(pos.short_pnl_pct),  # Direct from Position object
-                'long_funding_rate': float(pos.long_funding_rate),  # Actual rate (for P&L)
-                'short_funding_rate': float(pos.short_funding_rate),  # Actual rate (for P&L)
-                'estimated_long_funding_rate': float(estimated_long_rate),  # Estimated (for features)
-                'estimated_short_funding_rate': float(estimated_short_rate),  # Estimated (for features)
+                'slippage_pct': float(pos.slippage_pct),
+                # Raw funding and fees (Python calculates P&L from these + prices)
+                'long_funding_earned_usd': float(pos.long_net_funding_usd),
+                'short_funding_earned_usd': float(pos.short_net_funding_usd),
+                'long_fees_usd': float(pos.entry_fees_paid_usd / 2),
+                'short_fees_usd': float(pos.entry_fees_paid_usd / 2),
+                'long_funding_rate': float(pos.long_funding_rate),
+                'short_funding_rate': float(pos.short_funding_rate),
+                'estimated_long_funding_rate': float(estimated_long_rate),
+                'estimated_short_funding_rate': float(estimated_short_rate),
                 'long_funding_interval_hours': int(pos.long_funding_interval_hours),
                 'short_funding_interval_hours': int(pos.short_funding_interval_hours),
                 'entry_apr': float(pos.entry_apr),
                 'current_position_apr': float(current_position_apr),
                 'liquidation_distance': float(pos.get_liquidation_distance(current_long_price, current_short_price)),
-                'slippage_pct': float(pos.slippage_pct),
             })
 
         # Build portfolio state

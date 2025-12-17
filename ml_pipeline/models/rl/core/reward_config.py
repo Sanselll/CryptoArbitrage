@@ -105,6 +105,29 @@ class RewardConfig:
     # Penalizes holding inferior positions more aggressively
     opportunity_cost_threshold: float = 50.0  # V7: Lowered from 100 (was 200 in V6)
 
+    # V8: Peak drawdown penalty - Penalize giving back profits
+    # Applied hourly when position drops X% from peak P&L
+    # Example: 5% peak → 3.5% current = 30% drawdown → penalty applied
+    # This prevents the PIPPINUSDT case: +5.4% peak → +0.99% exit
+    # Set to 0.0 to disable
+    peak_drawdown_threshold: float = 0.30  # 30% of peak profit
+    peak_drawdown_penalty_scale: float = 0.5  # Per-step penalty multiplier
+
+    # V8: Entry quality filter - Penalize low-quality entries
+    # Quality = f(APR consistency, spread stability, projection agreement)
+    # Low quality: current APR high but 24h/3d projections negative
+    # This prevents entering unstable/temporary high-APR opportunities
+    # Set to 0.0 to disable
+    entry_quality_penalty_scale: float = 0.3  # Penalty for low-quality entry
+
+    # V8: APR decline rate penalty - Proactive exit signal
+    # Penalize holding when APR is declining rapidly (before it goes negative)
+    # Example: Entry 11961% → Current 6000% = 50% decline → penalty
+    # This catches positions before APR goes negative (more proactive than V7)
+    # Set to 0.0 to disable
+    apr_decline_threshold: float = 0.50  # 50% decline from entry APR triggers penalty
+    apr_decline_penalty_scale: float = 0.015  # Per-step penalty
+
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary for serialization."""
         return {
@@ -120,6 +143,12 @@ class RewardConfig:
             'negative_apr_penalty_scale': self.negative_apr_penalty_scale,
             'apr_flip_exit_bonus_scale': self.apr_flip_exit_bonus_scale,
             'opportunity_cost_threshold': self.opportunity_cost_threshold,
+            # V8 parameters
+            'peak_drawdown_threshold': self.peak_drawdown_threshold,
+            'peak_drawdown_penalty_scale': self.peak_drawdown_penalty_scale,
+            'entry_quality_penalty_scale': self.entry_quality_penalty_scale,
+            'apr_decline_threshold': self.apr_decline_threshold,
+            'apr_decline_penalty_scale': self.apr_decline_penalty_scale,
         }
 
     @classmethod
@@ -183,7 +212,10 @@ class RewardConfig:
             f"opp_cost={self.opportunity_cost_scale:.2f}, "
             f"neg_fund_exit={self.negative_funding_exit_reward_scale:.2f}, "
             f"neg_apr_pen={self.negative_apr_penalty_scale:.2f}, "
-            f"flip_exit={self.apr_flip_exit_bonus_scale:.2f})"
+            f"flip_exit={self.apr_flip_exit_bonus_scale:.2f}, "
+            f"peak_dd={self.peak_drawdown_penalty_scale:.2f}@{self.peak_drawdown_threshold:.0%}, "
+            f"entry_qual={self.entry_quality_penalty_scale:.2f}, "
+            f"apr_decline={self.apr_decline_penalty_scale:.3f}@{self.apr_decline_threshold:.0%})"
         )
 
 

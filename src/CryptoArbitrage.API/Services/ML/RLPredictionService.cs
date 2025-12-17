@@ -440,49 +440,19 @@ public class RLPredictionService
                 shortPosition.Symbol,
                 cancellationToken) ?? 0m;
 
-            // === CALCULATE P&L EXACTLY LIKE PYTHON PORTFOLIO ===
-            // Matches: ml_pipeline/models/rl/core/portfolio.py lines 200-240
+            // === RAW DATA FOR PYTHON P&L CALCULATION ===
+            // Python calculates P&L from: entry/current prices + funding + fees
+            // This ensures consistency with training environment
 
-            // Get position size (same for both legs in arbitrage)
-            decimal positionSizeUsd = longPosition.InitialMargin;
+            // Get raw funding earned per leg (from PositionTransaction)
+            decimal longFundingEarnedUsd = longPosition.NetFundingFee;
+            decimal shortFundingEarnedUsd = shortPosition.NetFundingFee;
 
-            // 1. Calculate PRICE P&L for each leg (in USD)
-            decimal longPriceChangePct = longPosition.EntryPrice != 0
-                ? ((currentLongPrice - longPosition.EntryPrice) / longPosition.EntryPrice)
-                : 0m;
-            decimal longPricePnlUsd = positionSizeUsd * longPriceChangePct;
+            // Get raw fees per leg (from PositionTransaction)
+            decimal longFeesUsd = longPosition.TradingFeePaid;
+            decimal shortFeesUsd = shortPosition.TradingFeePaid;
 
-            decimal shortPriceChangePct = shortPosition.EntryPrice != 0
-                ? ((shortPosition.EntryPrice - currentShortPrice) / shortPosition.EntryPrice)
-                : 0m;
-            decimal shortPricePnlUsd = positionSizeUsd * shortPriceChangePct;
-
-            // 2. Get NET FUNDING (from PositionTransaction - same source as frontend)
-            decimal netFundingUsd = (longPosition.NetFundingFee) + (shortPosition.NetFundingFee);
-
-            // 3. Get TOTAL TRADING FEES (from PositionTransaction)
-            decimal totalFeesUsd = (longPosition.TradingFeePaid) + (shortPosition.TradingFeePaid);
-
-            // 4. Calculate TOTAL P&L (net arbitrage P&L)
-            decimal unrealizedPnlUsd = longPricePnlUsd + shortPricePnlUsd + netFundingUsd - totalFeesUsd;
-
-            // 5. Calculate PERCENTAGES (relative to total capital = both legs)
-            decimal totalCapitalUsd = positionSizeUsd * 2;
-
-            var unrealizedPnlPct = totalCapitalUsd != 0
-                ? SanitizeDecimal((unrealizedPnlUsd / totalCapitalUsd) * 100m)
-                : 0m;
-
-            // Individual leg P&L percentages (relative to each leg's position size)
-            var longPnlPct = positionSizeUsd != 0
-                ? SanitizeDecimal((longPricePnlUsd / positionSizeUsd) * 100m)
-                : 0m;
-
-            var shortPnlPct = positionSizeUsd != 0
-                ? SanitizeDecimal((shortPricePnlUsd / positionSizeUsd) * 100m)
-                : 0m;
-
-            // === END P&L CALCULATION ===
+            // === END RAW DATA ===
 
             // Calculate liquidation distance (simplified formula)
             var longLiqDistance = CalculateLiquidationDistance(longPosition.Leverage);
@@ -508,10 +478,11 @@ public class RLPredictionService
                 // Slippage (0% to match training environment)
                 SlippagePct = 0m,
 
-                // P&L
-                UnrealizedPnlPct = unrealizedPnlPct,
-                LongPnlPct = longPnlPct,
-                ShortPnlPct = shortPnlPct,
+                // Raw funding and fees (Python calculates P&L)
+                LongFundingEarnedUsd = longFundingEarnedUsd,
+                ShortFundingEarnedUsd = shortFundingEarnedUsd,
+                LongFeesUsd = longFeesUsd,
+                ShortFeesUsd = shortFeesUsd,
 
                 // Funding rates from market data
                 LongFundingRate = longFundingRate,

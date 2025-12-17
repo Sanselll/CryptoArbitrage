@@ -48,7 +48,7 @@ class Position:
     leverage: float = 1.0      # Leverage multiplier (1-10x)
     maker_fee: float = 0.0002  # 0.02% maker fee (realistic rate)
     taker_fee: float = 0.00055  # 0.055% taker fee (Bybit rate)
-    slippage_pct: float = 0.0015  # 0.15% slippage per side
+    slippage_pct: float = 0.0  # No slippage
     entry_fee_pct: float = field(init=False)  # Calculated from maker/taker
     exit_fee_pct: float = field(init=False)
 
@@ -128,17 +128,19 @@ class Position:
 
     def __post_init__(self):
         """Calculate entry fees, margin, and liquidation prices after initialization."""
+        # CRITICAL: Fees are based on NOTIONAL value (margin × leverage), not margin
+        notional_per_leg = self.position_size_usd * self.leverage
+
         # Entry fees (assume maker orders for limit entry)
         self.entry_fee_pct = self.maker_fee * 2  # Long + short
-        self.entry_fees_paid_usd = self.position_size_usd * 2 * self.maker_fee
+        self.entry_fees_paid_usd = notional_per_leg * 2 * self.maker_fee
 
         # Exit fees (assume taker for market exit, calculated on close)
         self.exit_fee_pct = self.taker_fee * 2
 
         # Calculate margin required (total for both long + short)
-        # Margin = (position_size_long + position_size_short) / leverage
-        # For cross-exchange: both sides use position_size_usd
-        self.margin_used_usd = (self.position_size_usd * 2) / self.leverage
+        # position_size_usd is already margin per leg, so total margin = 2 × position_size_usd
+        self.margin_used_usd = self.position_size_usd * 2
 
         # Calculate liquidation prices
         # Using simplified formula (maintenance margin ~10% of position value)
@@ -202,15 +204,17 @@ class Position:
         # === LONG POSITION P&L (unrealized - NO slippage) ===
         # Slippage is only applied at actual exit in close_position()
         # Price change on long (profit if price goes up)
+        # CRITICAL: P&L is based on NOTIONAL value (margin × leverage), not margin!
+        notional_per_leg = self.position_size_usd * self.leverage
         long_price_change_pct = ((current_long_price - self.entry_long_price) /
                                  self.entry_long_price)
-        long_price_pnl_usd = self.position_size_usd * long_price_change_pct
+        long_price_pnl_usd = notional_per_leg * long_price_change_pct
 
         # === SHORT POSITION P&L (unrealized - NO slippage) ===
         # Price change on short (profit if price goes down)
         short_price_change_pct = ((self.entry_short_price - current_short_price) /
                                   self.entry_short_price)
-        short_price_pnl_usd = self.position_size_usd * short_price_change_pct
+        short_price_pnl_usd = notional_per_leg * short_price_change_pct
 
         # === FUNDING PAYMENTS ===
         # Check if funding time(s) passed and process payments
@@ -226,7 +230,8 @@ class Position:
         net_funding_usd = self.long_net_funding_usd + self.short_net_funding_usd
 
         # Exit costs (fees only, no slippage) - estimated if position were closed now
-        estimated_exit_fees_usd = self.position_size_usd * 2 * self.taker_fee
+        # Fees are based on NOTIONAL trade value (both legs)
+        estimated_exit_fees_usd = notional_per_leg * 2 * self.taker_fee
 
         self.unrealized_pnl_usd = (
             long_price_pnl_usd +
@@ -236,12 +241,14 @@ class Position:
             estimated_exit_fees_usd
         )
 
-        # Calculate percentage (relative to total capital used = 2x position size)
-        total_capital_used = self.position_size_usd * 2
-        if total_capital_used > 0:
-            self.unrealized_pnl_pct = (self.unrealized_pnl_usd / total_capital_used) * 100
-            self.long_pnl_pct = (long_price_pnl_usd / self.position_size_usd) * 100
-            self.short_pnl_pct = (short_price_pnl_usd / self.position_size_usd) * 100
+        # Calculate percentage (relative to total MARGIN used = 2x position_size_usd)
+        # unrealized_pnl_pct shows return on margin (capital at risk)
+        total_margin_used = self.position_size_usd * 2
+        if total_margin_used > 0:
+            self.unrealized_pnl_pct = (self.unrealized_pnl_usd / total_margin_used) * 100
+            # long/short_pnl_pct show actual price change % (divide by notional, not margin)
+            self.long_pnl_pct = (long_price_pnl_usd / notional_per_leg) * 100
+            self.short_pnl_pct = (short_price_pnl_usd / notional_per_leg) * 100
         else:
             # Position size is zero (shouldn't happen, but safety check)
             self.unrealized_pnl_pct = 0.0
@@ -278,8 +285,11 @@ class Position:
             # Calculate net funding (negative rate means we receive, positive means we pay)
             # Since we're LONG: positive rate = we pay (negative value), negative rate = we receive (positive value)
             # So we need to negate to match our convention (positive = received)
+            #
+            # CRITICAL: Funding is based on NOTIONAL value (margin × leverage), not margin!
+            notional_value = self.position_size_usd * self.leverage
             funding_payment_pct = self.long_funding_rate
-            funding_payment_usd = self.position_size_usd * funding_payment_pct
+            funding_payment_usd = notional_value * funding_payment_pct
 
             # Store as net funding (negate so positive = received, negative = paid)
             net_funding_usd = -funding_payment_usd
@@ -308,9 +318,12 @@ class Position:
             # For SHORT positions in perpetual futures:
             # - Positive funding rate → longs pay shorts → we RECEIVE (profit)
             # - Negative funding rate → shorts pay longs → we PAY (cost)
-            # Therefore: short_net_funding = position_size * rate (direct, no negation needed)
+            # Therefore: short_net_funding = notional * rate (direct, no negation needed)
+            #
+            # CRITICAL: Funding is based on NOTIONAL value (margin × leverage), not margin!
+            notional_value = self.position_size_usd * self.leverage
             funding_payment_pct = self.short_funding_rate
-            net_funding_usd = self.position_size_usd * funding_payment_pct
+            net_funding_usd = notional_value * funding_payment_pct
 
             funding_this_step += net_funding_usd
             self.short_net_funding_usd += net_funding_usd
@@ -338,19 +351,22 @@ class Position:
         # Final update to get latest P&L and funding
         self.update_hourly(exit_time, exit_long_price, exit_short_price)
 
-        # Record exit fees for logging (already included in unrealized P&L)
-        self.exit_fees_paid_usd = self.position_size_usd * 2 * self.taker_fee
+        # CRITICAL: Fees and slippage are based on NOTIONAL value, not margin
+        notional_per_leg = self.position_size_usd * self.leverage
 
-        # Calculate slippage cost at actual close
-        slippage_usd = self.position_size_usd * 2 * self.slippage_pct
+        # Record exit fees for logging (already included in unrealized P&L)
+        self.exit_fees_paid_usd = notional_per_leg * 2 * self.taker_fee
+
+        # Calculate slippage cost at actual close (based on notional)
+        slippage_usd = notional_per_leg * 2 * self.slippage_pct
 
         # Realized P&L = Unrealized P&L - Slippage (slippage only applied at close)
         self.realized_pnl_usd = self.unrealized_pnl_usd - slippage_usd
 
-        # Percentage relative to total capital used
-        total_capital_used = self.position_size_usd * 2
-        if total_capital_used > 0:
-            self.realized_pnl_pct = (self.realized_pnl_usd / total_capital_used) * 100
+        # Percentage relative to total MARGIN used (capital at risk)
+        total_margin_used = self.position_size_usd * 2
+        if total_margin_used > 0:
+            self.realized_pnl_pct = (self.realized_pnl_usd / total_margin_used) * 100
         else:
             self.realized_pnl_pct = 0.0
 

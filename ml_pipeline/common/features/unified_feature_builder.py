@@ -351,32 +351,58 @@ class UnifiedFeatureBuilder:
                 entry_long_price = pos.get('entry_long_price', 0.0)
                 entry_short_price = pos.get('entry_short_price', 0.0)
 
-                # ===== Calculate 17 features =====
+                # ===== Calculate features =====
 
                 # 1. is_active
                 is_active_feat = 1.0
 
+                # Get position size and leverage for P&L calculation
+                position_size = pos.get('position_size_usd', 0.0)  # This is margin per leg
+                leverage = pos.get('leverage', 1.0)
+                notional_per_leg = position_size * leverage  # Actual position value per leg
+
+                # Calculate PRICE P&L from entry/current prices (using NOTIONAL, not margin)
+                long_price_pnl_usd = 0.0
+                short_price_pnl_usd = 0.0
+                long_price_pnl_pct = 0.0
+                short_price_pnl_pct = 0.0
+                if entry_long_price > 0 and entry_short_price > 0:
+                    slippage_pct = pos.get('slippage_pct', 0.0)
+
+                    # Apply slippage ONLY on exit (not entry)
+                    effective_current_long = current_long_price * (1 - slippage_pct)  # Receive less at exit
+                    effective_current_short = current_short_price * (1 + slippage_pct)  # Pay more at exit
+
+                    # Price change percentages
+                    long_price_pnl_pct = (effective_current_long - entry_long_price) / entry_long_price
+                    short_price_pnl_pct = (entry_short_price - effective_current_short) / entry_short_price
+
+                    # P&L in USD (using NOTIONAL value, not margin)
+                    long_price_pnl_usd = notional_per_leg * long_price_pnl_pct
+                    short_price_pnl_usd = notional_per_leg * short_price_pnl_pct
+
+                # Get raw funding earned (from backend - actual exchange data)
+                long_funding_earned_usd = pos.get('long_funding_earned_usd', 0.0)
+                short_funding_earned_usd = pos.get('short_funding_earned_usd', 0.0)
+                net_funding_usd = long_funding_earned_usd + short_funding_earned_usd
+
+                # Get raw fees (from backend - actual exchange data)
+                long_fees_usd = pos.get('long_fees_usd', 0.0)
+                short_fees_usd = pos.get('short_fees_usd', 0.0)
+                total_fees_usd = long_fees_usd + short_fees_usd
+
+                # Calculate TOTAL unrealized P&L (price + funding - fees)
+                unrealized_pnl_usd = long_price_pnl_usd + short_price_pnl_usd + net_funding_usd - total_fees_usd
+                unrealized_pnl_pct_raw = (unrealized_pnl_usd / total_capital_used * 100) if total_capital_used > 0 else 0.0
+
                 # 2. net_pnl_pct (for feature output - divide by 100 to get decimal)
-                unrealized_pnl_pct_raw = pos.get('unrealized_pnl_pct', 0.0)  # As percentage (e.g., 2.5)
                 net_pnl_pct = unrealized_pnl_pct_raw / 100  # Convert to decimal (e.g., 0.025)
 
                 # 3. hours_held_norm (log scale)
                 hours_held_norm = np.log(raw_hours_held + 1) / np.log(CONFIG.HOURS_HELD_LOG_BASE + 63)
 
-                # 4. estimated_pnl_pct (price P&L only - WITH slippage applied on exit)
-                long_price_pnl = 0.0
-                short_price_pnl = 0.0
-                if entry_long_price > 0 and entry_short_price > 0:
-                    position_size = pos.get('position_size_usd', 0.0)
-                    slippage_pct = pos.get('slippage_pct', 0.0)
-
-                    # Apply slippage ONLY on exit (not entry)
-                    effective_current_long = current_long_price * (1 + slippage_pct)  # Receive less at exit
-                    effective_current_short = current_short_price * (1 - slippage_pct)  # Pay more at exit
-
-                    long_price_pnl = position_size * ((effective_current_long - entry_long_price) / entry_long_price)
-                    short_price_pnl = position_size * ((entry_short_price - effective_current_short) / entry_short_price)
-                estimated_pnl_pct = (long_price_pnl + short_price_pnl) / total_capital_used if total_capital_used > 0 else 0.0
+                # 4. estimated_pnl_pct (price P&L only - no funding, no fees)
+                estimated_pnl_pct = (long_price_pnl_usd + short_price_pnl_usd) / total_capital_used if total_capital_used > 0 else 0.0
 
                 # 5. estimated_pnl_velocity (change per step)
                 estimated_pnl_velocity = 0.0
@@ -481,10 +507,9 @@ class UnifiedFeatureBuilder:
                 # 16. value_to_capital_ratio
                 value_to_capital_ratio = total_capital_used / capital if capital > 0 else 0.0
 
-                # 17. pnl_imbalance
-                long_pnl_pct = pos.get('long_pnl_pct', 0.0)
-                short_pnl_pct = pos.get('short_pnl_pct', 0.0)
-                pnl_imbalance = (long_pnl_pct - short_pnl_pct) / 200
+                # 17. pnl_imbalance (calculated from price P&L percentages)
+                # long_price_pnl_pct and short_price_pnl_pct calculated above from entry/current prices
+                pnl_imbalance = (long_price_pnl_pct * 100 - short_price_pnl_pct * 100) / 200
 
                 # 18. pnl_vs_peak_pct (V6: signals profit-taking opportunity)
                 # Track peak P&L for this slot and calculate ratio

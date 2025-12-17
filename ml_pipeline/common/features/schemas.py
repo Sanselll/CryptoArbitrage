@@ -36,10 +36,11 @@ class PositionRawData(BaseModel):
     current_short_price: float = Field(default=0.0, ge=0.0)
     slippage_pct: float = Field(default=0.0, ge=0.0)  # Slippage percentage for exit calculations
 
-    # P&L
-    unrealized_pnl_pct: float = Field(default=0.0)
-    long_pnl_pct: float = Field(default=0.0)
-    short_pnl_pct: float = Field(default=0.0)
+    # Raw funding and fees (Python calculates P&L)
+    long_funding_earned_usd: float = Field(default=0.0)
+    short_funding_earned_usd: float = Field(default=0.0)
+    long_fees_usd: float = Field(default=0.0)
+    short_fees_usd: float = Field(default=0.0)
 
     # Funding rates
     long_funding_rate: float = Field(default=0.0)
@@ -94,7 +95,7 @@ class PortfolioRawData(BaseModel):
 
     positions: List[PositionRawData] = Field(default_factory=list, max_items=5)
     total_capital: float = Field(default=10000.0, gt=0.0)
-    capital_utilization: float = Field(default=0.0, ge=0.0, le=100.0)
+    capital_utilization: float = Field(default=0.0, ge=0.0, le=200.0)  # Can exceed 100% during drawdowns
 
     @validator('positions')
     def validate_positions(cls, v):

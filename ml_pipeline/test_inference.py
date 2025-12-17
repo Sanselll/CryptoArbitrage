@@ -221,9 +221,6 @@ class MLAPIClient:
                     current_position_apr = opp.get('fund_apr', 0.0)
                     break
 
-            # Get position breakdown
-            breakdown = pos.get_breakdown()
-
             positions.append({
                 'is_active': True,
                 'symbol': pos.symbol,
@@ -234,9 +231,12 @@ class MLAPIClient:
                 'entry_short_price': float(pos.entry_short_price),
                 'current_long_price': float(current_long_price),
                 'current_short_price': float(current_short_price),
-                'unrealized_pnl_pct': float(breakdown['unrealized_pnl_pct']),
-                'long_pnl_pct': float(breakdown['long_price_pnl_pct']),
-                'short_pnl_pct': float(breakdown['short_price_pnl_pct']),
+                'slippage_pct': float(pos.slippage_pct),
+                # Raw funding and fees (Python calculates P&L)
+                'long_funding_earned_usd': float(pos.long_net_funding_usd),
+                'short_funding_earned_usd': float(pos.short_net_funding_usd),
+                'long_fees_usd': float(pos.entry_fees_paid_usd / 2),  # Split entry fees between legs
+                'short_fees_usd': float(pos.entry_fees_paid_usd / 2),
                 'long_funding_rate': float(long_funding_rate),
                 'short_funding_rate': float(short_funding_rate),
                 'long_funding_interval_hours': int(pos.long_funding_interval_hours),

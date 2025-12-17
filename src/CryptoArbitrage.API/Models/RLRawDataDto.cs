@@ -72,15 +72,18 @@ public class PositionRawData
     [JsonPropertyName("slippage_pct")]
     public decimal SlippagePct { get; set; }
 
-    // P&L (pre-calculated for convenience)
-    [JsonPropertyName("unrealized_pnl_pct")]
-    public decimal UnrealizedPnlPct { get; set; }
+    // Raw funding data (Python calculates P&L from these + prices)
+    [JsonPropertyName("long_funding_earned_usd")]
+    public decimal LongFundingEarnedUsd { get; set; }
 
-    [JsonPropertyName("long_pnl_pct")]
-    public decimal LongPnlPct { get; set; }
+    [JsonPropertyName("short_funding_earned_usd")]
+    public decimal ShortFundingEarnedUsd { get; set; }
 
-    [JsonPropertyName("short_pnl_pct")]
-    public decimal ShortPnlPct { get; set; }
+    [JsonPropertyName("long_fees_usd")]
+    public decimal LongFeesUsd { get; set; }
+
+    [JsonPropertyName("short_fees_usd")]
+    public decimal ShortFeesUsd { get; set; }
 
     // Funding rates (for funding profit calculation)
     [JsonPropertyName("long_funding_rate")]

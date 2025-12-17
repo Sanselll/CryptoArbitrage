@@ -344,7 +344,12 @@
       "Bash(gtimeout 15 python:*)",
       "Bash(if [ -f /tmp/ml_api_server.log ])",
       "Bash(then tail -100 /tmp/ml_api_server.log)",
-      "Bash(else echo \"No log file found\")"
+      "Bash(else echo \"No log file found\")",
+      "Bash(timeout 60 python:*)",
+      "Bash(gtimeout 60 python:*)",
+      "Bash(mv:*)",
+      "Bash(then echo \"✅ ML API server running on port 5250\")",
+      "Bash(else echo \"❌ Failed to start\")"
     ],
     "deny": [],
     "ask": []
