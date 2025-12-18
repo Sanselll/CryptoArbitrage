@@ -1,21 +1,21 @@
 """
-Modular RL Predictor V2 - Simplified with UnifiedFeatureBuilder
+Modular RL Predictor V2 - Simplified with UnifiedFeatureBuilder (V8)
 
 This version uses the UnifiedFeatureBuilder for all feature preparation,
 eliminating code duplication and ensuring consistency across all components.
 
-Architecture V7: 229-dimensional observation space
+Architecture V8: 109-dimensional observation space (optimized)
 - Config: 5 dims
-- Portfolio: 4 dims (V6: +1 time_to_next_funding_norm)
-- Executions: 100 dims (5 slots × 20 features, V7: +2 apr_sign_match, apr_velocity per slot)
-- Opportunities: 120 dims (10 slots × 12 features)
+- Portfolio: 4 dims
+- Executions: 40 dims (2 slots × 20 features)
+- Opportunities: 60 dims (5 slots × 12 features)
 
-Action space: 36 actions
+Action space: 18 actions (V8: reduced from 36)
 - 0: HOLD
-- 1-10: ENTER_OPP_0-9_SMALL (10%)
-- 11-20: ENTER_OPP_0-9_MEDIUM (20%)
-- 21-30: ENTER_OPP_0-9_LARGE (30%)
-- 31-35: EXIT_POS_0-4
+- 1-5: ENTER_OPP_0-4_SMALL (10%)
+- 6-10: ENTER_OPP_0-4_MEDIUM (20%)
+- 11-15: ENTER_OPP_0-4_LARGE (30%)
+- 16-17: EXIT_POS_0-1
 """
 
 import numpy as np
@@ -32,13 +32,13 @@ from models.rl.algorithms.ppo_trainer import PPOTrainer
 from common.features import UnifiedFeatureBuilder, DIMS
 
 
-# Action space mapping
+# Action space mapping (V8: 18 actions)
 ACTION_NAMES = {
     0: 'HOLD',
-    **{i: f'ENTER_OPP_{i-1}_SMALL' for i in range(1, 11)},
-    **{i: f'ENTER_OPP_{i-11}_MEDIUM' for i in range(11, 21)},
-    **{i: f'ENTER_OPP_{i-21}_LARGE' for i in range(21, 31)},
-    **{i: f'EXIT_POS_{i-31}' for i in range(31, 36)},
+    **{i: f'ENTER_OPP_{i-1}_SMALL' for i in range(1, 6)},     # 1-5
+    **{i: f'ENTER_OPP_{i-6}_MEDIUM' for i in range(6, 11)},   # 6-10
+    **{i: f'ENTER_OPP_{i-11}_LARGE' for i in range(11, 16)},  # 11-15
+    **{i: f'EXIT_POS_{i-16}' for i in range(16, 18)},         # 16-17
 }
 
 # Position sizes (as % of max allowed size per side)
@@ -178,31 +178,31 @@ class ModularRLPredictor:
         trading_config: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
-        Predict best action for given opportunities and portfolio state.
+        Predict best action for given opportunities and portfolio state (V8).
 
         Args:
-            opportunities: List of up to 10 opportunity dicts
+            opportunities: List of up to 5 opportunity dicts
             portfolio: Current portfolio state dict
             trading_config: Trading configuration dict (optional)
 
         Returns:
             Dict with:
                 - action: Recommended action ('HOLD', 'ENTER', 'EXIT')
-                - action_id: Action ID (0-35)
+                - action_id: Action ID (0-17)
                 - confidence: Probability of selected action
                 - state_value: Estimated state value
                 - opportunity_symbol: Symbol if ENTER action
-                - opportunity_index: Index if ENTER action
-                - position_index: Index if EXIT action
+                - opportunity_index: Index if ENTER action (0-4)
+                - position_index: Index if EXIT action (0-1)
                 - position_size: Recommended size if ENTER
-                - action_probabilities: Full distribution over all 36 actions
+                - action_probabilities: Full distribution over all 18 actions
         """
         # Use default config if not provided
         if trading_config is None:
             trading_config = {
                 'max_leverage': 1.0,
                 'target_utilization': 0.5,
-                'max_positions': 3,
+                'max_positions': 2,  # V8: reduced from 3
                 'stop_loss_threshold': -0.02,
                 'liquidation_buffer': 0.15,
             }
@@ -298,10 +298,10 @@ class ModularRLPredictor:
 
     def _decode_action(self, action: int) -> Dict[str, Any]:
         """
-        Decode action ID to human-readable format.
+        Decode action ID to human-readable format (V8: 18 actions).
 
         Args:
-            action: Action ID (0-35)
+            action: Action ID (0-17)
 
         Returns:
             Dict with 'type', 'opportunity_index', 'position_index', 'size'
@@ -313,28 +313,28 @@ class ModularRLPredictor:
                 'position_index': None,
                 'size': None,
             }
-        elif 1 <= action <= 10:
+        elif 1 <= action <= 5:  # V8: 1-5 (was 1-10)
             return {
                 'type': 'ENTER',
                 'opportunity_index': action - 1,
                 'position_index': None,
                 'size': 'SMALL',
             }
-        elif 11 <= action <= 20:
+        elif 6 <= action <= 10:  # V8: 6-10 (was 11-20)
+            return {
+                'type': 'ENTER',
+                'opportunity_index': action - 6,
+                'position_index': None,
+                'size': 'MEDIUM',
+            }
+        elif 11 <= action <= 15:  # V8: 11-15 (was 21-30)
             return {
                 'type': 'ENTER',
                 'opportunity_index': action - 11,
                 'position_index': None,
-                'size': 'MEDIUM',
-            }
-        elif 21 <= action <= 30:
-            return {
-                'type': 'ENTER',
-                'opportunity_index': action - 21,
-                'position_index': None,
                 'size': 'LARGE',
             }
-        elif DIMS.ACTION_EXIT_START <= action <= DIMS.ACTION_EXIT_END:
+        elif DIMS.ACTION_EXIT_START <= action <= DIMS.ACTION_EXIT_END:  # V8: 16-17
             return {
                 'type': 'EXIT',
                 'opportunity_index': None,

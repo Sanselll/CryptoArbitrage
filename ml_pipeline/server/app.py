@@ -95,10 +95,10 @@ def initialize_predictor():
                 device='cpu'
             )
             print("✅ RL predictor initialized successfully")
-            print("   Architecture: Unified Feature Builder (229 dims)")
-            print("   Model: trained_models/rl/v7_ep2800.pt")
-            print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
-            print("   Features: 5 config + 3 portfolio + 85 executions + 120 opportunities")
+            print("   Architecture: Unified Feature Builder V8 (109 dims)")
+            print("   Model: trained_models/rl/v8_optimized.pt")  # V8: update model path
+            print("   Action space: 18 actions (1 HOLD + 15 ENTER + 2 EXIT)")  # V8: reduced
+            print("   Features: 5 config + 4 portfolio + 40 executions + 60 opportunities")
             print(f"   Confidence thresholds: ENTER >= {ENTER_CONFIDENCE_THRESHOLD:.0%}, EXIT >= {EXIT_CONFIDENCE_THRESHOLD:.0%}")
             print(f"   APR threshold: ENTER only if APR >= {MIN_APR_THRESHOLD:.0f}%")
         except Exception as e:
@@ -132,7 +132,7 @@ def start_agent():
         "config": {
             "max_leverage": 1.0,
             "target_utilization": 0.9,
-            "max_positions": 3,
+            "max_positions": 2,  # V8: reduced from 3
             "prediction_interval_sec": 60
         }
     }
@@ -380,7 +380,7 @@ def update_agent_config():
         "config": {
             "max_leverage": 2.0,
             "target_utilization": 0.8,
-            "max_positions": 3
+            "max_positions": 2  # V8: reduced from 3
         }
     }
 
@@ -561,16 +561,16 @@ def predict():
         "trading_config": {
             "max_leverage": 2.0,
             "target_utilization": 0.8,
-            "max_positions": 3,
+            "max_positions": 2,  # V8: reduced from 3
             "stop_loss_threshold": -0.02,
             "liquidation_buffer": 0.15
         },
         "portfolio": {
             "total_capital": 10000.0,
             "capital_utilization": 0.5,
-            "positions": [...]
+            "positions": [...]  # V8: max 2 positions
         },
-        "opportunities": [...]
+        "opportunities": [...]  # V8: max 5 opportunities
     }
 
     Returns:

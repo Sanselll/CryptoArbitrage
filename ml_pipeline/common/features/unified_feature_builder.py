@@ -1,19 +1,21 @@
 """
-Unified Feature Builder for RL Inference (V6)
+Unified Feature Builder for RL Inference (V8)
 
 This module provides the SINGLE SOURCE OF TRUTH for all feature engineering
 used in the modular RL arbitrage system. All components (backend inference,
 ML API server, training, and testing) must use this class to ensure consistency.
 
-Architecture V6: 219-dimensional observation space
+Architecture V8: 109-dimensional observation space (optimized)
 - Config: 5 dims
-- Portfolio: 4 dims (V6: +1 time_to_next_funding_norm)
-- Executions: 90 dims (5 slots × 18 features, V6: +1 pnl_vs_peak_pct per slot)
-- Opportunities: 120 dims (10 slots × 12 features)
+- Portfolio: 4 dims
+- Executions: 40 dims (2 slots × 20 features)
+- Opportunities: 60 dims (5 slots × 12 features)
 
-V6 Changes:
-- Added portfolio feature: time_to_next_funding_norm (minutes until next funding / 480)
-- Added execution feature #18: pnl_vs_peak_pct (current P&L / peak P&L, signals profit-taking)
+V8 Changes (Optimization):
+- Reduced opportunity slots: 10 → 5 (position opps first, then best APR)
+- Reduced position slots: 5 → 2
+- Observation space: 229 → 109 dimensions
+- Action space: 36 → 18 actions
 
 Key Principles:
 1. All feature calculation logic lives HERE and only here
@@ -108,7 +110,7 @@ class UnifiedFeatureBuilder:
 
     def build_observation_from_raw_data(self, raw_data: Dict[str, Any], log_file: Optional[str] = None) -> np.ndarray:
         """
-        Build complete 219-dim observation vector from raw backend data (V6).
+        Build complete 109-dim observation vector from raw backend data (V8).
 
         This is the main entry point for converting raw data to model features.
 
@@ -121,7 +123,7 @@ class UnifiedFeatureBuilder:
             log_file: Optional path to log features for debugging
 
         Returns:
-            219-dimensional observation array (5 + 4 + 90 + 120)
+            109-dimensional observation array (5 + 4 + 40 + 60)
         """
         trading_config = raw_data.get('trading_config', {})
         portfolio = raw_data.get('portfolio', {})
@@ -281,9 +283,9 @@ class UnifiedFeatureBuilder:
 
     def build_execution_features(self, portfolio: Dict, best_available_apr: float = 0.0) -> np.ndarray:
         """
-        Build execution features for up to 5 position slots (90 dimensions total, V6).
+        Build execution features for up to 2 position slots (40 dimensions total, V8).
 
-        Each position has 18 features:
+        Each position has 20 features:
         1. is_active
         2. net_pnl_pct (price P&L + funding - fees) / capital
         3. hours_held_norm: log(hours + 1) / log(73)
@@ -294,21 +296,23 @@ class UnifiedFeatureBuilder:
         8. spread_pct: current price spread
         9. spread_change_from_entry: entry_spread - current_spread (+ = profit from spread narrowing)
         10. liquidation_distance_pct
-        11. apr_ratio: current_apr / entry_apr (clipped to [0,3])
+        11. apr_ratio: current_apr / entry_apr (clipped to [-3,3])
         12. current_position_apr (normalized to ±5000%)
         13. best_available_apr_norm (normalized to ±5000%)
         14. apr_advantage: current - best
         15. return_efficiency: P&L per hour held (clipped to ±50)
         16. value_to_capital_ratio: capital allocated to this position
         17. pnl_imbalance: (long_pnl - short_pnl) / 200
-        18. pnl_vs_peak_pct: V6 - current P&L / peak P&L (signals profit-taking opportunity)
+        18. pnl_vs_peak_pct: current P&L / peak P&L (signals profit-taking opportunity)
+        19. apr_sign_match: APR direction flip indicator
+        20. apr_velocity: APR deterioration rate
 
         Args:
             portfolio: Portfolio state dict with positions list
             best_available_apr: Maximum APR among current opportunities
 
         Returns:
-            90-dimensional array (5 slots × 18 features)
+            40-dimensional array (2 slots × 20 features)
         """
         positions = portfolio.get('positions', [])
         capital = portfolio.get('total_capital', 10000.0)
@@ -579,9 +583,9 @@ class UnifiedFeatureBuilder:
 
     def build_opportunity_features(self, opportunities: List[Dict]) -> np.ndarray:
         """
-        Build opportunity features for up to 10 slots (120 dimensions total).
+        Build opportunity features for up to 5 slots (60 dimensions total, V8).
 
-        Each opportunity has 12 features (V5.4):
+        Each opportunity has 12 features:
         1-6: fund_profit_8h, fund_profit_8h_24h_proj, fund_profit_8h_3d_proj,
              fund_apr, fund_apr_24h_proj, fund_apr_3d_proj
         7-10: spread_30_sample_avg, price_spread_24h_avg, price_spread_3d_avg, spread_volatility_stddev
@@ -592,10 +596,10 @@ class UnifiedFeatureBuilder:
         to match training behavior. Empty slots are padded with zeros BEFORE scaling.
 
         Args:
-            opportunities: List of up to 10 opportunity dicts
+            opportunities: List of up to 5 opportunity dicts
 
         Returns:
-            120-dimensional array (10 slots × 12 features)
+            60-dimensional array (5 slots × 12 features)
         """
         all_features = []
 
@@ -663,7 +667,14 @@ class UnifiedFeatureBuilder:
         max_positions: int
     ) -> np.ndarray:
         """
-        Generate action mask (36 dimensions).
+        Generate action mask (18 dimensions, V8).
+
+        Action space (V8):
+        - 0: HOLD
+        - 1-5: ENTER_OPP_0-4_SMALL
+        - 6-10: ENTER_OPP_0-4_MEDIUM
+        - 11-15: ENTER_OPP_0-4_LARGE
+        - 16-17: EXIT_POS_0-1
 
         Args:
             opportunities: List of opportunity dicts
@@ -671,7 +682,7 @@ class UnifiedFeatureBuilder:
             max_positions: Maximum allowed positions
 
         Returns:
-            Boolean array (36,) where True = valid action
+            Boolean array (18,) where True = valid action
         """
         mask = np.zeros(DIMS.TOTAL_ACTIONS, dtype=bool)
 
@@ -682,17 +693,17 @@ class UnifiedFeatureBuilder:
         has_capacity = num_positions < max_positions
 
         if has_capacity:
-            for i in range(DIMS.OPPORTUNITIES_SLOTS):
+            for i in range(DIMS.OPPORTUNITIES_SLOTS):  # 0-4 (5 opportunities)
                 if i < len(opportunities):
                     # Prevent duplicate positions for same symbol
                     if not opportunities[i].get('has_existing_position', False):
-                        mask[1 + i] = True      # SMALL
-                        mask[11 + i] = True     # MEDIUM
-                        mask[21 + i] = True     # LARGE
+                        mask[1 + i] = True      # SMALL (1-5)
+                        mask[6 + i] = True      # MEDIUM (6-10)
+                        mask[11 + i] = True     # LARGE (11-15)
 
         # EXIT actions: valid if position exists
-        for i in range(DIMS.EXECUTIONS_SLOTS):
+        for i in range(DIMS.EXECUTIONS_SLOTS):  # 0-1 (2 positions)
             if i < num_positions:
-                mask[DIMS.ACTION_EXIT_START + i] = True
+                mask[DIMS.ACTION_EXIT_START + i] = True  # 16-17
 
         return mask

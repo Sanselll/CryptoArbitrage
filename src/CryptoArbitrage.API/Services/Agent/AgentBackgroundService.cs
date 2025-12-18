@@ -280,7 +280,8 @@ public class AgentBackgroundService : BackgroundService
             .ToList();
 
         // Build final list: position opportunities first, then fill remaining slots with top APR opportunities
-        var remainingSlots = Math.Max(0, 10 - positionOpportunities.Count);
+        // V8: Reduced from 10 to 5 opportunity slots
+        var remainingSlots = Math.Max(0, 5 - positionOpportunities.Count);
         var userOpportunities = positionOpportunities
             .Concat(otherOpportunities.Take(remainingSlots))
             .ToList();

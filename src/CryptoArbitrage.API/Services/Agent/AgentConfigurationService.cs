@@ -118,9 +118,10 @@ public class AgentConfigurationService : IAgentConfigurationService
             return (false, "Target utilization must be between 0.5 (50%) and 1.0 (100%)");
         }
 
-        if (maxPositions < 1 || maxPositions > 3)
+        // V8: Reduced from 3 to 2 max positions to match optimized model architecture
+        if (maxPositions < 1 || maxPositions > 2)
         {
-            return (false, "Max positions (executions) must be between 1 and 3. Each execution opens 2 positions (long + short hedge).");
+            return (false, "Max positions (executions) must be between 1 and 2. Each execution opens 2 positions (long + short hedge).");
         }
 
         return (true, null);

@@ -60,7 +60,7 @@ class FundingArbitrageEnv(gym.Env):
                  episode_length_days: int = 3,
                  episode_length_hours_min: int = None,  # For random episode lengths
                  episode_length_hours_max: int = None,  # For random episode lengths
-                 max_opportunities_per_hour: int = 10,
+                 max_opportunities_per_hour: int = 5,  # V8: reduced from 10
                  step_hours: int = 1,
                  reward_config: Optional[RewardConfig] = None,
                  pnl_reward_scale: float = None,  # Deprecated: use reward_config
@@ -80,7 +80,7 @@ class FundingArbitrageEnv(gym.Env):
             sample_random_config: If True, sample random config each episode (for training diversity)
             max_position_size_pct: Max % of capital per position side
             episode_length_days: Episode length in days (ignored if use_full_range_episodes=True)
-            max_opportunities_per_hour: Max opportunities to show per timestep (default 10)
+            max_opportunities_per_hour: Max opportunities to show per timestep (V8: default 5)
             step_hours: Hours per timestep (default 1 = hourly)
             pnl_reward_scale: Scaling factor for P&L rewards (default 3.0)
             use_full_range_episodes: If True, episodes span entire data range (data_start to data_end)
@@ -182,19 +182,19 @@ class FundingArbitrageEnv(gym.Env):
         # Current opportunities available to agent
         self.current_opportunities: List[Dict] = []
 
-        # Action space: 36 discrete actions
+        # Action space: 18 discrete actions (V8: reduced from 36)
         # 0 = HOLD
-        # 1-10 = ENTER_OPP_0-9_SMALL (10% of max allowed size)
-        # 11-20 = ENTER_OPP_0-9_MEDIUM (20% of max allowed size)
-        # 21-30 = ENTER_OPP_0-9_LARGE (30% of max allowed size)
-        # 31-35 = EXIT_POS_0-4
-        self.action_space = spaces.Discrete(36)
+        # 1-5 = ENTER_OPP_0-4_SMALL (10% of max allowed size)
+        # 6-10 = ENTER_OPP_0-4_MEDIUM (20% of max allowed size)
+        # 11-15 = ENTER_OPP_0-4_LARGE (30% of max allowed size)
+        # 16-17 = EXIT_POS_0-1
+        self.action_space = spaces.Discrete(DIMS.TOTAL_ACTIONS)  # V8: 18 actions
 
-        # Observation space dimensions (V7: 229 dims)
+        # Observation space dimensions (V8: 109 dims)
         # Config: 5 dims
-        # Portfolio: 4 dims (V6: +1 time_to_next_funding_norm)
-        # Executions: 5 slots × 20 features = 100 dims (V7: +2 apr_sign_match, apr_velocity per slot)
-        # Opportunities: 10 slots × 12 features = 120 dims
+        # Portfolio: 4 dims
+        # Executions: 2 slots × 20 features = 40 dims
+        # Opportunities: 5 slots × 12 features = 60 dims
         # Uses DIMS from feature_config.py as single source of truth
         self.observation_space = spaces.Box(
             low=-np.inf,
@@ -339,19 +339,19 @@ class FundingArbitrageEnv(gym.Env):
 
     def _get_action_mask(self) -> np.ndarray:
         """
-        Get boolean mask of valid actions for current state.
+        Get boolean mask of valid actions for current state (V8: 18 actions).
 
         Returns:
-            Boolean array of shape (36,) where True = valid action
+            Boolean array of shape (18,) where True = valid action
 
-        Action indices:
+        Action indices (V8):
             0: HOLD (always valid)
-            1-10: ENTER_OPP_0-9_SMALL
-            11-20: ENTER_OPP_0-9_MEDIUM
-            21-30: ENTER_OPP_0-9_LARGE
-            31-35: EXIT_POS_0-4
+            1-5: ENTER_OPP_0-4_SMALL
+            6-10: ENTER_OPP_0-4_MEDIUM
+            11-15: ENTER_OPP_0-4_LARGE
+            16-17: EXIT_POS_0-1
         """
-        mask = np.zeros(36, dtype=bool)
+        mask = np.zeros(DIMS.TOTAL_ACTIONS, dtype=bool)  # V8: 18 actions
 
         # HOLD is always valid
         mask[0] = True
@@ -365,45 +365,45 @@ class FundingArbitrageEnv(gym.Env):
         existing_symbols = {pos.symbol for pos in self.portfolio.positions}
 
         if has_capacity:
-            for i in range(10):
+            for i in range(DIMS.OPPORTUNITIES_SLOTS):  # V8: 5 opportunities
                 if i < len(self.current_opportunities):
                     opp = self.current_opportunities[i]
                     opp_symbol = opp.get('symbol', '')
 
                     # Only allow ENTER if we don't already have this symbol
                     if opp_symbol not in existing_symbols:
-                        mask[1 + i] = True      # SMALL
-                        mask[11 + i] = True     # MEDIUM
-                        mask[21 + i] = True     # LARGE
+                        mask[1 + i] = True      # SMALL (1-5)
+                        mask[6 + i] = True      # MEDIUM (6-10)
+                        mask[11 + i] = True     # LARGE (11-15)
 
         # EXIT actions: valid if position exists
-        for i in range(5):
+        for i in range(DIMS.EXECUTIONS_SLOTS):  # V8: 2 positions
             if i < num_positions:
-                mask[31 + i] = True
+                mask[DIMS.ACTION_EXIT_START + i] = True  # 16-17
 
         return mask
 
     def _calculate_position_size(self, action: int) -> float:
         """
-        Calculate position size based on action and current config.
+        Calculate position size based on action and current config (V8).
 
         IMPORTANT: This formula must match production backend (AgentBackgroundService.cs:474):
             positionSizeUsd = availableCapital * sizeMultiplier
 
         Args:
-            action: Action index (1-30 for ENTER actions)
+            action: Action index (1-15 for ENTER actions, V8)
 
         Returns:
             Position size in USD (per side)
         """
-        # Determine size multiplier based on action
-        if 1 <= action <= 10:
+        # Determine size multiplier based on action (V8: updated ranges)
+        if 1 <= action <= 5:
             # SMALL: 10% of available capital
             size_multiplier = 0.10
-        elif 11 <= action <= 20:
+        elif 6 <= action <= 10:
             # MEDIUM: 20% of available capital
             size_multiplier = 0.20
-        elif 21 <= action <= 30:
+        elif 11 <= action <= 15:
             # LARGE: 30% of available capital
             size_multiplier = 0.30
         else:
@@ -818,14 +818,14 @@ class FundingArbitrageEnv(gym.Env):
 
     def _execute_action(self, action: int) -> Tuple[float, dict]:
         """
-        Execute the agent's action.
+        Execute the agent's action (V8: 18 actions).
 
-        36 actions:
+        18 actions:
         - 0: HOLD
-        - 1-10: ENTER_OPP_0-9_SMALL
-        - 11-20: ENTER_OPP_0-9_MEDIUM
-        - 21-30: ENTER_OPP_0-9_LARGE
-        - 31-35: EXIT_POS_0-4
+        - 1-5: ENTER_OPP_0-4_SMALL
+        - 6-10: ENTER_OPP_0-4_MEDIUM
+        - 11-15: ENTER_OPP_0-4_LARGE
+        - 16-17: EXIT_POS_0-1
 
         Returns:
             (reward, info)
@@ -842,17 +842,17 @@ class FundingArbitrageEnv(gym.Env):
             info['action_type'] = 'hold'
             return reward, info
 
-        elif 1 <= action <= 30:
-            # ENTER actions
+        elif 1 <= action <= DIMS.ACTION_ENTER_END:  # 1-15
+            # ENTER actions (V8: updated ranges)
             # Decode opportunity index and size
-            if 1 <= action <= 10:
+            if 1 <= action <= 5:
                 opp_idx = action - 1
                 size_type = 'small'
-            elif 11 <= action <= 20:
-                opp_idx = action - 11
+            elif 6 <= action <= 10:
+                opp_idx = action - 6
                 size_type = 'medium'
-            else:  # 21-30
-                opp_idx = action - 21
+            else:  # 11-15
+                opp_idx = action - 11
                 size_type = 'large'
 
             # Validate opportunity exists
@@ -866,9 +866,9 @@ class FundingArbitrageEnv(gym.Env):
                 info['action_type'] = 'invalid_enter'
                 reward = 0.0  # No penalty - rely on action masking
 
-        elif 31 <= action <= 35:
-            # EXIT actions
-            pos_idx = action - 31
+        elif DIMS.ACTION_EXIT_START <= action <= DIMS.ACTION_EXIT_END:  # 16-17
+            # EXIT actions (V8: updated range)
+            pos_idx = action - DIMS.ACTION_EXIT_START
 
             # Validate position exists
             if pos_idx < len(self.portfolio.positions):
