@@ -349,7 +349,8 @@
       "Bash(gtimeout 60 python:*)",
       "Bash(mv:*)",
       "Bash(then echo \"✅ ML API server running on port 5250\")",
-      "Bash(else echo \"❌ Failed to start\")"
+      "Bash(else echo \"❌ Failed to start\")",
+      "Bash(do printf \"%-30s %9s%% %9s%% %10s %11sh\\n\" \"$checkpoint\" \"$pnl\" \"$winrate\" \"$trades\" \"$avg_hours\")"
     ],
     "deny": [],
     "ask": []

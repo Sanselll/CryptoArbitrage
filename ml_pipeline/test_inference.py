@@ -103,6 +103,16 @@ def parse_args():
     parser.add_argument('--exit-threshold', type=float, default=0.0,
                         help='Minimum confidence for EXIT actions (default: 0.0 = disabled, use 0.4 for 40%%)')
 
+    # APR threshold settings
+    parser.add_argument('--min-apr', type=float, default=0.0,
+                        help='Minimum APR for ENTER actions (default: 0.0 = disabled, use 800 for 800%%)')
+    parser.add_argument('--require-positive-24h', action='store_true',
+                        help='Only allow ENTER if fund_apr_24h_proj > 0')
+    parser.add_argument('--require-positive-3d', action='store_true',
+                        help='Only allow ENTER if fund_apr_3d_proj > 0')
+    parser.add_argument('--max-spread-vol', type=float, default=0.0,
+                        help='Maximum spread volatility for ENTER (default: 0.0 = disabled, use 0.15 for 15%%)')
+
     return parser.parse_args()
 
 
@@ -476,6 +486,18 @@ def test_model_inference(args):
         print(f"      ENTER threshold: {args.enter_threshold*100:.0f}% (actions below this default to HOLD)")
         print(f"      EXIT threshold:  {args.exit_threshold*100:.0f}% (actions below this default to HOLD)")
 
+    # APR threshold info
+    if args.min_apr > 0 or args.require_positive_24h or args.require_positive_3d or args.max_spread_vol > 0:
+        print(f"\n   📊 APR Thresholds:")
+        if args.min_apr > 0:
+            print(f"      Min APR: {args.min_apr:.0f}% (ENTER blocked if fund_apr < threshold)")
+        if args.require_positive_24h:
+            print(f"      Require 24h positive: Yes (ENTER blocked if fund_apr_24h_proj < 0)")
+        if args.require_positive_3d:
+            print(f"      Require 3d positive: Yes (ENTER blocked if fund_apr_3d_proj < 0)")
+        if args.max_spread_vol > 0:
+            print(f"      Max spread vol: {args.max_spread_vol:.2f} (ENTER blocked if spread_vol > threshold)")
+
     # Initialize inference method based on mode
     if args.api_mode:
         print("\n2. Initializing ML API client...")
@@ -545,6 +567,12 @@ def test_model_inference(args):
     # Threshold tracking
     threshold_blocked_enters = 0
     threshold_blocked_exits = 0
+
+    # APR threshold tracking
+    apr_blocked_low_apr = 0
+    apr_blocked_neg_24h = 0
+    apr_blocked_neg_3d = 0
+    apr_blocked_high_spread_vol = 0
 
     for episode in range(args.num_episodes):
         obs, info = env.reset(seed=args.seed)
@@ -771,6 +799,39 @@ def test_model_inference(args):
                     action = 0  # Default to HOLD
                     threshold_blocked_exits += 1
 
+            # Apply APR thresholds (only for ENTER actions that weren't already blocked)
+            if action >= 1 and action <= 30:
+                # Decode opportunity index from action
+                # Actions 1-10: opportunities 0-9 (SMALL size)
+                # Actions 11-20: opportunities 0-9 (MEDIUM size)
+                # Actions 21-30: opportunities 0-9 (LARGE size)
+                opp_idx = (action - 1) % 10  # 0-9
+
+                # Get opportunity data from environment
+                if hasattr(env, 'current_opportunities') and opp_idx < len(env.current_opportunities):
+                    opp = env.current_opportunities[opp_idx]
+                    fund_apr = opp.get('fund_apr', 0)
+                    fund_apr_24h = opp.get('fund_apr_24h_proj', 0)
+                    fund_apr_3d = opp.get('fund_apr_3d_proj', 0)
+                    spread_vol = opp.get('spread_volatility_stddev', 0)
+
+                    # Check min APR threshold
+                    if args.min_apr > 0 and fund_apr < args.min_apr:
+                        action = 0
+                        apr_blocked_low_apr += 1
+                    # Check 24h positive requirement
+                    elif args.require_positive_24h and fund_apr_24h < 0:
+                        action = 0
+                        apr_blocked_neg_24h += 1
+                    # Check 3d positive requirement
+                    elif args.require_positive_3d and fund_apr_3d < 0:
+                        action = 0
+                        apr_blocked_neg_3d += 1
+                    # Check max spread volatility
+                    elif args.max_spread_vol > 0 and spread_vol > args.max_spread_vol:
+                        action = 0
+                        apr_blocked_high_spread_vol += 1
+
             # Step
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
@@ -914,6 +975,20 @@ def test_model_inference(args):
         print(f"  EXIT threshold:  {args.exit_threshold*100:.0f}%")
         print(f"  Blocked ENTERs:  {threshold_blocked_enters:8d} (would have entered, defaulted to HOLD)")
         print(f"  Blocked EXITs:   {threshold_blocked_exits:8d} (would have exited, defaulted to HOLD)")
+
+    # Report APR threshold filtering if enabled
+    if args.min_apr > 0 or args.require_positive_24h or args.require_positive_3d or args.max_spread_vol > 0:
+        total_apr_blocked = apr_blocked_low_apr + apr_blocked_neg_24h + apr_blocked_neg_3d + apr_blocked_high_spread_vol
+        print(f"\n📊 APR Threshold Results:")
+        if args.min_apr > 0:
+            print(f"  Min APR ({args.min_apr:.0f}%):     {apr_blocked_low_apr:8d} blocked")
+        if args.require_positive_24h:
+            print(f"  Require 24h > 0:    {apr_blocked_neg_24h:8d} blocked")
+        if args.require_positive_3d:
+            print(f"  Require 3d > 0:     {apr_blocked_neg_3d:8d} blocked")
+        if args.max_spread_vol > 0:
+            print(f"  Max spread vol:     {apr_blocked_high_spread_vol:8d} blocked")
+        print(f"  Total blocked:      {total_apr_blocked:8d} ENTER actions → HOLD")
 
     # Calculate composite score (IMPROVED VERSION)
     # Weights: 50% P&L, 30% Profit Factor, 20% Low Drawdown

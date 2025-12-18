@@ -34,6 +34,10 @@ decision_logger = DecisionLogger(max_decisions_per_user=1000)
 ENTER_CONFIDENCE_THRESHOLD = 0.0   # Disabled - allow all ENTER actions
 EXIT_CONFIDENCE_THRESHOLD = 0.0    # Disabled - allow all EXIT actions
 
+# APR threshold for ENTER actions
+# ENTER actions on opportunities with APR below this threshold are converted to HOLD
+MIN_APR_THRESHOLD = 3000.0  # Only enter positions with APR >= 3000%
+
 # Decision log file for raw input/output analysis
 # Stored in server directory for easy access
 DECISION_LOG_FILE = os.path.join(os.path.dirname(__file__), 'ml_decisions.log')
@@ -87,15 +91,16 @@ def initialize_predictor():
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='trained_models/rl/v7_ep2050.pt',
+                model_path='trained_models/rl/v7_ep2800.pt',
                 device='cpu'
             )
             print("✅ RL predictor initialized successfully")
             print("   Architecture: Unified Feature Builder (229 dims)")
-            print("   Model: trained_models/rl/v7_ep2050.pt")
+            print("   Model: trained_models/rl/v7_ep2800.pt")
             print("   Action space: 36 actions (1 HOLD + 30 ENTER + 5 EXIT)")
             print("   Features: 5 config + 3 portfolio + 85 executions + 120 opportunities")
             print(f"   Confidence thresholds: ENTER >= {ENTER_CONFIDENCE_THRESHOLD:.0%}, EXIT >= {EXIT_CONFIDENCE_THRESHOLD:.0%}")
+            print(f"   APR threshold: ENTER only if APR >= {MIN_APR_THRESHOLD:.0f}%")
         except Exception as e:
             print(f"⚠️  Warning: Could not initialize RL predictor: {e}")
             print("   RL endpoints will be unavailable")
@@ -647,6 +652,8 @@ def predict():
         confidence = prediction.get('confidence', 0.0)
 
         threshold_applied = False
+        apr_blocked = False
+
         if original_action == 'ENTER' and confidence < ENTER_CONFIDENCE_THRESHOLD:
             prediction['action'] = 'HOLD'
             prediction['action_id'] = 0
@@ -662,11 +669,30 @@ def predict():
             prediction['original_action_id'] = original_action_id
             threshold_applied = True
 
+        # Apply APR threshold for ENTER actions
+        # Block ENTER if opportunity APR is below minimum threshold
+        if original_action == 'ENTER' and not threshold_applied and MIN_APR_THRESHOLD > 0:
+            opp_idx = prediction.get('opportunity_index')
+            opportunities = raw_data_dict.get('opportunities', [])
+            if opp_idx is not None and opp_idx < len(opportunities):
+                opp_apr = opportunities[opp_idx].get('fund_apr', 0)
+                if opp_apr < MIN_APR_THRESHOLD:
+                    prediction['action'] = 'HOLD'
+                    prediction['action_id'] = 0
+                    prediction['apr_blocked'] = True
+                    prediction['blocked_apr'] = opp_apr
+                    prediction['min_apr_threshold'] = MIN_APR_THRESHOLD
+                    prediction['original_action'] = original_action
+                    prediction['original_action_id'] = original_action_id
+                    apr_blocked = True
+
         # LOG RESPONSE DATA
         print(f"\n========== ML API RESPONSE ==========")
         print(f"Action: {prediction.get('action', 'N/A')}")
         if threshold_applied:
-            print(f"  (Original: {original_action} blocked by threshold, conf={confidence:.1%})")
+            print(f"  (Original: {original_action} blocked by confidence threshold, conf={confidence:.1%})")
+        if apr_blocked:
+            print(f"  (Original: {original_action} blocked by APR threshold, APR={prediction.get('blocked_apr', 0):.0f}% < {MIN_APR_THRESHOLD:.0f}%)")
         print(f"Opportunity Symbol: {prediction.get('opportunity_symbol', 'N/A')}")
         print(f"Opportunity Index: {prediction.get('opportunity_index', 'N/A')}")
         print(f"Confidence: {prediction.get('confidence', 'N/A')}")

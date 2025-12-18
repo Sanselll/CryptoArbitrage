@@ -679,11 +679,16 @@ class Portfolio:
 
     @property
     def capital_utilization(self) -> float:
-        """Percentage of initial capital currently in use (as margin)."""
-        if self.initial_capital == 0:
+        """Percentage of current capital in use (matches backend calculation).
+
+        Backend formula: sum(position_size_usd) / totalCapital * 100
+        Where position_size_usd is margin per leg (not both legs).
+        """
+        if self.total_capital == 0:
             return 0.0
-        margin_used = self.get_total_margin_used()
-        return (margin_used / self.initial_capital) * 100
+        # Sum of position_size_usd (margin per leg), matching backend
+        position_size_sum = sum(pos.position_size_usd for pos in self.positions)
+        return (position_size_sum / self.total_capital) * 100
 
     @property
     def margin_utilization(self) -> float:

@@ -14,14 +14,17 @@ TEST_DATA="data/production/rl_opportunities.csv"
 PRICE_HISTORY="data/production/price_history"
 LEVERAGE=2
 START_TIME="2025-11-28 08:05:00"
-END_TIME="2025-12-08 07:00:00"
+END_TIME="2025-12-18 07:20:00"
 INITIAL_CAPITAL=400
+MIN_APR=3000
 
 echo "========================================================================"
 echo "TESTING ALL CHECKPOINTS IN PARALLEL"
 echo "========================================================================"
 echo "Checkpoint directory: $CHECKPOINT_DIR"
 echo "Parallel jobs: $PARALLEL_JOBS"
+echo "Min APR threshold: $MIN_APR%"
+echo "Time range: $START_TIME to $END_TIME"
 echo "Results will be saved to: $RESULTS_FILE"
 echo ""
 
@@ -50,6 +53,7 @@ test_checkpoint() {
         --start-time "$START_TIME" \
         --end-time "$END_TIME" \
         --initial-capital "$INITIAL_CAPITAL" \
+        --min-apr "$MIN_APR" \
         --checkpoint "$checkpoint" \
         2>&1)
 
@@ -73,7 +77,7 @@ test_checkpoint() {
 
 # Export function and variables for parallel execution
 export -f test_checkpoint
-export TEST_DATA PRICE_HISTORY LEVERAGE START_TIME END_TIME INITIAL_CAPITAL RESULTS_FILE
+export TEST_DATA PRICE_HISTORY LEVERAGE START_TIME END_TIME INITIAL_CAPITAL MIN_APR RESULTS_FILE
 
 # Run tests in parallel
 echo "$CHECKPOINTS" | xargs -P "$PARALLEL_JOBS" -I {} bash -c 'test_checkpoint "$@"' _ {}
