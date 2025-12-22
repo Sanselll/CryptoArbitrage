@@ -18,7 +18,7 @@ public class AgentConfiguration
     // Trading configuration parameters
     public decimal MaxLeverage { get; set; } = 2.0m;  // 1-5x (trained with 2.0x)
     public decimal TargetUtilization { get; set; } = 0.8m;  // 50-100% (0.5-1.0) (trained with 0.8)
-    public int MaxPositions { get; set; } = 2;  // 1-3 concurrent executions (trained with 2)
+    public int MaxPositions { get; set; } = 1;  // V9: single position only
 
     // Prediction settings
     public int PredictionIntervalSeconds { get; set; } = 300;  // 5 minutes to match training environment (300 seconds)

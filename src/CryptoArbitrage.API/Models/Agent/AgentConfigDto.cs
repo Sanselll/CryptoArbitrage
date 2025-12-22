@@ -16,7 +16,7 @@ public class AgentConfigDto
     public decimal TargetUtilization { get; set; } = 0.9m;
 
     /// <summary>Maximum concurrent executions (V9: single position only). Each execution opens 2 positions (long + short hedge).</summary>
-    [Range(1, 1)]
+    [Range(1, 3)]  // Allow 1-3 for backwards compatibility, but ML model uses 1
     public int MaxPositions { get; set; } = 1;
 
     public int PredictionIntervalSeconds { get; set; } = 60;
