@@ -13,7 +13,7 @@ class TradingConfigRaw(BaseModel):
     """Trading configuration raw data."""
     max_leverage: float = Field(default=1.0, ge=1.0, le=10.0)
     target_utilization: float = Field(default=0.5, ge=0.0, le=1.0)
-    max_positions: int = Field(default=1, ge=1, le=1)  # V9: single position only
+    max_positions: int = Field(default=1, ge=1, le=3)  # Allow 1-3 for backwards compatibility, model uses 1
     stop_loss_threshold: float = Field(default=-0.02, ge=-1.0, le=0.0)
     liquidation_buffer: float = Field(default=0.15, ge=0.0, le=1.0)
 
