@@ -23,10 +23,10 @@ class AgentStatus(str, Enum):
 
 @dataclass
 class AgentConfig:
-    """Agent trading configuration"""
+    """Agent trading configuration (V9: single position only)"""
     max_leverage: float = 1.0          # 1-5x
     target_utilization: float = 0.9    # 50-100%
-    max_positions: int = 3             # 1-3
+    max_positions: int = 1             # V9: single position only
     prediction_interval_sec: int = 60  # Seconds between predictions
 
     def to_dict(self) -> Dict[str, Any]:
@@ -37,7 +37,7 @@ class AgentConfig:
         return cls(
             max_leverage=data.get('max_leverage', 1.0),
             target_utilization=data.get('target_utilization', 0.9),
-            max_positions=data.get('max_positions', 3),
+            max_positions=1,  # V9: force single position
             prediction_interval_sec=data.get('prediction_interval_sec', 60)
         )
 
@@ -47,8 +47,8 @@ class AgentConfig:
             return False, "max_leverage must be between 1.0 and 5.0"
         if not (0.5 <= self.target_utilization <= 1.0):
             return False, "target_utilization must be between 0.5 and 1.0"
-        if not (1 <= self.max_positions <= 3):
-            return False, "max_positions must be between 1 and 3"
+        if self.max_positions != 1:  # V9: single position only
+            return False, "max_positions must be 1 (V9: single position mode)"
         if not (10 <= self.prediction_interval_sec <= 300):
             return False, "prediction_interval_sec must be between 10 and 300"
         return True, None

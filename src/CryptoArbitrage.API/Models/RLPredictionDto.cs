@@ -47,7 +47,7 @@ public class RLTradingConfig
 {
     public decimal MaxLeverage { get; set; } = 2.0m;  // Feature 1: 1-5x leverage
     public decimal TargetUtilization { get; set; } = 0.8m;  // Feature 2: 50-100% (0.5-1.0)
-    public int MaxPositions { get; set; } = 2;  // Feature 3: 1-3 concurrent executions
+    public int MaxPositions { get; set; } = 1;  // V9: single position only
     public decimal StopLossThreshold { get; set; } = -0.02m;  // Feature 4: Stop loss % (e.g., -2%)
     public decimal LiquidationBuffer { get; set; } = 0.15m;  // Feature 5: Safety buffer from liquidation (15%)
 }

@@ -15,9 +15,9 @@ public class AgentConfigDto
     [Range(0.5, 1.0)]
     public decimal TargetUtilization { get; set; } = 0.9m;
 
-    /// <summary>Maximum concurrent executions (1-3). Each execution opens 2 positions (long + short hedge).</summary>
-    [Range(1, 3)]
-    public int MaxPositions { get; set; } = 3;
+    /// <summary>Maximum concurrent executions (V9: single position only). Each execution opens 2 positions (long + short hedge).</summary>
+    [Range(1, 1)]
+    public int MaxPositions { get; set; } = 1;
 
     public int PredictionIntervalSeconds { get; set; } = 60;
 }

@@ -36,7 +36,7 @@ EXIT_CONFIDENCE_THRESHOLD = 0.0    # Disabled - allow all EXIT actions
 
 # APR threshold for ENTER actions
 # ENTER actions on opportunities with APR below this threshold are converted to HOLD
-MIN_APR_THRESHOLD = 3000.0  # Only enter positions with APR >= 3000%
+MIN_APR_THRESHOLD = 0.0  # Disabled - model decides
 
 # Decision log file for raw input/output analysis
 # Stored in server directory for easy access
@@ -91,14 +91,14 @@ def initialize_predictor():
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='trained_models/rl/v7_ep2800.pt',
+                model_path='trained_models/rl/v9_ep2100.pt',
                 device='cpu'
             )
             print("✅ RL predictor initialized successfully")
-            print("   Architecture: Unified Feature Builder V8 (109 dims)")
-            print("   Model: trained_models/rl/v8_optimized.pt")  # V8: update model path
-            print("   Action space: 18 actions (1 HOLD + 15 ENTER + 2 EXIT)")  # V8: reduced
-            print("   Features: 5 config + 4 portfolio + 40 executions + 60 opportunities")
+            print("   Architecture: Unified Feature Builder V9 (86 dims)")
+            print("   Model: trained_models/rl/v9_ep2100.pt")
+            print("   Action space: 17 actions (1 HOLD + 15 ENTER + 1 EXIT)")  # V9: single position
+            print("   Features: 5 config + 2 portfolio + 19 executions + 60 opportunities")
             print(f"   Confidence thresholds: ENTER >= {ENTER_CONFIDENCE_THRESHOLD:.0%}, EXIT >= {EXIT_CONFIDENCE_THRESHOLD:.0%}")
             print(f"   APR threshold: ENTER only if APR >= {MIN_APR_THRESHOLD:.0f}%")
         except Exception as e:
@@ -132,7 +132,7 @@ def start_agent():
         "config": {
             "max_leverage": 1.0,
             "target_utilization": 0.9,
-            "max_positions": 2,  # V8: reduced from 3
+            "max_positions": 1,  # V9: single position only
             "prediction_interval_sec": 60
         }
     }
@@ -380,7 +380,7 @@ def update_agent_config():
         "config": {
             "max_leverage": 2.0,
             "target_utilization": 0.8,
-            "max_positions": 2  # V8: reduced from 3
+            "max_positions": 1  # V9: single position only
         }
     }
 

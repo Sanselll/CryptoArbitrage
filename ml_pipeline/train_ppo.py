@@ -59,8 +59,8 @@ def parse_args():
                         help='Maximum leverage (1-10x)')
     parser.add_argument('--target-utilization', type=float, default=0.8,
                         help='Target capital utilization (0-1)')
-    parser.add_argument('--max-positions', type=int, default=2,
-                        help='Maximum concurrent positions (1-5)')
+    parser.add_argument('--max-positions', type=int, default=1,
+                        help='Maximum concurrent positions (V9: single position only)')
 
     # Reward config (V7: Balanced RL approach with APR flip detection)
     parser.add_argument('--funding-reward-scale', type=float, default=15.0,

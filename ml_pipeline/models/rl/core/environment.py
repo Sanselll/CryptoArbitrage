@@ -182,18 +182,18 @@ class FundingArbitrageEnv(gym.Env):
         # Current opportunities available to agent
         self.current_opportunities: List[Dict] = []
 
-        # Action space: 18 discrete actions (V8: reduced from 36)
+        # Action space: 17 discrete actions (V9: single position)
         # 0 = HOLD
         # 1-5 = ENTER_OPP_0-4_SMALL (10% of max allowed size)
         # 6-10 = ENTER_OPP_0-4_MEDIUM (20% of max allowed size)
         # 11-15 = ENTER_OPP_0-4_LARGE (30% of max allowed size)
-        # 16-17 = EXIT_POS_0-1
-        self.action_space = spaces.Discrete(DIMS.TOTAL_ACTIONS)  # V8: 18 actions
+        # 16 = EXIT_POS_0
+        self.action_space = spaces.Discrete(DIMS.TOTAL_ACTIONS)  # V9: 17 actions
 
-        # Observation space dimensions (V8: 109 dims)
+        # Observation space dimensions (V9: 86 dims)
         # Config: 5 dims
-        # Portfolio: 4 dims
-        # Executions: 2 slots × 20 features = 40 dims
+        # Portfolio: 2 dims (removed num_positions_ratio, capital_utilization)
+        # Executions: 1 slot × 19 features = 19 dims (removed value_to_capital_ratio)
         # Opportunities: 5 slots × 12 features = 60 dims
         # Uses DIMS from feature_config.py as single source of truth
         self.observation_space = spaces.Box(
@@ -339,19 +339,19 @@ class FundingArbitrageEnv(gym.Env):
 
     def _get_action_mask(self) -> np.ndarray:
         """
-        Get boolean mask of valid actions for current state (V8: 18 actions).
+        Get boolean mask of valid actions for current state (V9: 17 actions).
 
         Returns:
-            Boolean array of shape (18,) where True = valid action
+            Boolean array of shape (17,) where True = valid action
 
-        Action indices (V8):
+        Action indices (V9):
             0: HOLD (always valid)
             1-5: ENTER_OPP_0-4_SMALL
             6-10: ENTER_OPP_0-4_MEDIUM
             11-15: ENTER_OPP_0-4_LARGE
-            16-17: EXIT_POS_0-1
+            16: EXIT_POS_0
         """
-        mask = np.zeros(DIMS.TOTAL_ACTIONS, dtype=bool)  # V8: 18 actions
+        mask = np.zeros(DIMS.TOTAL_ACTIONS, dtype=bool)  # V9: 17 actions
 
         # HOLD is always valid
         mask[0] = True
@@ -371,15 +371,17 @@ class FundingArbitrageEnv(gym.Env):
                     opp_symbol = opp.get('symbol', '')
 
                     # Only allow ENTER if we don't already have this symbol
-                    if opp_symbol not in existing_symbols:
-                        mask[1 + i] = True      # SMALL (1-5)
-                        mask[6 + i] = True      # MEDIUM (6-10)
-                        mask[11 + i] = True     # LARGE (11-15)
+                    if opp_symbol in existing_symbols:
+                        continue
 
-        # EXIT actions: valid if position exists
-        for i in range(DIMS.EXECUTIONS_SLOTS):  # V8: 2 positions
+                    mask[1 + i] = True      # SMALL (1-5)
+                    mask[6 + i] = True      # MEDIUM (6-10)
+                    mask[11 + i] = True     # LARGE (11-15)
+
+        # EXIT actions: valid if position exists (V9: single position only)
+        for i in range(DIMS.EXECUTIONS_SLOTS):  # V9: 1 position
             if i < num_positions:
-                mask[DIMS.ACTION_EXIT_START + i] = True  # 16-17
+                mask[DIMS.ACTION_EXIT_START + i] = True  # 16
 
         return mask
 
@@ -818,14 +820,14 @@ class FundingArbitrageEnv(gym.Env):
 
     def _execute_action(self, action: int) -> Tuple[float, dict]:
         """
-        Execute the agent's action (V8: 18 actions).
+        Execute the agent's action (V9: 17 actions).
 
-        18 actions:
+        17 actions:
         - 0: HOLD
         - 1-5: ENTER_OPP_0-4_SMALL
         - 6-10: ENTER_OPP_0-4_MEDIUM
         - 11-15: ENTER_OPP_0-4_LARGE
-        - 16-17: EXIT_POS_0-1
+        - 16: EXIT_POS_0
 
         Returns:
             (reward, info)

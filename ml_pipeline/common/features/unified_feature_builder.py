@@ -1,21 +1,22 @@
 """
-Unified Feature Builder for RL Inference (V8)
+Unified Feature Builder for RL Inference (V9)
 
 This module provides the SINGLE SOURCE OF TRUTH for all feature engineering
 used in the modular RL arbitrage system. All components (backend inference,
 ML API server, training, and testing) must use this class to ensure consistency.
 
-Architecture V8: 109-dimensional observation space (optimized)
+Architecture V9: 86-dimensional observation space (simplified)
 - Config: 5 dims
-- Portfolio: 4 dims
-- Executions: 40 dims (2 slots × 20 features)
+- Portfolio: 2 dims (removed num_positions_ratio, capital_utilization)
+- Executions: 19 dims (1 slot × 19 features, removed value_to_capital_ratio)
 - Opportunities: 60 dims (5 slots × 12 features)
 
-V8 Changes (Optimization):
-- Reduced opportunity slots: 10 → 5 (position opps first, then best APR)
-- Reduced position slots: 5 → 2
-- Observation space: 229 → 109 dimensions
-- Action space: 36 → 18 actions
+V9 Changes (Simplification):
+- Removed capital features: num_positions_ratio, capital_utilization from portfolio
+- Removed value_to_capital_ratio from execution features
+- Reduced position slots: 2 → 1 (single position only)
+- Observation space: 109 → 86 dimensions
+- Action space: 18 → 17 actions
 
 Key Principles:
 1. All feature calculation logic lives HERE and only here
@@ -110,7 +111,7 @@ class UnifiedFeatureBuilder:
 
     def build_observation_from_raw_data(self, raw_data: Dict[str, Any], log_file: Optional[str] = None) -> np.ndarray:
         """
-        Build complete 109-dim observation vector from raw backend data (V8).
+        Build complete 86-dim observation vector from raw backend data (V9).
 
         This is the main entry point for converting raw data to model features.
 
@@ -123,7 +124,7 @@ class UnifiedFeatureBuilder:
             log_file: Optional path to log features for debugging
 
         Returns:
-            109-dimensional observation array (5 + 4 + 40 + 60)
+            86-dimensional observation array (5 + 2 + 19 + 60)
         """
         trading_config = raw_data.get('trading_config', {})
         portfolio = raw_data.get('portfolio', {})
@@ -197,13 +198,13 @@ class UnifiedFeatureBuilder:
 
     def build_portfolio_features(self, portfolio: Dict, trading_config: Dict, current_time: Optional[datetime] = None) -> np.ndarray:
         """
-        Build portfolio features (V6: 4 dimensions).
+        Build portfolio features (V9: 2 dimensions).
 
         Features:
-        1. num_positions_ratio: Active positions / max_positions
-        2. min_liq_distance: Minimum liquidation distance across all positions
-        3. capital_utilization: Used capital / total capital
-        4. time_to_next_funding_norm: V6 - Minutes until next funding payment / 480 (0-1)
+        1. min_liq_distance: Minimum liquidation distance across all positions
+        2. time_to_next_funding_norm: Minutes until next funding payment / 480 (0-1)
+
+        V9: Removed num_positions_ratio and capital_utilization
 
         Args:
             portfolio: Portfolio state dict
@@ -211,7 +212,7 @@ class UnifiedFeatureBuilder:
             current_time: Optional datetime for funding time calculation
 
         Returns:
-            4-dimensional array
+            2-dimensional array
         """
         # Count only ACTIVE positions, not empty padded slots
         positions = portfolio.get('positions', [])
@@ -219,8 +220,6 @@ class UnifiedFeatureBuilder:
             1 for p in positions
             if p.get('is_active', False)
         )
-        max_positions = trading_config.get('max_positions', 2)
-        num_positions_ratio = num_positions / max_positions if max_positions > 0 else 0.0
 
         # Calculate minimum liquidation distance from active positions
         min_liq_distance = 1.0  # Default for no positions
@@ -233,16 +232,12 @@ class UnifiedFeatureBuilder:
             if active_liq_distances:
                 min_liq_distance = min(active_liq_distances)
 
-        capital_utilization = portfolio.get('capital_utilization', 0.0) / 100.0
-
         # V6: Calculate time to next funding payment
         time_to_next_funding_norm = self._calc_time_to_next_funding(current_time)
 
         return np.array([
-            num_positions_ratio,
             min_liq_distance,
-            capital_utilization,
-            time_to_next_funding_norm,  # V6: New feature
+            time_to_next_funding_norm,
         ], dtype=np.float32)
 
     def _calc_time_to_next_funding(self, current_time: Optional[datetime]) -> float:
@@ -283,9 +278,9 @@ class UnifiedFeatureBuilder:
 
     def build_execution_features(self, portfolio: Dict, best_available_apr: float = 0.0) -> np.ndarray:
         """
-        Build execution features for up to 2 position slots (40 dimensions total, V8).
+        Build execution features for 1 position slot (19 dimensions total, V9).
 
-        Each position has 20 features:
+        Each position has 19 features:
         1. is_active
         2. net_pnl_pct (price P&L + funding - fees) / capital
         3. hours_held_norm: log(hours + 1) / log(73)
@@ -301,18 +296,19 @@ class UnifiedFeatureBuilder:
         13. best_available_apr_norm (normalized to ±5000%)
         14. apr_advantage: current - best
         15. return_efficiency: P&L per hour held (clipped to ±50)
-        16. value_to_capital_ratio: capital allocated to this position
-        17. pnl_imbalance: (long_pnl - short_pnl) / 200
-        18. pnl_vs_peak_pct: current P&L / peak P&L (signals profit-taking opportunity)
-        19. apr_sign_match: APR direction flip indicator
-        20. apr_velocity: APR deterioration rate
+        16. pnl_imbalance: (long_pnl - short_pnl) / 200
+        17. pnl_vs_peak_pct: current P&L / peak P&L (signals profit-taking opportunity)
+        18. apr_sign_match: APR direction flip indicator
+        19. apr_velocity: APR deterioration rate
+
+        V9: Removed value_to_capital_ratio, reduced to 1 slot
 
         Args:
             portfolio: Portfolio state dict with positions list
             best_available_apr: Maximum APR among current opportunities
 
         Returns:
-            40-dimensional array (2 slots × 20 features)
+            19-dimensional array (1 slot × 19 features)
         """
         positions = portfolio.get('positions', [])
         capital = portfolio.get('total_capital', 10000.0)
@@ -508,10 +504,9 @@ class UnifiedFeatureBuilder:
                     CONFIG.RETURN_EFFICIENCY_CLIP_MAX
                 ) / CONFIG.RETURN_EFFICIENCY_CLIP_MAX
 
-                # 16. value_to_capital_ratio
-                value_to_capital_ratio = total_capital_used / capital if capital > 0 else 0.0
+                # V9: Removed value_to_capital_ratio
 
-                # 17. pnl_imbalance (calculated from price P&L percentages)
+                # 16. pnl_imbalance (calculated from price P&L percentages)
                 # long_price_pnl_pct and short_price_pnl_pct calculated above from entry/current prices
                 pnl_imbalance = (long_price_pnl_pct * 100 - short_price_pnl_pct * 100) / 200
 
@@ -551,6 +546,7 @@ class UnifiedFeatureBuilder:
                     self._prev_position_apr[slot_idx] = current_position_apr_value
 
                 # CRITICAL: Feature order must match exactly across all components
+                # V9: 19 features (removed value_to_capital_ratio)
                 slot_features = [
                     is_active_feat,
                     net_pnl_pct,
@@ -567,11 +563,11 @@ class UnifiedFeatureBuilder:
                     best_available_apr_norm,
                     apr_advantage,
                     return_efficiency,
-                    value_to_capital_ratio,
+                    # V9: Removed value_to_capital_ratio
                     pnl_imbalance,
-                    pnl_vs_peak_pct,  # V6: New feature
-                    apr_sign_match,   # V7: APR direction flip indicator
-                    apr_velocity,     # V7: APR deterioration rate
+                    pnl_vs_peak_pct,
+                    apr_sign_match,
+                    apr_velocity,
                 ]
             else:
                 # Empty slot - all zeros
@@ -664,25 +660,27 @@ class UnifiedFeatureBuilder:
         self,
         opportunities: List[Dict],
         num_positions: int,
-        max_positions: int
+        max_positions: int,
+        current_time: Optional[datetime] = None,
     ) -> np.ndarray:
         """
-        Generate action mask (18 dimensions, V8).
+        Generate action mask (17 dimensions, V9).
 
-        Action space (V8):
+        Action space (V9):
         - 0: HOLD
         - 1-5: ENTER_OPP_0-4_SMALL
         - 6-10: ENTER_OPP_0-4_MEDIUM
         - 11-15: ENTER_OPP_0-4_LARGE
-        - 16-17: EXIT_POS_0-1
+        - 16: EXIT_POS_0
 
         Args:
             opportunities: List of opportunity dicts
             num_positions: Current number of active positions
             max_positions: Maximum allowed positions
+            current_time: Current datetime (unused, kept for API compatibility)
 
         Returns:
-            Boolean array (18,) where True = valid action
+            Boolean array (17,) where True = valid action
         """
         mask = np.zeros(DIMS.TOTAL_ACTIONS, dtype=bool)
 
@@ -695,15 +693,18 @@ class UnifiedFeatureBuilder:
         if has_capacity:
             for i in range(DIMS.OPPORTUNITIES_SLOTS):  # 0-4 (5 opportunities)
                 if i < len(opportunities):
+                    opp = opportunities[i]
                     # Prevent duplicate positions for same symbol
-                    if not opportunities[i].get('has_existing_position', False):
-                        mask[1 + i] = True      # SMALL (1-5)
-                        mask[6 + i] = True      # MEDIUM (6-10)
-                        mask[11 + i] = True     # LARGE (11-15)
+                    if opp.get('has_existing_position', False):
+                        continue
 
-        # EXIT actions: valid if position exists
-        for i in range(DIMS.EXECUTIONS_SLOTS):  # 0-1 (2 positions)
+                    mask[1 + i] = True      # SMALL (1-5)
+                    mask[6 + i] = True      # MEDIUM (6-10)
+                    mask[11 + i] = True     # LARGE (11-15)
+
+        # EXIT actions: valid if position exists (V9: only 1 position slot)
+        for i in range(DIMS.EXECUTIONS_SLOTS):  # 0 (1 position)
             if i < num_positions:
-                mask[DIMS.ACTION_EXIT_START + i] = True  # 16-17
+                mask[DIMS.ACTION_EXIT_START + i] = True  # 16
 
         return mask

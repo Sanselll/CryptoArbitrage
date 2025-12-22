@@ -2,7 +2,7 @@
 Feature configuration constants for RL model.
 
 Defines all feature dimensions and configuration for the modular RL architecture.
-Version: V8 (109 dimensions total)
+Version: V9 (86 dimensions total)
 
 V6 Changes:
 - Added portfolio feature: time_to_next_funding_norm (+1)
@@ -18,6 +18,15 @@ V8 Changes (Optimization):
 - Reduced position slots: 5 -> 2
 - Observation space: 229 -> 109 dimensions
 - Action space: 36 -> 18 actions
+
+V9 Changes (Simplification):
+- Removed capital features: num_positions_ratio, capital_utilization from portfolio
+- Removed value_to_capital_ratio from execution features
+- Reduced position slots: 2 -> 1 (single position only)
+- Portfolio features: 4 -> 2
+- Execution features per slot: 20 -> 19
+- Observation space: 109 -> 86 dimensions
+- Action space: 18 -> 17 actions
 """
 
 from dataclasses import dataclass
@@ -26,33 +35,33 @@ from typing import Final
 
 @dataclass(frozen=True)
 class FeatureDimensions:
-    """Feature dimensions for V8 modular architecture (optimized)."""
+    """Feature dimensions for V9 modular architecture (single position)."""
 
     # Component dimensions
     CONFIG: Final[int] = 5
-    PORTFOLIO: Final[int] = 4  # V6: +1 (time_to_next_funding_norm)
-    EXECUTIONS_PER_SLOT: Final[int] = 20  # V7: +2 (apr_sign_match, apr_velocity)
-    EXECUTIONS_SLOTS: Final[int] = 2  # V8: reduced from 5
-    EXECUTIONS_TOTAL: Final[int] = EXECUTIONS_PER_SLOT * EXECUTIONS_SLOTS  # 40
+    PORTFOLIO: Final[int] = 2  # min_liq_distance, time_to_next_funding (V9: removed capital features)
+    EXECUTIONS_PER_SLOT: Final[int] = 19  # V9: 19 features per slot (removed value_to_capital_ratio)
+    EXECUTIONS_SLOTS: Final[int] = 1  # V9: single position only
+    EXECUTIONS_TOTAL: Final[int] = EXECUTIONS_PER_SLOT * EXECUTIONS_SLOTS  # 19
     OPPORTUNITIES_PER_SLOT: Final[int] = 12
     OPPORTUNITIES_SLOTS: Final[int] = 5  # V8: reduced from 10
     OPPORTUNITIES_TOTAL: Final[int] = OPPORTUNITIES_PER_SLOT * OPPORTUNITIES_SLOTS  # 60
 
     # Total observation dimension
-    TOTAL: Final[int] = CONFIG + PORTFOLIO + EXECUTIONS_TOTAL + OPPORTUNITIES_TOTAL  # 109
+    TOTAL: Final[int] = CONFIG + PORTFOLIO + EXECUTIONS_TOTAL + OPPORTUNITIES_TOTAL  # 86
 
-    # Action space (V8: 18 actions)
+    # Action space (V9: 17 actions)
     # 0: HOLD
     # 1-5: ENTER_OPP_0-4_SMALL
     # 6-10: ENTER_OPP_0-4_MEDIUM
     # 11-15: ENTER_OPP_0-4_LARGE
-    # 16-17: EXIT_POS_0-1
+    # 16: EXIT_POS_0
     ACTION_HOLD: Final[int] = 0
     ACTION_ENTER_START: Final[int] = 1
     ACTION_ENTER_END: Final[int] = 15  # V8: reduced from 30
     ACTION_EXIT_START: Final[int] = 16  # V8: reduced from 31
-    ACTION_EXIT_END: Final[int] = 17  # V8: reduced from 35
-    TOTAL_ACTIONS: Final[int] = 18  # V8: reduced from 36
+    ACTION_EXIT_END: Final[int] = 16  # V9: only EXIT_POS_0 (was 17)
+    TOTAL_ACTIONS: Final[int] = 17  # V9: reduced from 18
 
 
 @dataclass(frozen=True)
@@ -72,7 +81,7 @@ class FeatureConfig:
     # V5.4: StandardScaler (12 features)
     FEATURE_SCALER_PATH: Final[str] = "trained_models/rl/feature_scaler_v3.pkl"
 
-    # Feature names for execution slots (20 features - V7)
+    # Feature names for execution slots (19 features - V9)
     EXECUTION_FEATURE_NAMES: Final[tuple] = (
         "is_active",
         "net_pnl_pct",
@@ -89,11 +98,10 @@ class FeatureConfig:
         "best_available_apr_norm",
         "apr_advantage",
         "return_efficiency",
-        "value_to_capital_ratio",
         "pnl_imbalance",
-        "pnl_vs_peak_pct",  # V6: Current P&L / Peak P&L (signals when to take profits)
-        "apr_sign_match",   # V7: APR direction flip indicator (1.0 = same sign, -1.0 = flipped)
-        "apr_velocity",     # V7: APR deterioration rate (negative = getting worse)
+        "pnl_vs_peak_pct",
+        "apr_sign_match",
+        "apr_velocity",
     )
 
     # Feature names for opportunity slots (12 features - V5.4)

@@ -18,10 +18,10 @@ class TradingConfig:
     to teach the agent to adapt to different risk profiles.
     """
 
-    # Position sizing and leverage (V8: reduced max_positions to 2)
+    # Position sizing and leverage (V9: single position only)
     max_leverage: float = 3.0                    # Maximum leverage allowed (1-10x)
     target_utilization: float = 0.6              # Target capital utilization (0-1, e.g., 0.6 = 60%)
-    max_positions: int = 2                        # Maximum concurrent positions (V8: 1-2)
+    max_positions: int = 1                        # Maximum concurrent positions (V9: single position only)
 
     # Risk management
     stop_loss_threshold: float = -0.02           # P&L% threshold for automatic exit (e.g., -0.02 = -2%)
@@ -81,7 +81,7 @@ class TradingConfig:
         return TradingConfig(
             max_leverage=np.random.uniform(1.0, 10.0),
             target_utilization=np.random.uniform(0.3, 0.8),
-            max_positions=np.random.choice([1, 2]),  # V8: reduced from [1,2,3,4,5]
+            max_positions=1,  # V9: single position only
             stop_loss_threshold=np.random.uniform(-0.05, -0.01),
             liquidation_buffer=np.random.uniform(0.1, 0.3)
         )
@@ -106,7 +106,7 @@ class TradingConfig:
         return TradingConfig(
             max_leverage=np.random.uniform(1.0, 5.0),      # 1-5x (vs 1-10x in random)
             target_utilization=np.random.uniform(0.4, 0.7), # 40-70% (vs 30-80%)
-            max_positions=np.random.choice([1, 2]),         # V8: 1-2 positions
+            max_positions=1,                                # V9: single position only
             stop_loss_threshold=np.random.uniform(-0.03, -0.015),  # -3% to -1.5%
             liquidation_buffer=np.random.uniform(0.12, 0.20)       # 12-20%
         )
@@ -117,7 +117,7 @@ class TradingConfig:
         return TradingConfig(
             max_leverage=1.0,
             target_utilization=0.4,
-            max_positions=2,
+            max_positions=1,              # V9: single position only
             stop_loss_threshold=-0.01,  # -1% stop-loss
             liquidation_buffer=0.25      # 25% buffer
         )
@@ -128,25 +128,25 @@ class TradingConfig:
         return TradingConfig(
             max_leverage=3.0,
             target_utilization=0.6,
-            max_positions=3,
+            max_positions=1,              # V9: single position only
             stop_loss_threshold=-0.02,  # -2% stop-loss
             liquidation_buffer=0.15      # 15% buffer
         )
 
     @staticmethod
     def get_aggressive() -> 'TradingConfig':
-        """Get aggressive trading configuration (high risk, V8)."""
+        """Get aggressive trading configuration (high risk, V9)."""
         return TradingConfig(
             max_leverage=5.0,
             target_utilization=0.75,
-            max_positions=2,              # V8: reduced from 5
+            max_positions=1,              # V9: single position only
             stop_loss_threshold=-0.03,  # -3% stop-loss
             liquidation_buffer=0.10      # 10% buffer
         )
 
     def validate(self) -> bool:
         """
-        Validate configuration parameters are within acceptable ranges (V8).
+        Validate configuration parameters are within acceptable ranges (V9).
 
         Returns:
             True if valid, False otherwise
@@ -155,7 +155,7 @@ class TradingConfig:
             return False
         if not (0.0 <= self.target_utilization <= 1.0):
             return False
-        if not (1 <= self.max_positions <= 2):  # V8: reduced from 5
+        if self.max_positions != 1:  # V9: single position only
             return False
         if not (-0.10 <= self.stop_loss_threshold <= 0.0):
             return False

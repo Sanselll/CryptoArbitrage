@@ -13,7 +13,7 @@ class TradingConfigRaw(BaseModel):
     """Trading configuration raw data."""
     max_leverage: float = Field(default=1.0, ge=1.0, le=10.0)
     target_utilization: float = Field(default=0.5, ge=0.0, le=1.0)
-    max_positions: int = Field(default=2, ge=1, le=2)  # V8: reduced from 5
+    max_positions: int = Field(default=1, ge=1, le=1)  # V9: single position only
     stop_loss_threshold: float = Field(default=-0.02, ge=-1.0, le=0.0)
     liquidation_buffer: float = Field(default=0.15, ge=0.0, le=1.0)
 
@@ -93,15 +93,15 @@ class PortfolioRawData(BaseModel):
     # Ensures velocity state is isolated between different agent sessions
     session_id: Optional[str] = None
 
-    positions: List[PositionRawData] = Field(default_factory=list, max_items=2)  # V8: reduced from 5
+    positions: List[PositionRawData] = Field(default_factory=list, max_items=1)  # V9: single position only
     total_capital: float = Field(default=10000.0, gt=0.0)
     capital_utilization: float = Field(default=0.0, ge=0.0, le=200.0)  # Can exceed 100% during drawdowns
 
     @validator('positions')
     def validate_positions(cls, v):
-        """Ensure max 2 positions (V8)."""
-        if len(v) > 2:
-            raise ValueError(f"Maximum 2 positions allowed, got {len(v)}")
+        """Ensure max 1 position (V9)."""
+        if len(v) > 1:
+            raise ValueError(f"Maximum 1 position allowed, got {len(v)}")
         return v
 
     class Config:
@@ -126,16 +126,16 @@ class RLRawDataRequest(BaseModel):
 
 
 class RLPredictionResponse(BaseModel):
-    """Response from ML API with prediction results (V8: 18 actions)."""
-    action: int = Field(ge=0, le=17)  # V8: reduced from 35
+    """Response from ML API with prediction results (V9: 17 actions)."""
+    action: int = Field(ge=0, le=16)  # V9: reduced from 17
     action_name: str
     action_type: str  # "HOLD", "ENTER", "EXIT"
     confidence: float = Field(ge=0.0, le=1.0)
-    action_probabilities: List[float] = Field(min_items=18, max_items=18)  # V8: reduced from 36
+    action_probabilities: List[float] = Field(min_items=17, max_items=17)  # V9: reduced from 18
 
     # Action details
     opportunity_index: Optional[int] = Field(default=None, ge=0, le=4)  # V8: reduced from 9
-    position_index: Optional[int] = Field(default=None, ge=0, le=1)  # V8: reduced from 4
+    position_index: Optional[int] = Field(default=None, ge=0, le=0)  # V9: single position only
     size: Optional[str] = None  # "SMALL", "MEDIUM", "LARGE"
     size_multiplier: Optional[float] = None
 
@@ -146,8 +146,8 @@ class RLPredictionResponse(BaseModel):
     selected_fund_apr: Optional[float] = None
 
     # Mask info
-    valid_actions: int = Field(ge=1, le=18)  # V8: reduced from 36
-    masked_actions: int = Field(ge=0, le=17)  # V8: reduced from 35
+    valid_actions: int = Field(ge=1, le=17)  # V9: reduced from 18
+    masked_actions: int = Field(ge=0, le=16)  # V9: reduced from 17
 
     class Config:
         extra = "allow"

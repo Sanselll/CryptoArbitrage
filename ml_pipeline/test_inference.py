@@ -1,13 +1,20 @@
 """
 Test model inference - verify trained model can be loaded and used
 
-V3 Feature Architecture (203 dimensions total):
+V9 Feature Architecture (86 dimensions total):
   - Config: 5 features (max_leverage, target_utilization, max_positions, stop_loss, liq_buffer)
-  - Portfolio: 3 features (num_positions_ratio, liq_distance, utilization)
-  - Executions: 85 features (5 positions × 17 features each)
-  - Opportunities: 110 features (10 opportunities × 11 features each)
+  - Portfolio: 2 features (min_liq_distance, time_to_next_funding_norm)
+  - Executions: 19 features (1 position × 19 features)
+  - Opportunities: 60 features (5 opportunities × 12 features each)
 
-V3 Position Features (17 per position):
+V9 Action Space (17 actions total):
+  - 0: HOLD
+  - 1-5: ENTER_SMALL (opportunities 0-4)
+  - 6-10: ENTER_MEDIUM (opportunities 0-4)
+  - 11-15: ENTER_LARGE (opportunities 0-4)
+  - 16: EXIT_POS_0
+
+V9 Position Features (19 per position):
   1. is_active - Position active flag
   2. net_pnl_pct - Net P&L percentage
   3. hours_held_norm - Log-normalized hold time: log(hours+1)/log(73)
@@ -23,8 +30,10 @@ V3 Position Features (17 per position):
   13. best_available_apr_norm - Best APR available (±5000% range)
   14. apr_advantage - Current APR - Best Available APR
   15. return_efficiency - Net P&L / (hours * entry APR/8760)
-  16. value_to_capital_ratio - Position value / total capital
-  17. pnl_imbalance - (long_pnl - short_pnl) / 2 (asymmetry indicator)
+  16. pnl_imbalance - (long_pnl - short_pnl) / 2 (asymmetry indicator)
+  17. pnl_velocity - P&L trend over recent history
+  18. peak_drawdown - Drawdown from peak P&L
+  19. hours_until_next_funding_norm - Time to next funding payment
 
 Logs detailed feature breakdown to: test_features.log
 """
@@ -62,8 +71,8 @@ def parse_args():
                         help='Max leverage (default: 2.0x)')
     parser.add_argument('--utilization', type=float, default=0.8,
                         help='Capital utilization (default: 0.8 = 80%%)')
-    parser.add_argument('--max-positions', type=int, default=2,
-                        help='Max concurrent positions (default: 2)')
+    parser.add_argument('--max-positions', type=int, default=1,
+                        help='Max concurrent positions (default: 1, V9: single position only)')
 
     # Test configuration
     parser.add_argument('--num-episodes', type=int, default=1,
@@ -609,13 +618,14 @@ def test_model_inference(args):
                             for opp in env.current_opportunities:
                                 current_market_aprs[opp['symbol']] = opp.get('fund_apr', 0.0)
 
-                        # V3 Feature names (17 features per position)
+                        # V9 Feature names (19 features per position)
                         feature_names = [
                             "is_active", "net_pnl_pct", "hours_held_norm", "estimated_pnl_pct",
                             "estimated_pnl_velocity", "estimated_funding_8h_pct", "funding_velocity",
                             "spread_pct", "spread_velocity", "liquidation_distance_pct", "apr_ratio",
                             "current_position_apr", "best_available_apr_norm", "apr_advantage",
-                            "return_efficiency", "value_to_capital_ratio", "pnl_imbalance"
+                            "return_efficiency", "pnl_imbalance", "pnl_velocity", "peak_drawdown",
+                            "hours_until_next_funding_norm"
                         ]
 
                         with open(log_path, 'a') as f:
@@ -679,9 +689,9 @@ def test_model_inference(args):
 
                                 f.write("\n" + "=" * 60 + "\n\n")
 
-                                # Extract normalized features from observation vector (V3: 5 config + 3 portfolio = 8 prefix)
-                                feat_start_idx = 8 + (slot_idx * 17)
-                                normalized_features = obs[feat_start_idx:feat_start_idx+17]
+                                # Extract normalized features from observation vector (V9: 5 config + 2 portfolio = 7 prefix)
+                                feat_start_idx = 7 + (slot_idx * 19)
+                                normalized_features = obs[feat_start_idx:feat_start_idx+19]
 
                                 # Get raw values
                                 net_pnl_pct_raw = pos.unrealized_pnl_pct * 100
@@ -713,8 +723,8 @@ def test_model_inference(args):
                                 # Calculate pnl_imbalance
                                 pnl_imbalance = (pos.long_pnl_pct - pos.short_pnl_pct) / 2.0
 
-                                # Write V3 raw features
-                                f.write("Raw Features (before normalization) - V3:\n")
+                                # Write V9 raw features
+                                f.write("Raw Features (before normalization) - V9:\n")
                                 f.write(f"  1. is_active                  : {normalized_features[0]:.4f}\n")
                                 f.write(f"  2. net_pnl_pct                : {net_pnl_pct_raw:.4f}%\n")
                                 f.write(f"  3. hours_held                 : {raw_hours_held:.4f}h (log-normalized)\n")
@@ -730,14 +740,16 @@ def test_model_inference(args):
                                 f.write(f" 13. best_available_apr_norm    : {best_available_apr:.2f}% (±5000% range)\n")
                                 f.write(f" 14. apr_advantage              : {current_position_apr - best_available_apr:.2f}%\n")
                                 f.write(f" 15. return_efficiency          : {normalized_features[14]:.6f}\n")
-                                f.write(f" 16. value_to_capital_ratio     : {normalized_features[15]:.4f}\n")
-                                f.write(f" 17. pnl_imbalance              : {pnl_imbalance:.4f} (long-short asymmetry)\n")
+                                f.write(f" 16. pnl_imbalance              : {pnl_imbalance:.4f} (long-short asymmetry)\n")
+                                f.write(f" 17. pnl_velocity               : {normalized_features[16]:.6f} (P&L trend)\n")
+                                f.write(f" 18. peak_drawdown              : {normalized_features[17]:.4f}%\n")
+                                f.write(f" 19. hours_until_next_funding   : {normalized_features[18]:.4f} (normalized)\n")
 
-                                f.write(f"\nNormalized Features (sent to model) - V3:\n")
+                                f.write(f"\nNormalized Features (sent to model) - V9:\n")
                                 for i, (name, val) in enumerate(zip(feature_names, normalized_features)):
                                     f.write(f" {i+1:2d}. {name:30s}: {val:12.6f}\n")
 
-                                f.write(f"\nV3 Feature Details:\n")
+                                f.write(f"\nV9 Feature Details:\n")
                                 f.write(f"  hours_held_log_norm           : {hours_held_log_norm:.6f} (log({raw_hours_held:.2f}+1)/log(73))\n")
                                 f.write(f"  long_pnl_pct                  : {pos.long_pnl_pct*100:.4f}%\n")
                                 f.write(f"  short_pnl_pct                 : {pos.short_pnl_pct*100:.4f}%\n")
@@ -788,24 +800,24 @@ def test_model_inference(args):
                     probs = torch.softmax(action_logits, dim=1).cpu().numpy()[0]
                     confidence = float(probs[action])
 
-            # Apply confidence threshold (action 0 = HOLD, 1-30 = ENTER, 31-35 = EXIT)
+            # Apply confidence threshold (V9: action 0 = HOLD, 1-15 = ENTER, 16 = EXIT)
             original_action = action
-            if action >= 1 and action <= 30:  # ENTER action
+            if action >= 1 and action <= 15:  # V9: ENTER actions
                 if confidence < args.enter_threshold:
                     action = 0  # Default to HOLD
                     threshold_blocked_enters += 1
-            elif action >= 31 and action <= 35:  # EXIT action
+            elif action == 16:  # V9: EXIT_POS_0
                 if confidence < args.exit_threshold:
                     action = 0  # Default to HOLD
                     threshold_blocked_exits += 1
 
             # Apply APR thresholds (only for ENTER actions that weren't already blocked)
-            if action >= 1 and action <= 30:
-                # Decode opportunity index from action
-                # Actions 1-10: opportunities 0-9 (SMALL size)
-                # Actions 11-20: opportunities 0-9 (MEDIUM size)
-                # Actions 21-30: opportunities 0-9 (LARGE size)
-                opp_idx = (action - 1) % 10  # 0-9
+            if action >= 1 and action <= 15:  # V9: ENTER actions
+                # Decode opportunity index from action (V9)
+                # Actions 1-5: opportunities 0-4 (SMALL size)
+                # Actions 6-10: opportunities 0-4 (MEDIUM size)
+                # Actions 11-15: opportunities 0-4 (LARGE size)
+                opp_idx = (action - 1) % 5  # V9: 0-4
 
                 # Get opportunity data from environment
                 if hasattr(env, 'current_opportunities') and opp_idx < len(env.current_opportunities):

@@ -629,14 +629,14 @@ class Portfolio:
 
     def __init__(self,
                  initial_capital: float = 10000.0,
-                 max_positions: int = 3,
+                 max_positions: int = 1,
                  max_position_size_pct: float = 33.3):
         """
         Initialize portfolio.
 
         Args:
             initial_capital: Starting capital in USD
-            max_positions: Maximum number of concurrent executions
+            max_positions: Maximum number of concurrent executions (V9: single position only)
             max_position_size_pct: Max % of capital per side (total used = 2x)
         """
         self.initial_capital = initial_capital
@@ -929,22 +929,22 @@ class Portfolio:
         ], dtype=np.float32)
 
     def get_all_execution_states(self, price_data: Dict[str, Dict[str, float]],
-                                max_positions: int = 5,
+                                max_positions: int = 1,
                                 best_available_apr: float = 0.0,
                                 current_opportunities: Optional[List[Dict]] = None) -> np.ndarray:
         """
-        Get execution state features for all 5 slots (85 dimensions total - V3 refactoring).
+        Get execution state features for position slots (V9: single position only).
 
-        V3: Changed from 100 dims (5×20) to 85 dims (5×17 features)
+        Note: This is a legacy method. UnifiedFeatureBuilder is the current source of truth.
 
         Args:
             price_data: Current price data for all symbols
-            max_positions: Maximum number of position slots (default 5)
+            max_positions: Maximum number of position slots (V9: default 1)
             best_available_apr: Maximum APR among current opportunities (for comparison)
             current_opportunities: List of current market opportunities to look up APR by symbol
 
         Returns:
-            85-dimensional array (5 slots × 17 features)
+            17-dimensional array (1 slot × 17 features) for V9
         """
         all_features = []
         for i in range(max_positions):

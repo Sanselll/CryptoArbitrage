@@ -350,9 +350,13 @@
       "Bash(mv:*)",
       "Bash(then echo \"✅ ML API server running on port 5250\")",
       "Bash(else echo \"❌ Failed to start\")",
-      "Bash(do printf \"%-30s %9s%% %9s%% %10s %11sh\\n\" \"$checkpoint\" \"$pnl\" \"$winrate\" \"$trades\" \"$avg_hours\")"
+      "Bash(do printf \"%-30s %9s%% %9s%% %10s %11sh\\n\" \"$checkpoint\" \"$pnl\" \"$winrate\" \"$trades\" \"$avg_hours\")",
+      "Bash(bash:*)",
+      "Bash(for ckpt in checkpoint_ep2500.pt checkpoint_ep2400.pt checkpoint_ep750.pt checkpoint_ep2350.pt checkpoint_ep3000.pt)",
+      "Bash(do echo \"Testing $ckpt...\" python test_inference.py --checkpoint checkpoints/v9/$ckpt --num-episodes 1)"
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "spinnerTipsEnabled": false
 }

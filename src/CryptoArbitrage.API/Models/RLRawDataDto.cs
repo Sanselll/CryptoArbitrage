@@ -24,7 +24,7 @@ public class TradingConfigRawData
     public decimal TargetUtilization { get; set; } = 0.5m;
 
     [JsonPropertyName("max_positions")]
-    public int MaxPositions { get; set; } = 3;
+    public int MaxPositions { get; set; } = 1;  // V9: single position only
 
     [JsonPropertyName("stop_loss_threshold")]
     public decimal StopLossThreshold { get; set; } = -0.02m;

@@ -37,13 +37,13 @@ public class AgentConfigurationService : IAgentConfigurationService
             return config;
         }
 
-        // Create default configuration (matches trained model parameters)
+        // Create default configuration (V9: single position mode)
         config = new AgentConfiguration
         {
             UserId = userId,
             MaxLeverage = 2.0m,              // Trained with 2.0x leverage
             TargetUtilization = 0.8m,        // Trained with 80% utilization
-            MaxPositions = 2,                // Trained with 2 max positions
+            MaxPositions = 1,                // V9: single position only
             PredictionIntervalSeconds = 300, // Trained with 5-minute intervals (300s)
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow

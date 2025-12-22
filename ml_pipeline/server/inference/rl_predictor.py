@@ -1,21 +1,21 @@
 """
-Modular RL Predictor V2 - Simplified with UnifiedFeatureBuilder (V8)
+Modular RL Predictor V2 - Simplified with UnifiedFeatureBuilder (V9)
 
 This version uses the UnifiedFeatureBuilder for all feature preparation,
 eliminating code duplication and ensuring consistency across all components.
 
-Architecture V8: 109-dimensional observation space (optimized)
+Architecture V9: 86-dimensional observation space (simplified)
 - Config: 5 dims
-- Portfolio: 4 dims
-- Executions: 40 dims (2 slots × 20 features)
+- Portfolio: 2 dims (removed capital features)
+- Executions: 19 dims (1 slot × 19 features)
 - Opportunities: 60 dims (5 slots × 12 features)
 
-Action space: 18 actions (V8: reduced from 36)
+Action space: 17 actions (V9: single position)
 - 0: HOLD
 - 1-5: ENTER_OPP_0-4_SMALL (10%)
 - 6-10: ENTER_OPP_0-4_MEDIUM (20%)
 - 11-15: ENTER_OPP_0-4_LARGE (30%)
-- 16-17: EXIT_POS_0-1
+- 16: EXIT_POS_0
 """
 
 import numpy as np
@@ -32,13 +32,13 @@ from models.rl.algorithms.ppo_trainer import PPOTrainer
 from common.features import UnifiedFeatureBuilder, DIMS
 
 
-# Action space mapping (V8: 18 actions)
+# Action space mapping (V9: 17 actions)
 ACTION_NAMES = {
     0: 'HOLD',
     **{i: f'ENTER_OPP_{i-1}_SMALL' for i in range(1, 6)},     # 1-5
     **{i: f'ENTER_OPP_{i-6}_MEDIUM' for i in range(6, 11)},   # 6-10
     **{i: f'ENTER_OPP_{i-11}_LARGE' for i in range(11, 16)},  # 11-15
-    **{i: f'EXIT_POS_{i-16}' for i in range(16, 18)},         # 16-17
+    16: 'EXIT_POS_0',                                          # V9: single position
 }
 
 # Position sizes (as % of max allowed size per side)
@@ -65,7 +65,7 @@ class ModularRLPredictor:
 
     def __init__(
         self,
-        model_path: str = 'trained_models/rl/v5.4_ep1800.pt',
+        model_path: str = 'trained_models/rl/v9_ep2100.pt',
         feature_scaler_path: str = 'trained_models/rl/feature_scaler_v3.pkl',
         device: str = 'cpu'
     ):
@@ -188,21 +188,21 @@ class ModularRLPredictor:
         Returns:
             Dict with:
                 - action: Recommended action ('HOLD', 'ENTER', 'EXIT')
-                - action_id: Action ID (0-17)
+                - action_id: Action ID (0-16)
                 - confidence: Probability of selected action
                 - state_value: Estimated state value
                 - opportunity_symbol: Symbol if ENTER action
                 - opportunity_index: Index if ENTER action (0-4)
-                - position_index: Index if EXIT action (0-1)
+                - position_index: Index if EXIT action (0 only, V9)
                 - position_size: Recommended size if ENTER
-                - action_probabilities: Full distribution over all 18 actions
+                - action_probabilities: Full distribution over all 17 actions
         """
         # Use default config if not provided
         if trading_config is None:
             trading_config = {
                 'max_leverage': 1.0,
                 'target_utilization': 0.5,
-                'max_positions': 2,  # V8: reduced from 3
+                'max_positions': 1,  # V9: single position only
                 'stop_loss_threshold': -0.02,
                 'liquidation_buffer': 0.15,
             }
@@ -237,7 +237,7 @@ class ModularRLPredictor:
         # Build action mask using session-specific feature builder
         positions = portfolio.get('positions', [])
         num_positions = sum(1 for p in positions if p.get('is_active', False) or p.get('symbol', '') != '')
-        max_positions = trading_config.get('max_positions', 3)
+        max_positions = trading_config.get('max_positions', 1)  # V9: single position
         action_mask = feature_builder.get_action_mask(opportunities, num_positions, max_positions)
 
         # Select action (deterministic = greedy)
@@ -292,16 +292,16 @@ class ModularRLPredictor:
 
         # Add timing info for debugging (V6 feature verification)
         result['current_time_utc'] = current_time.isoformat() + 'Z'
-        result['time_to_next_funding_norm'] = float(obs[8])  # Index: 5 config + 3 portfolio features
+        result['time_to_next_funding_norm'] = float(obs[6])  # Index: 5 config + 1 (second portfolio feature)
 
         return result
 
     def _decode_action(self, action: int) -> Dict[str, Any]:
         """
-        Decode action ID to human-readable format (V8: 18 actions).
+        Decode action ID to human-readable format (V9: 17 actions).
 
         Args:
-            action: Action ID (0-17)
+            action: Action ID (0-16)
 
         Returns:
             Dict with 'type', 'opportunity_index', 'position_index', 'size'

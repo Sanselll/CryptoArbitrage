@@ -21,7 +21,7 @@ def create_test_raw_data():
         'trading_config': {
             'max_leverage': 2.0,
             'target_utilization': 0.8,
-            'max_positions': 3,
+            'max_positions': 1,  # V9: single position only
             'stop_loss_threshold': -0.02,
             'liquidation_buffer': 0.15
         },
@@ -129,7 +129,8 @@ def test_config_features_values():
 
     config_features = builder.build_config_features(raw_data['trading_config'])
 
-    expected = np.array([2.0, 0.8, 3.0, -0.02, 0.15], dtype=np.float32)
+    # V9: max_positions is always 1
+    expected = np.array([2.0, 0.8, 1.0, -0.02, 0.15], dtype=np.float32)
     np.testing.assert_array_almost_equal(config_features, expected, decimal=5)
 
     print(f"✅ Config features match expected values")
@@ -138,7 +139,7 @@ def test_config_features_values():
 
 
 def test_portfolio_features_calculation():
-    """Test portfolio feature calculation."""
+    """Test portfolio feature calculation (V9: 2 features only)."""
     print("Test 4: Portfolio Feature Calculation")
     print("-" * 80)
 
@@ -150,19 +151,17 @@ def test_portfolio_features_calculation():
         raw_data['trading_config']
     )
 
-    # Expected:
-    # - num_positions_ratio = 1 position / 3 max = 0.333...
+    # V9: Only 2 features
     # - min_liq_distance = 0.45
-    # - capital_utilization = 25.0 / 100 = 0.25
-
-    assert abs(portfolio_features[0] - 0.333333) < 0.01, f"num_positions_ratio incorrect: {portfolio_features[0]}"
-    assert abs(portfolio_features[1] - 0.45) < 0.001, f"min_liq_distance incorrect: {portfolio_features[1]}"
-    assert abs(portfolio_features[2] - 0.25) < 0.001, f"capital_utilization incorrect: {portfolio_features[2]}"
+    # - time_to_next_funding_norm (calculated from positions)
+    assert len(portfolio_features) == DIMS.PORTFOLIO, f"Expected {DIMS.PORTFOLIO} features, got {len(portfolio_features)}"
+    assert abs(portfolio_features[0] - 0.45) < 0.001, f"min_liq_distance incorrect: {portfolio_features[0]}"
+    # time_to_next_funding_norm should be between 0 and 1
+    assert 0.0 <= portfolio_features[1] <= 1.0, f"time_to_next_funding_norm out of range: {portfolio_features[1]}"
 
     print(f"✅ Portfolio features calculated correctly")
-    print(f"   num_positions_ratio: {portfolio_features[0]:.4f}")
-    print(f"   min_liq_distance: {portfolio_features[1]:.4f}")
-    print(f"   capital_utilization: {portfolio_features[2]:.4f}")
+    print(f"   min_liq_distance: {portfolio_features[0]:.4f}")
+    print(f"   time_to_next_funding_norm: {portfolio_features[1]:.4f}")
     print()
 
 
@@ -191,8 +190,8 @@ def test_execution_features_active_position():
 
 
 def test_execution_features_empty_slots():
-    """Test that empty execution slots are all zeros."""
-    print("Test 6: Execution Features (Empty Slots)")
+    """Test execution features shape (V9: only 1 slot)."""
+    print("Test 6: Execution Features Shape")
     print("-" * 80)
 
     builder = UnifiedFeatureBuilder(feature_scaler_path=None)
@@ -200,15 +199,12 @@ def test_execution_features_empty_slots():
 
     execution_features = builder.build_execution_features(raw_data['portfolio'], best_available_apr=180.0)
 
-    # Slots 1-4 should be all zeros (only 1 position)
-    for slot_idx in range(1, DIMS.EXECUTIONS_SLOTS):
-        slot_start = slot_idx * DIMS.EXECUTIONS_PER_SLOT
-        slot_end = slot_start + DIMS.EXECUTIONS_PER_SLOT
-        slot_features = execution_features[slot_start:slot_end]
+    # V9: Only 1 slot with 19 features
+    assert execution_features.shape == (DIMS.EXECUTIONS_TOTAL,), f"Expected shape ({DIMS.EXECUTIONS_TOTAL},), got {execution_features.shape}"
+    assert DIMS.EXECUTIONS_SLOTS == 1, "V9 should have exactly 1 execution slot"
+    assert DIMS.EXECUTIONS_PER_SLOT == 19, "V9 should have 19 features per slot"
 
-        assert np.all(slot_features == 0.0), f"Slot {slot_idx} should be all zeros, got {slot_features}"
-
-    print(f"✅ Empty execution slots (1-4) are all zeros")
+    print(f"✅ Execution features shape correct: {execution_features.shape}")
     print()
 
 
@@ -239,7 +235,7 @@ def test_opportunity_features_without_scaler():
 
 
 def test_action_mask_generation():
-    """Test action mask generation."""
+    """Test action mask generation (V9: 17 actions)."""
     print("Test 8: Action Mask Generation")
     print("-" * 80)
 
@@ -248,33 +244,42 @@ def test_action_mask_generation():
 
     opportunities = raw_data['opportunities']
     num_positions = 1
-    max_positions = 3
+    max_positions = 1  # V9: single position only
 
     action_mask = builder.get_action_mask(opportunities, num_positions, max_positions)
+
+    # V9 Action space (17 actions):
+    # 0: HOLD
+    # 1-5: ENTER_SMALL (opp 0-4)
+    # 6-10: ENTER_MEDIUM (opp 0-4)
+    # 11-15: ENTER_LARGE (opp 0-4)
+    # 16: EXIT_POS_0
+
+    # Check total actions
+    assert len(action_mask) == DIMS.TOTAL_ACTIONS, f"Action mask should have {DIMS.TOTAL_ACTIONS} actions"
+    assert DIMS.TOTAL_ACTIONS == 17, "V9 should have 17 total actions"
 
     # HOLD should always be valid
     assert action_mask[0] == True, "HOLD action should be valid"
 
-    # ENTER actions should be valid (have capacity and 1 opportunity)
-    assert action_mask[1] == True, "ENTER_OPP_0_SMALL should be valid"
-    assert action_mask[11] == True, "ENTER_OPP_0_MEDIUM should be valid"
-    assert action_mask[21] == True, "ENTER_OPP_0_LARGE should be valid"
+    # V9: With 1 position and max_positions=1, no capacity for ENTER
+    # All ENTER actions should be INVALID (no capacity)
+    assert action_mask[1] == False, "ENTER_OPP_0_SMALL should be invalid (no capacity)"
+    assert action_mask[6] == False, "ENTER_OPP_0_MEDIUM should be invalid (no capacity)"
+    assert action_mask[11] == False, "ENTER_OPP_0_LARGE should be invalid (no capacity)"
 
-    # ENTER for non-existent opportunities should be invalid
-    assert action_mask[2] == False, "ENTER_OPP_1 should be invalid (no opportunity)"
+    # ENTER for non-existent opportunities should also be invalid
+    assert action_mask[2] == False, "ENTER_OPP_1_SMALL should be invalid (no opportunity)"
 
-    # EXIT for position 0 should be valid
-    assert action_mask[31] == True, "EXIT_POS_0 should be valid"
-
-    # EXIT for non-existent positions should be invalid
-    assert action_mask[32] == False, "EXIT_POS_1 should be invalid (no position)"
+    # EXIT for position 0 should be valid (V9: action 16)
+    assert action_mask[16] == True, "EXIT_POS_0 should be valid"
 
     valid_count = action_mask.sum()
     print(f"✅ Action mask generated correctly")
     print(f"   Valid actions: {valid_count}/{DIMS.TOTAL_ACTIONS}")
     print(f"   HOLD: {action_mask[0]}")
-    print(f"   ENTER (opp 0): {action_mask[1]}, {action_mask[11]}, {action_mask[21]}")
-    print(f"   EXIT (pos 0): {action_mask[31]}")
+    print(f"   ENTER (opp 0): SMALL={action_mask[1]}, MEDIUM={action_mask[6]}, LARGE={action_mask[11]}")
+    print(f"   EXIT (pos 0): {action_mask[16]}")
     print()
 
 
