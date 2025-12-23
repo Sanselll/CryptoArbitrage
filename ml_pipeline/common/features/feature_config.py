@@ -2,7 +2,7 @@
 Feature configuration constants for RL model.
 
 Defines all feature dimensions and configuration for the modular RL architecture.
-Version: V9 (86 dimensions total)
+Version: V10 (91 dimensions total)
 
 V6 Changes:
 - Added portfolio feature: time_to_next_funding_norm (+1)
@@ -27,6 +27,12 @@ V9 Changes (Simplification):
 - Execution features per slot: 20 -> 19
 - Observation space: 109 -> 86 dimensions
 - Action space: 18 -> 17 actions
+
+V10 Changes (Funding Timing):
+- Added opportunity feature: time_to_profitable_funding (+1 per slot = +5)
+- Uses actual next funding times from exchange data (not hardcoded 8h schedule)
+- Opportunity features per slot: 12 -> 13
+- Observation space: 86 -> 91 dimensions
 """
 
 from dataclasses import dataclass
@@ -35,7 +41,7 @@ from typing import Final
 
 @dataclass(frozen=True)
 class FeatureDimensions:
-    """Feature dimensions for V9 modular architecture (single position)."""
+    """Feature dimensions for V10 modular architecture (single position)."""
 
     # Component dimensions
     CONFIG: Final[int] = 5
@@ -43,12 +49,12 @@ class FeatureDimensions:
     EXECUTIONS_PER_SLOT: Final[int] = 19  # V9: 19 features per slot (removed value_to_capital_ratio)
     EXECUTIONS_SLOTS: Final[int] = 1  # V9: single position only
     EXECUTIONS_TOTAL: Final[int] = EXECUTIONS_PER_SLOT * EXECUTIONS_SLOTS  # 19
-    OPPORTUNITIES_PER_SLOT: Final[int] = 12
+    OPPORTUNITIES_PER_SLOT: Final[int] = 13  # V10: added time_to_profitable_funding
     OPPORTUNITIES_SLOTS: Final[int] = 5  # V8: reduced from 10
-    OPPORTUNITIES_TOTAL: Final[int] = OPPORTUNITIES_PER_SLOT * OPPORTUNITIES_SLOTS  # 60
+    OPPORTUNITIES_TOTAL: Final[int] = OPPORTUNITIES_PER_SLOT * OPPORTUNITIES_SLOTS  # 65
 
     # Total observation dimension
-    TOTAL: Final[int] = CONFIG + PORTFOLIO + EXECUTIONS_TOTAL + OPPORTUNITIES_TOTAL  # 86
+    TOTAL: Final[int] = CONFIG + PORTFOLIO + EXECUTIONS_TOTAL + OPPORTUNITIES_TOTAL  # 91 (V10)
 
     # Action space (V9: 17 actions)
     # 0: HOLD
@@ -104,7 +110,7 @@ class FeatureConfig:
         "apr_velocity",
     )
 
-    # Feature names for opportunity slots (12 features - V5.4)
+    # Feature names for opportunity slots (13 features - V10)
     OPPORTUNITY_FEATURE_NAMES: Final[tuple] = (
         "fund_profit_8h",
         "fund_profit_8h_24h_proj",
@@ -118,6 +124,7 @@ class FeatureConfig:
         "spread_volatility_stddev",
         "apr_velocity",
         "spread_mean_reversion_potential",  # V5.4: Sign-agnostic spread profitability
+        "time_to_profitable_funding",  # V10: Minutes to next profitable funding / 480
     )
 
 

@@ -91,14 +91,14 @@ def initialize_predictor():
         print("Initializing Modular RL predictor...")
         try:
             rl_predictor = ModularRLPredictor(
-                model_path='trained_models/rl/v9_ep2100.pt',
+                model_path='trained_models/rl/modular_ppo_v10.pt',
                 device='cpu'
             )
             print("✅ RL predictor initialized successfully")
-            print("   Architecture: Unified Feature Builder V9 (86 dims)")
-            print("   Model: trained_models/rl/v9_ep2100.pt")
-            print("   Action space: 17 actions (1 HOLD + 15 ENTER + 1 EXIT)")  # V9: single position
-            print("   Features: 5 config + 2 portfolio + 19 executions + 60 opportunities")
+            print("   Architecture: Unified Feature Builder V10 (91 dims)")
+            print("   Model: trained_models/rl/modular_ppo_v10.pt")
+            print("   Action space: 17 actions (1 HOLD + 15 ENTER + 1 EXIT)")
+            print("   Features: 5 config + 2 portfolio + 19 executions + 65 opportunities")
             print(f"   Confidence thresholds: ENTER >= {ENTER_CONFIDENCE_THRESHOLD:.0%}, EXIT >= {EXIT_CONFIDENCE_THRESHOLD:.0%}")
             print(f"   APR threshold: ENTER only if APR >= {MIN_APR_THRESHOLD:.0f}%")
         except Exception as e:

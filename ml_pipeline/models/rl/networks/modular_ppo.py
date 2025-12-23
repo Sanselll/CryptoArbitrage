@@ -1,13 +1,13 @@
 """
-Modular PPO Network Architecture for Multi-Opportunity, Single-Position Trading (V9)
+Modular PPO Network Architecture for Multi-Opportunity, Single-Position Trading (V10)
 
-V9 Architecture (86 dimensions - simplified):
+V10 Architecture (91 dimensions):
 - ConfigEncoder: 5 → 16 (unchanged)
-- PortfolioEncoder: 2 → 32 (V9: reduced from 4, removed capital features)
-- ExecutionEncoder: 1×19 → 64 (V9: reduced from 2×20, removed value_to_capital_ratio)
-- OpportunityEncoder: 5×12 → 128 (unchanged)
+- PortfolioEncoder: 2 → 32 (unchanged)
+- ExecutionEncoder: 1×19 → 64 (unchanged)
+- OpportunityEncoder: 5×13 → 128 (V10: added time_to_profitable_funding)
 - FusionLayer: Cross-attention → 256
-- Actor: 17 actions (V9: single position only)
+- Actor: 17 actions
 - Critic: 1 value
 """
 
@@ -123,16 +123,16 @@ class ExecutionEncoder(nn.Module):
 
 class OpportunityEncoder(nn.Module):
     """
-    Encodes opportunity states with self-attention over opportunity slots (V8: 12 features per slot).
+    Encodes opportunity states with self-attention over opportunity slots (V10: 13 features per slot).
 
-    V8: 5 slots × 12 features = 60 dimensions (reduced from 10×12=120)
-    Input: 60 features (5 opportunities × 12 features each)
+    V10: 5 slots × 13 features = 65 dimensions (added time_to_profitable_funding)
+    Input: 65 features (5 opportunities × 13 features each)
     Output: 128-dimensional embedding
     """
 
     def __init__(self,
-                 num_slots: int = 5,           # V8: reduced from 10
-                 features_per_slot: int = 12,  # 12 features per opportunity
+                 num_slots: int = 5,
+                 features_per_slot: int = 13,  # V10: 13 features per opportunity
                  embedding_dim: int = 64,
                  num_heads: int = 4,
                  output_dim: int = 128):
@@ -345,34 +345,34 @@ class CriticHead(nn.Module):
 
 class ModularPPONetwork(nn.Module):
     """
-    Complete modular PPO network combining all components (V9).
+    Complete modular PPO network combining all components (V10).
 
-    Processes 86-dim observation (V9: simplified):
+    Processes 91-dim observation (V10):
     - Config (5) → ConfigEncoder → 16
-    - Portfolio (2) → PortfolioEncoder → 32 (V9: reduced from 4)
-    - Executions (19) → ExecutionEncoder → 64 (V9: 1×19, reduced from 2×20)
-    - Opportunities (60) → OpportunityEncoder → 128
+    - Portfolio (2) → PortfolioEncoder → 32
+    - Executions (19) → ExecutionEncoder → 64 (1×19)
+    - Opportunities (65) → OpportunityEncoder → 128 (V10: 5×13)
     - Fusion → 256
-    - Actor → 17 action logits (V9: single position)
+    - Actor → 17 action logits
     - Critic → 1 value
     """
 
     def __init__(self):
         super().__init__()
 
-        # Encoders (V9: Updated dimensions)
+        # Encoders (V10)
         self.config_encoder = ConfigEncoder(input_dim=5, output_dim=16)
-        self.portfolio_encoder = PortfolioEncoder(input_dim=2, output_dim=32)  # V9: 2 features
+        self.portfolio_encoder = PortfolioEncoder(input_dim=2, output_dim=32)
         self.execution_encoder = ExecutionEncoder(
-            num_slots=1,           # V9: single position
-            features_per_slot=19,  # V9: 19 features per position
+            num_slots=1,
+            features_per_slot=19,
             embedding_dim=32,
             num_heads=2,
             output_dim=64
         )
         self.opportunity_encoder = OpportunityEncoder(
-            num_slots=5,           # V8: reduced from 10
-            features_per_slot=12,
+            num_slots=5,
+            features_per_slot=13,  # V10: added time_to_profitable_funding
             embedding_dim=64,
             num_heads=4,
             output_dim=128
@@ -395,21 +395,21 @@ class ModularPPONetwork(nn.Module):
                 obs: torch.Tensor,
                 action_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass through entire network (V9).
+        Forward pass through entire network (V10).
 
         Args:
-            obs: (batch_size, 86) observation
+            obs: (batch_size, 91) observation
             action_mask: (batch_size, 17) boolean mask (optional)
 
         Returns:
             action_logits: (batch_size, 17) masked action logits
             value: (batch_size, 1) state value estimate
         """
-        # Split observation into components (V9: 86 dims total)
-        config = obs[:, 0:5]            # (batch, 5) - unchanged
-        portfolio = obs[:, 5:7]         # (batch, 2) - V9: reduced from 4
-        executions = obs[:, 7:26]       # (batch, 19) - V9: 1×19 (was 9:49, 2×20)
-        opportunities = obs[:, 26:86]   # (batch, 60) - V9: 5×12 (was 49:109)
+        # Split observation into components (V10: 91 dims total)
+        config = obs[:, 0:5]            # (batch, 5)
+        portfolio = obs[:, 5:7]         # (batch, 2)
+        executions = obs[:, 7:26]       # (batch, 19) - 1×19
+        opportunities = obs[:, 26:91]   # (batch, 65) - V10: 5×13
 
         # Encode each component
         config_emb = self.config_encoder(config)
@@ -430,10 +430,10 @@ class ModularPPONetwork(nn.Module):
                                  obs: torch.Tensor,
                                  action_mask: Optional[torch.Tensor] = None) -> torch.distributions.Categorical:
         """
-        Get action distribution for sampling (V9).
+        Get action distribution for sampling (V10).
 
         Args:
-            obs: (batch_size, 86) observation
+            obs: (batch_size, 91) observation
             action_mask: (batch_size, 17) boolean mask (optional)
 
         Returns:
@@ -447,10 +447,10 @@ class ModularPPONetwork(nn.Module):
                          actions: torch.Tensor,
                          action_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Evaluate actions for PPO training (V9).
+        Evaluate actions for PPO training (V10).
 
         Args:
-            obs: (batch_size, 86) observations
+            obs: (batch_size, 91) observations
             actions: (batch_size,) actions taken
             action_mask: (batch_size, 17) boolean mask (optional)
 
@@ -469,8 +469,8 @@ class ModularPPONetwork(nn.Module):
 
 
 if __name__ == "__main__":
-    # Test the network (V9)
-    print("Testing ModularPPONetwork (V9)...")
+    # Test the network (V10)
+    print("Testing ModularPPONetwork (V10)...")
 
     # Create network
     net = ModularPPONetwork()
@@ -483,12 +483,12 @@ if __name__ == "__main__":
 
     # Test forward pass
     batch_size = 4
-    obs = torch.randn(batch_size, 86)  # V9: 86 dims total
+    obs = torch.randn(batch_size, 91)  # V10: 91 dims total
 
     # Create action mask (all valid)
-    action_mask = torch.ones(batch_size, 17, dtype=torch.bool)  # V9: 17 actions
+    action_mask = torch.ones(batch_size, 17, dtype=torch.bool)
     # Mask out exit action for testing (no position to exit)
-    action_mask[:, 16] = False  # No position to exit (V9: single position)
+    action_mask[:, 16] = False  # No position to exit
 
     # Forward pass
     action_logits, values = net(obs, action_mask)

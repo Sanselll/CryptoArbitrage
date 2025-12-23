@@ -65,7 +65,7 @@ class ModularRLPredictor:
 
     def __init__(
         self,
-        model_path: str = 'trained_models/rl/v9_ep2100.pt',
+        model_path: str = 'trained_models/rl/modular_ppo_v10.pt',
         feature_scaler_path: str = 'trained_models/rl/feature_scaler_v3.pkl',
         device: str = 'cpu'
     ):
@@ -234,11 +234,21 @@ class ModularRLPredictor:
         # Log observation for debugging
         self._log_observation(obs, portfolio, opportunities, session_id)
 
-        # Build action mask using session-specific feature builder
+        # Build action mask using session-specific feature builder (V10)
         positions = portfolio.get('positions', [])
         num_positions = sum(1 for p in positions if p.get('is_active', False) or p.get('symbol', '') != '')
-        max_positions = trading_config.get('max_positions', 1)  # V9: single position
-        action_mask = feature_builder.get_action_mask(opportunities, num_positions, max_positions)
+        max_positions = trading_config.get('max_positions', 1)
+
+        # V10 masking criteria from trading config (with defaults)
+        min_apr = trading_config.get('min_apr', 2500.0)
+        max_minutes_to_funding = trading_config.get('max_minutes_to_funding', 30.0)
+
+        action_mask = feature_builder.get_action_mask(
+            opportunities, num_positions, max_positions,
+            current_time=current_time,
+            max_minutes_to_funding=max_minutes_to_funding,
+            min_apr=min_apr
+        )
 
         # Select action (deterministic = greedy)
         action, value, log_prob = self.trainer.select_action(

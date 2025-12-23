@@ -1,28 +1,28 @@
 """
-Unified Feature Builder for RL Inference (V9)
+Unified Feature Builder for RL Inference (V10)
 
 This module provides the SINGLE SOURCE OF TRUTH for all feature engineering
 used in the modular RL arbitrage system. All components (backend inference,
 ML API server, training, and testing) must use this class to ensure consistency.
 
-Architecture V9: 86-dimensional observation space (simplified)
+Architecture V10: 91-dimensional observation space
 - Config: 5 dims
-- Portfolio: 2 dims (removed num_positions_ratio, capital_utilization)
-- Executions: 19 dims (1 slot × 19 features, removed value_to_capital_ratio)
-- Opportunities: 60 dims (5 slots × 12 features)
+- Portfolio: 2 dims (min_liq_distance, time_to_next_funding_norm)
+- Executions: 19 dims (1 slot × 19 features)
+- Opportunities: 65 dims (5 slots × 13 features)
 
-V9 Changes (Simplification):
-- Removed capital features: num_positions_ratio, capital_utilization from portfolio
-- Removed value_to_capital_ratio from execution features
-- Reduced position slots: 2 → 1 (single position only)
-- Observation space: 109 → 86 dimensions
-- Action space: 18 → 17 actions
+V10 Changes (Funding Timing):
+- Added opportunity feature: time_to_profitable_funding (+1 per slot = +5)
+- Uses actual next funding times from exchange data (not hardcoded 8h schedule)
+- Calculates time to next funding on profitable side (long if rate<0, short if rate>0)
+- Opportunity features per slot: 12 → 13
+- Observation space: 86 → 91 dimensions
 
 Key Principles:
 1. All feature calculation logic lives HERE and only here
 2. Backend sends raw data, this module transforms it to features
 3. Training environment uses same code paths
-4. Feature scaler is applied here for opportunity features
+4. Feature scaler is applied here for opportunity features (first 12 only)
 5. No feature logic duplication across Python/C# codebases
 """
 
@@ -111,7 +111,7 @@ class UnifiedFeatureBuilder:
 
     def build_observation_from_raw_data(self, raw_data: Dict[str, Any], log_file: Optional[str] = None) -> np.ndarray:
         """
-        Build complete 86-dim observation vector from raw backend data (V9).
+        Build complete 91-dim observation vector from raw backend data (V10).
 
         This is the main entry point for converting raw data to model features.
 
@@ -119,12 +119,12 @@ class UnifiedFeatureBuilder:
             raw_data: Dict containing:
                 - 'trading_config': Dict with max_leverage, target_utilization, etc.
                 - 'portfolio': Dict with positions, total_capital, capital_utilization
-                - 'opportunities': List of opportunity dicts
-                - 'current_time': Optional datetime for time_to_next_funding calculation
+                - 'opportunities': List of opportunity dicts (with funding times and rates)
+                - 'current_time': Optional datetime for time_to_profitable_funding calculation
             log_file: Optional path to log features for debugging
 
         Returns:
-            86-dimensional observation array (5 + 2 + 19 + 60)
+            91-dimensional observation array (5 + 2 + 19 + 65)
         """
         trading_config = raw_data.get('trading_config', {})
         portfolio = raw_data.get('portfolio', {})
@@ -141,7 +141,7 @@ class UnifiedFeatureBuilder:
             best_available_apr = max(opp.get('fund_apr', 0.0) for opp in opportunities)
 
         execution_features = self.build_execution_features(portfolio, best_available_apr)
-        opportunity_features = self.build_opportunity_features(opportunities)
+        opportunity_features = self.build_opportunity_features(opportunities, current_time)
 
         # Concatenate all components
         observation = np.concatenate([
@@ -577,25 +577,27 @@ class UnifiedFeatureBuilder:
 
         return np.array(all_features, dtype=np.float32)
 
-    def build_opportunity_features(self, opportunities: List[Dict]) -> np.ndarray:
+    def build_opportunity_features(self, opportunities: List[Dict], current_time: Optional[datetime] = None) -> np.ndarray:
         """
-        Build opportunity features for up to 5 slots (60 dimensions total, V8).
+        Build opportunity features for up to 5 slots (65 dimensions total, V10).
 
-        Each opportunity has 12 features:
+        Each opportunity has 13 features:
         1-6: fund_profit_8h, fund_profit_8h_24h_proj, fund_profit_8h_3d_proj,
              fund_apr, fund_apr_24h_proj, fund_apr_3d_proj
         7-10: spread_30_sample_avg, price_spread_24h_avg, price_spread_3d_avg, spread_volatility_stddev
         11: apr_velocity (fund_profit_8h - fund_profit_8h_24h_proj)
         12: spread_mean_reversion_potential = |spread_30| - |spread_3d| (sign-agnostic)
+        13: time_to_profitable_funding = minutes to next funding on profitable side / 480 (V10)
 
-        CRITICAL: Feature scaler is applied to ALL slots (including empty ones)
-        to match training behavior. Empty slots are padded with zeros BEFORE scaling.
+        CRITICAL: Feature scaler is applied to first 12 features only.
+        time_to_profitable_funding is already normalized 0-1 and added after scaling.
 
         Args:
             opportunities: List of up to 5 opportunity dicts
+            current_time: Current datetime for funding time calculation
 
         Returns:
-            60-dimensional array (5 slots × 12 features)
+            65-dimensional array (5 slots × 13 features)
         """
         all_features = []
 
@@ -614,6 +616,7 @@ class UnifiedFeatureBuilder:
                 spread_mean_reversion_potential = abs(spread_30_sample_avg) - abs(price_spread_3d_avg)
                 spread_mean_reversion_potential = np.clip(spread_mean_reversion_potential, -0.05, 0.05)
 
+                # First 12 features (to be scaled)
                 features = [
                     # Profit projections (6 features)
                     fund_profit_8h,
@@ -638,23 +641,115 @@ class UnifiedFeatureBuilder:
                     float(np.nan_to_num(x, nan=0.0, posinf=100.0, neginf=-100.0))
                     for x in features
                 ]
+
+                # Apply feature scaler to first 12 features ONLY
+                if self.feature_scaler is not None:
+                    features_array = np.array(features, dtype=np.float32)
+                    features_scaled = self.feature_scaler.transform(
+                        features_array.reshape(1, 12)  # Scaler expects 12 features
+                    )
+                    features = features_scaled.flatten().tolist()
+
+                # V10: Calculate time_to_profitable_funding (not scaled - already normalized)
+                time_to_profitable_funding = self._calc_time_to_profitable_funding(opp, current_time)
+                features.append(time_to_profitable_funding)
+
+                all_features.extend(features)
             else:
-                # Empty slot - all zeros (DO NOT SCALE - keep as zeros)
-                # Scaling zeros produces non-zero values which misleads the model
+                # Empty slot - all zeros
                 all_features.extend([0.0] * DIMS.OPPORTUNITIES_PER_SLOT)
-                continue
-
-            # Apply feature scaler ONLY to non-empty slots
-            if self.feature_scaler is not None:
-                features_array = np.array(features, dtype=np.float32)
-                features_scaled = self.feature_scaler.transform(
-                    features_array.reshape(1, DIMS.OPPORTUNITIES_PER_SLOT)
-                )
-                features = features_scaled.flatten().tolist()
-
-            all_features.extend(features)
 
         return np.array(all_features, dtype=np.float32)
+
+    def _calc_time_to_profitable_funding(self, opp: Dict, current_time: Optional[datetime]) -> float:
+        """
+        Calculate normalized time until next funding payment on the profitable side (V10).
+
+        For funding arbitrage:
+        - Long side profitable when long_funding_rate < 0 (we receive funding)
+        - Short side profitable when short_funding_rate > 0 (we receive funding)
+
+        Returns the time to the SOONEST profitable funding payment.
+
+        Time source priority:
+        1. Opportunity's entry_time (for training/backtesting with historical data)
+        2. Passed current_time parameter (fallback)
+        3. datetime.utcnow() (for live inference)
+
+        Args:
+            opp: Opportunity dict with funding rates, next funding times, and optionally entry_time
+            current_time: Fallback datetime (UTC) if entry_time not in opportunity
+
+        Returns:
+            Normalized value 0-1 (0 = funding imminent, 1 = ~8h away)
+            Returns 0.5 if no time available
+        """
+        import pandas as pd
+        from datetime import datetime as dt, timezone
+
+        # Priority: opportunity's entry_time > passed current_time > now (UTC)
+        ref_time = opp.get('entry_time')
+        if ref_time is None:
+            ref_time = current_time
+        if ref_time is None:
+            ref_time = dt.now(timezone.utc)  # Use timezone-aware UTC
+
+        # Get funding rates to determine which side(s) are profitable
+        long_rate = opp.get('long_funding_rate', 0.0)
+        short_rate = opp.get('short_funding_rate', 0.0)
+
+        # Get next funding times
+        long_next_funding = opp.get('long_next_funding_time')
+        short_next_funding = opp.get('short_next_funding_time')
+
+        # Convert to pandas Timestamp if needed
+        if long_next_funding is not None and not isinstance(long_next_funding, pd.Timestamp):
+            try:
+                long_next_funding = pd.to_datetime(long_next_funding)
+            except:
+                long_next_funding = None
+
+        if short_next_funding is not None and not isinstance(short_next_funding, pd.Timestamp):
+            try:
+                short_next_funding = pd.to_datetime(short_next_funding)
+            except:
+                short_next_funding = None
+
+        # Convert ref_time to pandas Timestamp if needed
+        if not isinstance(ref_time, pd.Timestamp):
+            ref_time = pd.to_datetime(ref_time)
+
+        # Calculate minutes to each profitable side
+        profitable_times = []
+
+        # Long is profitable if rate < 0 (we receive)
+        if long_rate < 0 and long_next_funding is not None:
+            try:
+                minutes_to_long = (long_next_funding - ref_time).total_seconds() / 60
+                if minutes_to_long > 0:
+                    profitable_times.append(minutes_to_long)
+            except:
+                pass
+
+        # Short is profitable if rate > 0 (we receive)
+        if short_rate > 0 and short_next_funding is not None:
+            try:
+                minutes_to_short = (short_next_funding - ref_time).total_seconds() / 60
+                if minutes_to_short > 0:
+                    profitable_times.append(minutes_to_short)
+            except:
+                pass
+
+        if not profitable_times:
+            # No profitable funding coming - return 1.0 (max wait)
+            # This could happen if both rates are unfavorable
+            return 1.0
+
+        # Return minimum (soonest profitable funding)
+        min_minutes = min(profitable_times)
+
+        # Normalize by 480 minutes (8 hours max)
+        return min(min_minutes / 480.0, 1.0)
 
     def get_action_mask(
         self,
@@ -662,22 +757,32 @@ class UnifiedFeatureBuilder:
         num_positions: int,
         max_positions: int,
         current_time: Optional[datetime] = None,
+        max_minutes_to_funding: float = 30.0,
+        min_apr: float = 2500.0
     ) -> np.ndarray:
         """
-        Generate action mask (17 dimensions, V9).
+        Generate action mask (17 dimensions, V10).
 
-        Action space (V9):
+        Action space:
         - 0: HOLD
         - 1-5: ENTER_OPP_0-4_SMALL
         - 6-10: ENTER_OPP_0-4_MEDIUM
         - 11-15: ENTER_OPP_0-4_LARGE
         - 16: EXIT_POS_0
 
+        ENTER masking criteria (V10):
+        - Opportunity must have fund_apr >= min_apr
+        - Time to profitable funding must be <= max_minutes_to_funding
+        - Must have position capacity
+        - Must not have existing position for same symbol
+
         Args:
             opportunities: List of opportunity dicts
             num_positions: Current number of active positions
             max_positions: Maximum allowed positions
-            current_time: Current datetime (unused, kept for API compatibility)
+            current_time: Fallback datetime for funding time calculation
+            max_minutes_to_funding: Max minutes until next profitable funding (default: 30)
+            min_apr: Minimum APR required to enter (default: 2500)
 
         Returns:
             Boolean array (17,) where True = valid action
@@ -687,7 +792,7 @@ class UnifiedFeatureBuilder:
         # HOLD is always valid
         mask[DIMS.ACTION_HOLD] = True
 
-        # ENTER actions: valid if opportunity exists AND we have capacity
+        # ENTER actions: valid if opportunity meets criteria
         # Cap max_positions to model's execution slots (V9: 1 slot only)
         effective_max_positions = min(max_positions, DIMS.EXECUTIONS_SLOTS)
         has_capacity = num_positions < effective_max_positions
@@ -696,10 +801,25 @@ class UnifiedFeatureBuilder:
             for i in range(DIMS.OPPORTUNITIES_SLOTS):  # 0-4 (5 opportunities)
                 if i < len(opportunities):
                     opp = opportunities[i]
+
                     # Prevent duplicate positions for same symbol
                     if opp.get('has_existing_position', False):
                         continue
 
+                    # Check minimum APR
+                    fund_apr = opp.get('fund_apr', 0.0)
+                    if fund_apr < min_apr:
+                        continue
+
+                    # Check time to profitable funding (uses actual funding times)
+                    # Returns normalized value 0-1 (minutes / 480)
+                    time_to_funding_norm = self._calc_time_to_profitable_funding(opp, current_time)
+                    minutes_to_funding = time_to_funding_norm * 480.0
+
+                    if minutes_to_funding > max_minutes_to_funding:
+                        continue
+
+                    # All criteria met - enable ENTER actions for this opportunity
                     mask[1 + i] = True      # SMALL (1-5)
                     mask[6 + i] = True      # MEDIUM (6-10)
                     mask[11 + i] = True     # LARGE (11-15)
