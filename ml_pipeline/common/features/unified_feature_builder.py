@@ -688,7 +688,9 @@ class UnifiedFeatureBuilder:
         mask[DIMS.ACTION_HOLD] = True
 
         # ENTER actions: valid if opportunity exists AND we have capacity
-        has_capacity = num_positions < max_positions
+        # Cap max_positions to model's execution slots (V9: 1 slot only)
+        effective_max_positions = min(max_positions, DIMS.EXECUTIONS_SLOTS)
+        has_capacity = num_positions < effective_max_positions
 
         if has_capacity:
             for i in range(DIMS.OPPORTUNITIES_SLOTS):  # 0-4 (5 opportunities)

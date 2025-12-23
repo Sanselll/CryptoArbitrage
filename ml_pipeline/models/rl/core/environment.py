@@ -359,7 +359,9 @@ class FundingArbitrageEnv(gym.Env):
         # ENTER actions: valid if opportunity exists AND we can open position AND symbol not already held
         num_positions = len(self.portfolio.positions)
         max_positions = self.current_config.max_positions
-        has_capacity = num_positions < max_positions
+        # Cap max_positions to model's execution slots (V9: 1 slot only)
+        effective_max_positions = min(max_positions, DIMS.EXECUTIONS_SLOTS)
+        has_capacity = num_positions < effective_max_positions
 
         # Get set of symbols we already have positions in
         existing_symbols = {pos.symbol for pos in self.portfolio.positions}
