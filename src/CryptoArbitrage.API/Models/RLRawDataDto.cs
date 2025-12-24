@@ -169,6 +169,22 @@ public class OpportunityRawData
     // Position tracking
     [JsonPropertyName("has_existing_position")]
     public bool HasExistingPosition { get; set; }
+
+    // V10: Funding rate and timing fields for action masking
+    [JsonPropertyName("long_funding_rate")]
+    public decimal LongFundingRate { get; set; }
+
+    [JsonPropertyName("short_funding_rate")]
+    public decimal ShortFundingRate { get; set; }
+
+    [JsonPropertyName("long_next_funding_time")]
+    public DateTime? LongNextFundingTime { get; set; }
+
+    [JsonPropertyName("short_next_funding_time")]
+    public DateTime? ShortNextFundingTime { get; set; }
+
+    [JsonPropertyName("entry_time")]
+    public DateTime EntryTime { get; set; }
 }
 
 /// <summary>

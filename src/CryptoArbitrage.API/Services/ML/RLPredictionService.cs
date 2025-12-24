@@ -273,7 +273,14 @@ public class RLPredictionService
             PriceSpread24hAvg = opp.PriceSpread24hAvg ?? 0m,
             PriceSpread3dAvg = opp.PriceSpread3dAvg ?? 0m,
             SpreadVolatilityStddev = opp.SpreadVolatilityStdDev ?? 0m,
-            HasExistingPosition = opp.IsExistingPosition
+            HasExistingPosition = opp.IsExistingPosition,
+
+            // V10: Funding rate and timing fields for action masking
+            LongFundingRate = opp.LongFundingRate,
+            ShortFundingRate = opp.ShortFundingRate,
+            LongNextFundingTime = opp.LongNextFundingTime,
+            ShortNextFundingTime = opp.ShortNextFundingTime,
+            EntryTime = DateTime.UtcNow
         };
     }
 
