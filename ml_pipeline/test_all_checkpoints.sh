@@ -10,11 +10,11 @@ RESULTS_FILE="checkpoint_results_$(basename $CHECKPOINT_DIR)_full.txt"
 PARALLEL_JOBS=4
 
 # Common test parameters
-TEST_DATA="data/production/rl_opportunities.csv"
+TEST_DATA="/Users/sansel/Projects/CryptoArbitrage/ml_pipeline/data/production/rl_opportunities.csv"
 PRICE_HISTORY="data/production/price_history"
 LEVERAGE=2
-START_TIME="2025-11-28 08:05:00"
-END_TIME="2025-12-18 07:20:00"
+START_TIME="2025-12-10 09:40:00"
+END_TIME="2025-12-27 17:20:00"
 INITIAL_CAPITAL=400
 
 echo "========================================================================"

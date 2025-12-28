@@ -362,7 +362,10 @@ class FundingArbitrageEnv(gym.Env):
         # HOLD is always valid
         mask[0] = True
 
-        # ENTER actions: valid if opportunity meets criteria
+        # APR + TIME MASKING (min 2500%, max 30min to funding)
+        MIN_APR = 2500.0
+        MAX_MINUTES_TO_FUNDING = 30.0
+
         num_positions = len(self.portfolio.positions)
         max_positions = self.current_config.max_positions
         effective_max_positions = min(max_positions, DIMS.EXECUTIONS_SLOTS)
@@ -371,32 +374,27 @@ class FundingArbitrageEnv(gym.Env):
         # Get set of symbols we already have positions in
         existing_symbols = {pos.symbol for pos in self.portfolio.positions}
 
-        # V10 entry criteria thresholds
-        MAX_MINUTES_TO_FUNDING = 30.0
-        MIN_APR = 2500.0
-
         if has_capacity:
             for i in range(DIMS.OPPORTUNITIES_SLOTS):
                 if i < len(self.current_opportunities):
                     opp = self.current_opportunities[i]
                     opp_symbol = opp.get('symbol', '')
 
-                    # Check 1: No duplicate symbols
+                    # Prevent duplicate symbols
                     if opp_symbol in existing_symbols:
                         continue
 
-                    # Check 2: Minimum APR requirement
+                    # APR masking
                     fund_apr = opp.get('fund_apr', 0.0)
                     if fund_apr < MIN_APR:
                         continue
 
-                    # Check 3: Time to PROFITABLE funding (V10)
-                    # Only count funding on sides where we receive payment
-                    minutes_to_profitable_funding = self._calc_minutes_to_profitable_funding(opp)
-                    if minutes_to_profitable_funding > MAX_MINUTES_TO_FUNDING:
+                    # Time to funding masking
+                    minutes_to_funding = self._calc_minutes_to_profitable_funding(opp)
+                    if minutes_to_funding > MAX_MINUTES_TO_FUNDING:
                         continue
 
-                    # All criteria met
+                    # All ENTER actions enabled for this opportunity
                     mask[1 + i] = True      # SMALL (1-5)
                     mask[6 + i] = True      # MEDIUM (6-10)
                     mask[11 + i] = True     # LARGE (11-15)

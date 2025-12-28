@@ -792,41 +792,34 @@ class UnifiedFeatureBuilder:
         # HOLD is always valid
         mask[DIMS.ACTION_HOLD] = True
 
-        # ENTER actions: valid if opportunity meets criteria
-        # Cap max_positions to model's execution slots (V9: 1 slot only)
+        # APR + TIME MASKING (min 2500%, max 30min to funding)
         effective_max_positions = min(max_positions, DIMS.EXECUTIONS_SLOTS)
         has_capacity = num_positions < effective_max_positions
 
         if has_capacity:
-            for i in range(DIMS.OPPORTUNITIES_SLOTS):  # 0-4 (5 opportunities)
+            for i in range(DIMS.OPPORTUNITIES_SLOTS):
                 if i < len(opportunities):
                     opp = opportunities[i]
 
-                    # Prevent duplicate positions for same symbol
                     if opp.get('has_existing_position', False):
                         continue
 
-                    # Check minimum APR
                     fund_apr = opp.get('fund_apr', 0.0)
                     if fund_apr < min_apr:
                         continue
 
-                    # Check time to profitable funding (uses actual funding times)
-                    # Returns normalized value 0-1 (minutes / 480)
                     time_to_funding_norm = self._calc_time_to_profitable_funding(opp, current_time)
                     minutes_to_funding = time_to_funding_norm * 480.0
-
                     if minutes_to_funding > max_minutes_to_funding:
                         continue
 
-                    # All criteria met - enable ENTER actions for this opportunity
-                    mask[1 + i] = True      # SMALL (1-5)
-                    mask[6 + i] = True      # MEDIUM (6-10)
-                    mask[11 + i] = True     # LARGE (11-15)
+                    mask[1 + i] = True
+                    mask[6 + i] = True
+                    mask[11 + i] = True
 
-        # EXIT actions: valid if position exists (V9: only 1 position slot)
-        for i in range(DIMS.EXECUTIONS_SLOTS):  # 0 (1 position)
+        # EXIT actions
+        for i in range(DIMS.EXECUTIONS_SLOTS):
             if i < num_positions:
-                mask[DIMS.ACTION_EXIT_START + i] = True  # 16
+                mask[DIMS.ACTION_EXIT_START + i] = True
 
         return mask

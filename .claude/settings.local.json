@@ -354,7 +354,9 @@
       "Bash(bash:*)",
       "Bash(for ckpt in checkpoint_ep2500.pt checkpoint_ep2400.pt checkpoint_ep750.pt checkpoint_ep2350.pt checkpoint_ep3000.pt)",
       "Bash(do echo \"Testing $ckpt...\" python test_inference.py --checkpoint checkpoints/v9/$ckpt --num-episodes 1)",
-      "Bash(do printf \"%-30s %10s%% %10s%% %10s %12sh\\\\n\" \"$checkpoint\" \"$pnl\" \"$winrate\" \"$trades\" \"$avg_hours\" done)"
+      "Bash(do printf \"%-30s %10s%% %10s%% %10s %12sh\\\\n\" \"$checkpoint\" \"$pnl\" \"$winrate\" \"$trades\" \"$avg_hours\" done)",
+      "Bash(while IFS='|' read -r ckpt pnl wr trades hrs)",
+      "Bash(do printf \"%-35s %8s%% %8s%% %8s %10sh\\\\n\" \"$ckpt\" \"$pnl\" \"$wr\" \"$trades\" \"$hrs\")"
     ],
     "deny": [],
     "ask": []
