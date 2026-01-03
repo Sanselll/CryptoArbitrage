@@ -1023,6 +1023,53 @@ def test_model_inference(args):
     print(f"\n🎯 Composite Score: {composite_score:.4f}")
     print(f"   (P&L: {pnl_score:.3f} | ProfitFactor: {profit_factor_score:.3f} | Drawdown: {drawdown_score:.3f})")
 
+    # Show top 5 winners and losers
+    if all_trades:
+        trades_df = pd.DataFrame(all_trades)
+        if 'realized_pnl_usd' in trades_df.columns:
+            closed_trades = trades_df[trades_df['status'] == 'closed'].copy()
+            if len(closed_trades) > 0:
+                closed_trades_sorted = closed_trades.sort_values('realized_pnl_usd', ascending=False)
+
+                print(f"\n💰 TOP 5 PROFITABLE TRADES:")
+                print(f"   {'Symbol':<12} {'P&L USD':>10} {'P&L %':>8} {'Entry':>14} {'Exit':>14}")
+                print(f"   {'-'*66}")
+                for _, trade in closed_trades_sorted.head(5).iterrows():
+                    symbol = trade.get('symbol', 'N/A')[:12]
+                    pnl_usd = trade.get('realized_pnl_usd', 0)
+                    pnl_pct = trade.get('realized_pnl_pct', 0)
+                    entry_dt = trade.get('entry_datetime', '')
+                    exit_dt = trade.get('exit_datetime', '')
+                    # Format datetime to MM-DD HH:MM
+                    if hasattr(entry_dt, 'strftime'):
+                        entry_str = entry_dt.strftime('%m-%d %H:%M')
+                    else:
+                        entry_str = str(entry_dt)[-14:-3] if entry_dt else 'N/A'
+                    if hasattr(exit_dt, 'strftime'):
+                        exit_str = exit_dt.strftime('%m-%d %H:%M')
+                    else:
+                        exit_str = str(exit_dt)[-14:-3] if exit_dt else 'N/A'
+                    print(f"   {symbol:<12} ${pnl_usd:>9.2f} {pnl_pct:>7.2f}% {entry_str:>14} {exit_str:>14}")
+
+                print(f"\n📉 TOP 5 LOSING TRADES:")
+                print(f"   {'Symbol':<12} {'P&L USD':>10} {'P&L %':>8} {'Entry':>14} {'Exit':>14}")
+                print(f"   {'-'*66}")
+                for _, trade in closed_trades_sorted.tail(5).iloc[::-1].iterrows():
+                    symbol = trade.get('symbol', 'N/A')[:12]
+                    pnl_usd = trade.get('realized_pnl_usd', 0)
+                    pnl_pct = trade.get('realized_pnl_pct', 0)
+                    entry_dt = trade.get('entry_datetime', '')
+                    exit_dt = trade.get('exit_datetime', '')
+                    if hasattr(entry_dt, 'strftime'):
+                        entry_str = entry_dt.strftime('%m-%d %H:%M')
+                    else:
+                        entry_str = str(entry_dt)[-14:-3] if entry_dt else 'N/A'
+                    if hasattr(exit_dt, 'strftime'):
+                        exit_str = exit_dt.strftime('%m-%d %H:%M')
+                    else:
+                        exit_str = str(exit_dt)[-14:-3] if exit_dt else 'N/A'
+                    print(f"   {symbol:<12} ${pnl_usd:>9.2f} {pnl_pct:>7.2f}% {entry_str:>14} {exit_str:>14}")
+
     # Write trades to CSV
     if all_trades:
         trades_df = pd.DataFrame(all_trades)
