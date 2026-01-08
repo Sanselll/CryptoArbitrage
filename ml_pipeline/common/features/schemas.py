@@ -14,7 +14,7 @@ class TradingConfigRaw(BaseModel):
     max_leverage: float = Field(default=1.0, ge=1.0, le=10.0)
     target_utilization: float = Field(default=0.5, ge=0.0, le=1.0)
     max_positions: int = Field(default=1, ge=1, le=3)  # Allow 1-3 for backwards compatibility, model uses 1
-    stop_loss_threshold: float = Field(default=-0.02, ge=-1.0, le=0.0)
+    stop_loss_threshold: float = Field(default=-0.05, ge=-1.0, le=0.0)
     liquidation_buffer: float = Field(default=0.15, ge=0.0, le=1.0)
 
 
@@ -53,7 +53,7 @@ class PositionRawData(BaseModel):
     current_position_apr: float = Field(default=0.0)
 
     # Risk
-    liquidation_distance: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    liquidation_distance: Optional[float] = Field(default=None, ge=0.0)
 
     class Config:
         extra = "allow"  # Allow additional fields from backend

@@ -212,13 +212,19 @@ def create_trade_chart(trade: pd.Series, price_loader: PriceHistoryLoader, trade
     leverage = trade['leverage']
     size_pct_of_capital = (position_size / initial_capital) * 100
 
+    # Get coin_quantity - same quantity for both legs (true delta neutral)
+    # If not in CSV (older data), calculate from average entry price
+    if 'coin_quantity' in trade and pd.notna(trade['coin_quantity']):
+        coin_quantity = trade['coin_quantity']
+    else:
+        avg_entry_price = (trade['entry_long_price'] + trade['entry_short_price']) / 2
+        coin_quantity = (position_size * leverage) / avg_entry_price
+
     # Calculate long/short PnL from price movements (excluding funding)
-    # CRITICAL: P&L is based on NOTIONAL value (margin × leverage), not margin!
-    notional_per_leg = position_size * leverage
-    # Long PnL: profit when price goes up
-    long_price_pnl = notional_per_leg * ((trade['exit_long_price'] - trade['entry_long_price']) / trade['entry_long_price'])
-    # Short PnL: profit when price goes down
-    short_price_pnl = notional_per_leg * ((trade['entry_short_price'] - trade['exit_short_price']) / trade['entry_short_price'])
+    # CRITICAL: Use same coin_quantity for both legs (true delta neutral, matches backend)
+    # PnL = coin_quantity * price_change
+    long_price_pnl = coin_quantity * (trade['exit_long_price'] - trade['entry_long_price'])
+    short_price_pnl = coin_quantity * (trade['entry_short_price'] - trade['exit_short_price'])
 
     # Get funding for each side
     long_funding = trade.get('long_funding_earned_usd', 0)
@@ -539,12 +545,17 @@ def create_dashboard(trades: pd.DataFrame, price_loader: PriceHistoryLoader, out
         size_pct = (trade['position_size_usd'] / initial_capital) * 100
 
         # Calculate long/short PnL from price movements + funding
-        # CRITICAL: P&L is based on NOTIONAL value (margin × leverage), not margin!
+        # CRITICAL: Use same coin_quantity for both legs (true delta neutral, matches backend)
         position_size = trade['position_size_usd']
         leverage = trade['leverage']
-        notional_per_leg = position_size * leverage
-        long_price_pnl = notional_per_leg * ((trade['exit_long_price'] - trade['entry_long_price']) / trade['entry_long_price'])
-        short_price_pnl = notional_per_leg * ((trade['entry_short_price'] - trade['exit_short_price']) / trade['entry_short_price'])
+        # Get coin_quantity - same quantity for both legs
+        if 'coin_quantity' in trade.index and pd.notna(trade['coin_quantity']):
+            coin_quantity = trade['coin_quantity']
+        else:
+            avg_entry_price = (trade['entry_long_price'] + trade['entry_short_price']) / 2
+            coin_quantity = (position_size * leverage) / avg_entry_price
+        long_price_pnl = coin_quantity * (trade['exit_long_price'] - trade['entry_long_price'])
+        short_price_pnl = coin_quantity * (trade['entry_short_price'] - trade['exit_short_price'])
         long_total_pnl = long_price_pnl + trade['long_funding_earned_usd']
         short_total_pnl = short_price_pnl + trade['short_funding_earned_usd']
         long_pnl_class = 'positive' if long_total_pnl >= 0 else 'negative'

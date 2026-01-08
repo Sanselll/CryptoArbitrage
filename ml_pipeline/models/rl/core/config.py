@@ -24,7 +24,7 @@ class TradingConfig:
     max_positions: int = 1                        # Maximum concurrent positions (V9: single position only)
 
     # Risk management
-    stop_loss_threshold: float = -0.02           # P&L% threshold for automatic exit (e.g., -0.02 = -2%)
+    stop_loss_threshold: float = -0.05           # P&L% threshold for automatic exit (e.g., -0.05 = -5%)
     liquidation_buffer: float = 0.15             # Minimum safe distance to liquidation (e.g., 0.15 = 15%)
 
     def to_array(self) -> np.ndarray:

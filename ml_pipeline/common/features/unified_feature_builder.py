@@ -758,7 +758,8 @@ class UnifiedFeatureBuilder:
         max_positions: int,
         current_time: Optional[datetime] = None,
         max_minutes_to_funding: float = 30.0,
-        min_apr: float = 2500.0
+        min_apr: float = 2500.0,
+        max_apr: float = 15000.0
     ) -> np.ndarray:
         """
         Generate action mask (17 dimensions, V10).
@@ -772,6 +773,7 @@ class UnifiedFeatureBuilder:
 
         ENTER masking criteria (V10):
         - Opportunity must have fund_apr >= min_apr
+        - Opportunity must have fund_apr <= max_apr (block high APR traps)
         - Time to profitable funding must be <= max_minutes_to_funding
         - Must have position capacity
         - Must not have existing position for same symbol
@@ -783,6 +785,7 @@ class UnifiedFeatureBuilder:
             current_time: Fallback datetime for funding time calculation
             max_minutes_to_funding: Max minutes until next profitable funding (default: 30)
             min_apr: Minimum APR required to enter (default: 2500)
+            max_apr: Maximum APR allowed to enter (default: 15000, blocks high APR traps)
 
         Returns:
             Boolean array (17,) where True = valid action
@@ -806,6 +809,8 @@ class UnifiedFeatureBuilder:
 
                     fund_apr = opp.get('fund_apr', 0.0)
                     if fund_apr < min_apr:
+                        continue
+                    if fund_apr > max_apr:
                         continue
 
                     time_to_funding_norm = self._calc_time_to_profitable_funding(opp, current_time)

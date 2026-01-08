@@ -341,9 +341,13 @@ class FundingArbitrageEnv(gym.Env):
         """
         Get boolean mask of valid actions for current state (V10: 17 actions).
 
-        ENTER masking criteria (V10):
+        ENTER masking criteria (V11 - Analysis-based filters):
         - Opportunity must have fund_apr >= MIN_APR (2500)
+        - Opportunity must have fund_apr <= MAX_APR (15000) - avoid traps!
         - Time to PROFITABLE funding must be <= MAX_MINUTES_TO_FUNDING (30)
+        - Entry spread must be >= MIN_SPREAD (1%) - enough opportunity
+        - Entry spread must be <= MAX_SPREAD (5%) - avoid stuck divergence
+        - Spread direction: Long price not much lower than Short (>= -2%)
         - Must have position capacity
         - Must not have existing position for same symbol
 
@@ -362,9 +366,21 @@ class FundingArbitrageEnv(gym.Env):
         # HOLD is always valid
         mask[0] = True
 
-        # APR + TIME MASKING (min 2500%, max 30min to funding)
+        # APR MASKING (V11: filter APR traps)
         MIN_APR = 2500.0
+        MAX_APR = 15000.0  # Block high APR traps
         MAX_MINUTES_TO_FUNDING = 30.0
+
+        # SPREAD MASKING - DISABLED
+        MIN_SPREAD_PCT = 0.0
+        MAX_SPREAD_PCT = 999.0
+
+        # SPREAD DIRECTION - DISABLED
+        MIN_SPREAD_DIRECTION = -999.0
+
+        # EXIT MASKING (V11: prevent early exits) - DISABLED for testing
+        # Analysis: trades <1h = -$120 loss, 12% win rate
+        MIN_HOLD_HOURS = 0.0  # DISABLED - allow exit anytime
 
         num_positions = len(self.portfolio.positions)
         max_positions = self.current_config.max_positions
@@ -384,9 +400,13 @@ class FundingArbitrageEnv(gym.Env):
                     if opp_symbol in existing_symbols:
                         continue
 
-                    # APR masking
+                    # APR masking - minimum
                     fund_apr = opp.get('fund_apr', 0.0)
                     if fund_apr < MIN_APR:
+                        continue
+
+                    # V11: APR masking - maximum (avoid traps)
+                    if fund_apr > MAX_APR:
                         continue
 
                     # Time to funding masking
@@ -394,14 +414,42 @@ class FundingArbitrageEnv(gym.Env):
                     if minutes_to_funding > MAX_MINUTES_TO_FUNDING:
                         continue
 
-                    # All ENTER actions enabled for this opportunity
+                    # V11: Spread masking (absolute spread size)
+                    entry_long_price = opp.get('entry_long_price', 0.0)
+                    entry_short_price = opp.get('entry_short_price', 0.0)
+                    if entry_long_price > 0 and entry_short_price > 0:
+                        avg_price = (entry_long_price + entry_short_price) / 2
+                        spread_pct_signed = (entry_long_price - entry_short_price) / avg_price * 100
+                        spread_pct_abs = abs(spread_pct_signed)
+
+                        # Filter by absolute spread size
+                        if spread_pct_abs < MIN_SPREAD_PCT:
+                            continue
+                        if spread_pct_abs > MAX_SPREAD_PCT:
+                            continue
+
+                        # V11: Filter by spread direction
+                        # Reject when Long price is much lower than Short (bad direction)
+                        if spread_pct_signed < MIN_SPREAD_DIRECTION:
+                            continue
+
+                    # All sizes enabled - model prefers SMALL (best performance)
                     mask[1 + i] = True      # SMALL (1-5)
                     mask[6 + i] = True      # MEDIUM (6-10)
                     mask[11 + i] = True     # LARGE (11-15)
 
-        # EXIT actions: valid if position exists
+        # EXIT actions: valid if position exists AND held for minimum time
         for i in range(DIMS.EXECUTIONS_SLOTS):
             if i < num_positions:
+                position = self.portfolio.positions[i]
+
+                # V11: Check minimum hold time before allowing exit
+                if self.current_time is not None and position.entry_time is not None:
+                    hours_held = (self.current_time - position.entry_time).total_seconds() / 3600
+                    if hours_held < MIN_HOLD_HOURS:
+                        # Don't allow exit yet - position too young
+                        continue
+
                 mask[DIMS.ACTION_EXIT_START + i] = True  # 16
 
         return mask

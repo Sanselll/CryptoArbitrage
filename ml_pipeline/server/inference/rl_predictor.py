@@ -203,7 +203,7 @@ class ModularRLPredictor:
                 'max_leverage': 1.0,
                 'target_utilization': 0.5,
                 'max_positions': 1,  # V9: single position only
-                'stop_loss_threshold': -0.02,
+                'stop_loss_threshold': -0.05,
                 'liquidation_buffer': 0.15,
             }
 
@@ -241,13 +241,15 @@ class ModularRLPredictor:
 
         # V10 masking criteria from trading config (with defaults)
         min_apr = trading_config.get('min_apr', 2500.0)
+        max_apr = trading_config.get('max_apr', 15000.0)  # Block high APR traps
         max_minutes_to_funding = trading_config.get('max_minutes_to_funding', 30.0)
 
         action_mask = feature_builder.get_action_mask(
             opportunities, num_positions, max_positions,
             current_time=current_time,
             max_minutes_to_funding=max_minutes_to_funding,
-            min_apr=min_apr
+            min_apr=min_apr,
+            max_apr=max_apr
         )
 
         # Select action (deterministic = greedy)
