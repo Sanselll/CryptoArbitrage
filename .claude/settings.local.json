@@ -361,7 +361,9 @@
       "Bash(python visualize_trades.py:*)",
       "Bash(open:*)",
       "Bash(xargs -I {} sh -c 'ps -o pid,rss,vsz,comm -p {} 2>/dev/null && echo \"\"\"\"RSS \\(MB\\):\"\"\"\" && ps -o rss= -p {} | awk \"\"\"\"{print \\\\$1/1024}\"\"\"\"')",
-      "Bash(python /tmp/compare_divergence.py:*)"
+      "Bash(python /tmp/compare_divergence.py:*)",
+      "Bash(python /tmp/compare_obs.py:*)",
+      "Bash(md5:*)"
     ],
     "deny": [],
     "ask": []

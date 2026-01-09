@@ -109,6 +109,26 @@ class UnifiedFeatureBuilder:
         self._slot_symbols.clear()  # V6: Reset symbol tracking
         self._prev_position_apr.clear()  # V7: Reset APR velocity tracking
 
+    def _clear_slot_state(self, slot_idx: int):
+        """
+        Clear all velocity tracking state for a specific slot.
+
+        Call this when a position closes or a new position opens to ensure
+        velocity features are position-scoped (not session-scoped).
+        """
+        if slot_idx in self._prev_estimated_pnl:
+            del self._prev_estimated_pnl[slot_idx]
+        if slot_idx in self._prev_funding_8h:
+            del self._prev_funding_8h[slot_idx]
+        if slot_idx in self._prev_spread:
+            del self._prev_spread[slot_idx]
+        if slot_idx in self._peak_pnl:
+            del self._peak_pnl[slot_idx]
+        if slot_idx in self._prev_position_apr:
+            del self._prev_position_apr[slot_idx]
+        if slot_idx in self._slot_symbols:
+            del self._slot_symbols[slot_idx]
+
     def build_observation_from_raw_data(self, raw_data: Dict[str, Any], log_file: Optional[str] = None) -> np.ndarray:
         """
         Build complete 91-dim observation vector from raw backend data (V10).
@@ -321,29 +341,34 @@ class UnifiedFeatureBuilder:
 
                 # Check if position is ACTUALLY active
                 is_active = pos.get('is_active', False)
-
-                # V6/V7: Detect position change and reset tracking for this slot
                 pos_symbol = pos.get('symbol', '')
-                if slot_idx in self._slot_symbols and self._slot_symbols[slot_idx] != pos_symbol:
-                    # Different symbol in this slot - reset tracking
-                    if slot_idx in self._peak_pnl:
-                        del self._peak_pnl[slot_idx]
-                    if slot_idx in self._prev_estimated_pnl:
-                        del self._prev_estimated_pnl[slot_idx]
-                    if slot_idx in self._prev_funding_8h:
-                        del self._prev_funding_8h[slot_idx]
-                    if slot_idx in self._prev_position_apr:  # V7: Reset APR tracking
-                        del self._prev_position_apr[slot_idx]
-                self._slot_symbols[slot_idx] = pos_symbol
+                raw_hours_held = pos.get('position_age_hours', 0.0)
 
+                # Position-scoped state: Clear tracking when position closes or new position opens
+                # This ensures velocity features don't bleed between positions
                 if not is_active:
-                    # Empty/inactive slot - all zeros
+                    # Position closed - clear state and return zeros
+                    self._clear_slot_state(slot_idx)
                     all_features.extend([0.0] * DIMS.EXECUTIONS_PER_SLOT)
                     continue
 
+                # Detect new position: hours_held < step interval (typically 5 min = 0.083h)
+                # Use 0.1h threshold to catch first step of any new position
+                is_new_position = raw_hours_held < 0.1
+
+                # V6/V7: Also detect symbol change (different position in same slot)
+                symbol_changed = (slot_idx in self._slot_symbols and
+                                  self._slot_symbols[slot_idx] != pos_symbol)
+
+                if is_new_position or symbol_changed:
+                    # New position opened - clear stale state from previous position
+                    self._clear_slot_state(slot_idx)
+
+                # Track current symbol for change detection
+                self._slot_symbols[slot_idx] = pos_symbol
+
                 # Extract position data
                 total_capital_used = pos.get('position_size_usd', 0.0) * 2
-                raw_hours_held = pos.get('position_age_hours', 0.0)
 
                 # Prices
                 current_long_price = pos.get('current_long_price', 0.0)
@@ -570,7 +595,9 @@ class UnifiedFeatureBuilder:
                     apr_velocity,
                 ]
             else:
-                # Empty slot - all zeros
+                # Empty slot (no position data) - clear any stale state and return zeros
+                # This handles the case when backend sends empty positions list after close
+                self._clear_slot_state(slot_idx)
                 slot_features = [0.0] * DIMS.EXECUTIONS_PER_SLOT
 
             all_features.extend(slot_features)

@@ -1023,8 +1023,8 @@ class Portfolio:
         # REMOVED: Capital availability check (replaced by margin check above)
         # With leverage, we don't need full capital, just margin
 
-        # Position size limit per side (based on initial capital, not current)
-        max_size_per_side = self.initial_capital * (self.max_position_size_pct / 100)
+        # Position size limit per side (based on current capital, scales with portfolio)
+        max_size_per_side = self.total_capital * (self.max_position_size_pct / 100)
         if size_per_side_usd > max_size_per_side:
             return False
 

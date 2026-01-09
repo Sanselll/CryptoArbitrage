@@ -53,6 +53,8 @@ def parse_args():
                         help='Use entire test dataset for evaluation (V6 default: False = random 3-day windows)')
     parser.add_argument('--no-eval-full-test', action='store_false', dest='eval_full_test',
                         help='Use episode-length-days for evaluation instead of full test dataset')
+    parser.add_argument('--mask-enter-actions', action='store_true', default=False,
+                        help='Enable ENTER action masking during training (default: disabled, model learns entry criteria)')
 
     # Trading config (if not sampling random)
     parser.add_argument('--max-leverage', type=float, default=2.0,
@@ -202,6 +204,10 @@ def create_environment(args, data_path: str, is_test_env: bool = False, verbose:
     # For test environments, optionally use full range
     use_full_range = is_test_env and args.eval_full_test
 
+    # For training: masking disabled by default so model learns entry criteria
+    # For test/eval: always keep masking enabled
+    mask_enter = True if is_test_env else args.mask_enter_actions
+
     # Create environment
     env = FundingArbitrageEnv(
         data_path=data_path,
@@ -214,12 +220,14 @@ def create_environment(args, data_path: str, is_test_env: bool = False, verbose:
         episode_length_days=args.episode_length_days,
         step_hours=step_hours,
         use_full_range_episodes=use_full_range,
+        mask_enter_actions=mask_enter,
         verbose=verbose,
     )
 
     if verbose:
+        if not mask_enter:
+            print("⚠️  ENTER action masking DISABLED (model learns entry criteria)")
         if use_full_range:
-            # Calculate actual data range for display
             import pandas as pd
             df = pd.read_csv(data_path)
             df['entry_time'] = pd.to_datetime(df['entry_time'])

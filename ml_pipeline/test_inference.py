@@ -103,6 +103,8 @@ def parse_args():
                         help='Random seed for reproducible results (default: 42)')
     parser.add_argument('--force-zero-pnl', action='store_true',
                         help='Force total_pnl_pct to always be 0 in observations (simulates production bug)')
+    parser.add_argument('--no-early-termination', action='store_true',
+                        help='Disable early termination (25%% drawdown, 50%% capital loss) for testing')
     parser.add_argument('--start-time', type=str, default=None,
                         help='Start time for filtering test data (e.g., "2025-11-13 09:20:00")')
     parser.add_argument('--end-time', type=str, default=None,
@@ -123,6 +125,8 @@ def parse_args():
                         help='Only allow ENTER if fund_apr_3d_proj > 0')
     parser.add_argument('--max-spread-vol', type=float, default=0.0,
                         help='Maximum spread volatility for ENTER (default: 0.0 = disabled, use 0.15 for 15%%)')
+    parser.add_argument('--no-masking', action='store_true',
+                        help='Disable action masking (allow model to attempt invalid actions)')
 
     return parser.parse_args()
 
@@ -457,6 +461,8 @@ def test_model_inference(args):
         feature_scaler_path=args.feature_scaler_path,
         use_full_range_episodes=args.full_test,
         force_zero_total_pnl_pct=args.force_zero_pnl,
+        disable_early_termination=args.no_early_termination,
+        mask_enter_actions=not args.no_masking,
         verbose=False,
     )
 
@@ -493,6 +499,10 @@ def test_model_inference(args):
         print(f"   Price History: {args.price_history_path} (dynamic funding updates enabled)")
     if args.force_zero_pnl:
         print(f"   ⚠️  FORCING total_pnl_pct = 0 in observations (production bug simulation)")
+    if args.no_early_termination:
+        print(f"   ⚠️  Early termination DISABLED (25% drawdown, 50% capital loss)")
+    if args.no_masking:
+        print(f"   ⚠️  Action masking DISABLED (model can attempt invalid ENTER actions)")
     if args.enter_threshold > 0 or args.exit_threshold > 0:
         print(f"\n   🎯 Confidence Thresholds:")
         print(f"      ENTER threshold: {args.enter_threshold*100:.0f}% (actions below this default to HOLD)")
@@ -846,6 +856,24 @@ def test_model_inference(args):
                     elif args.max_spread_vol > 0 and spread_vol > args.max_spread_vol:
                         action = 0
                         apr_blocked_high_spread_vol += 1
+
+            # DEBUG: Log around divergence point (Jan 1 16:00 - 20:00)
+            _target_start = pd.Timestamp("2026-01-01 16:00:00", tz='UTC')
+            _target_end = pd.Timestamp("2026-01-01 20:00:00", tz='UTC')
+            if hasattr(env, 'current_time') and _target_start <= env.current_time <= _target_end:
+                pos_info = ""
+                if env.portfolio.positions:
+                    p = env.portfolio.positions[0]
+                    pos_info = f" | {p.symbol} held={p.hours_held:.2f}h"
+                action_name = {0: "HOLD", 16: "EXIT"}.get(action, f"ENTER_{action}")
+                print(f"DEBUG: {env.current_time} → action={action} ({action_name}) conf={confidence*100:.1f}%{pos_info}")
+                if action == 16:
+                    print(f"DEBUG: >>> EXIT ACTION! <<<")
+                # Save observation at 01:20 for comparison
+                if env.current_time == pd.Timestamp("2025-12-04 01:20:00", tz='UTC'):
+                    np.save('/tmp/obs_test_inference.npy', obs)
+                    print(f"DEBUG: Saved obs to /tmp/obs_test_inference.npy")
+                    print(f"DEBUG: obs[7:26] (execution features): {obs[7:26]}")
 
             # Step
             obs, reward, terminated, truncated, info = env.step(action)

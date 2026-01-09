@@ -67,6 +67,8 @@ class FundingArbitrageEnv(gym.Env):
                  use_full_range_episodes: bool = False,
                  fixed_position_size_usd: float = None,
                  force_zero_total_pnl_pct: bool = False,
+                 disable_early_termination: bool = False,
+                 mask_enter_actions: bool = True,
                  verbose: bool = True):
         """
         Initialize the environment.
@@ -85,6 +87,8 @@ class FundingArbitrageEnv(gym.Env):
             pnl_reward_scale: Scaling factor for P&L rewards (default 3.0)
             use_full_range_episodes: If True, episodes span entire data range (data_start to data_end)
             fixed_position_size_usd: If set, use this fixed size per side instead of capital-based sizing
+            mask_enter_actions: If True (default), apply APR/timing filters to ENTER actions.
+                               Set False for training to let model learn entry criteria.
         """
         super().__init__()
 
@@ -108,6 +112,8 @@ class FundingArbitrageEnv(gym.Env):
         self.use_full_range_episodes = use_full_range_episodes
         self.fixed_position_size_usd = fixed_position_size_usd
         self.force_zero_total_pnl_pct = force_zero_total_pnl_pct  # For testing: simulates production bug
+        self.disable_early_termination = disable_early_termination  # For testing: disable 25% drawdown termination
+        self.mask_enter_actions = mask_enter_actions  # For training: disable to let model learn entry criteria
 
         # Random episode length support (to prevent episode-length-dependent learning)
         # If min/max not set, use fixed episode length
@@ -396,42 +402,45 @@ class FundingArbitrageEnv(gym.Env):
                     opp = self.current_opportunities[i]
                     opp_symbol = opp.get('symbol', '')
 
-                    # Prevent duplicate symbols
+                    # HARD CONSTRAINT: Prevent duplicate symbols (always enforced)
                     if opp_symbol in existing_symbols:
                         continue
 
-                    # APR masking - minimum
-                    fund_apr = opp.get('fund_apr', 0.0)
-                    if fund_apr < MIN_APR:
-                        continue
-
-                    # V11: APR masking - maximum (avoid traps)
-                    if fund_apr > MAX_APR:
-                        continue
-
-                    # Time to funding masking
-                    minutes_to_funding = self._calc_minutes_to_profitable_funding(opp)
-                    if minutes_to_funding > MAX_MINUTES_TO_FUNDING:
-                        continue
-
-                    # V11: Spread masking (absolute spread size)
-                    entry_long_price = opp.get('entry_long_price', 0.0)
-                    entry_short_price = opp.get('entry_short_price', 0.0)
-                    if entry_long_price > 0 and entry_short_price > 0:
-                        avg_price = (entry_long_price + entry_short_price) / 2
-                        spread_pct_signed = (entry_long_price - entry_short_price) / avg_price * 100
-                        spread_pct_abs = abs(spread_pct_signed)
-
-                        # Filter by absolute spread size
-                        if spread_pct_abs < MIN_SPREAD_PCT:
-                            continue
-                        if spread_pct_abs > MAX_SPREAD_PCT:
+                    # SOFT CONSTRAINTS: Only apply if mask_enter_actions=True (default)
+                    # When False, model learns entry criteria from rewards
+                    if self.mask_enter_actions:
+                        # APR masking - minimum
+                        fund_apr = opp.get('fund_apr', 0.0)
+                        if fund_apr < MIN_APR:
                             continue
 
-                        # V11: Filter by spread direction
-                        # Reject when Long price is much lower than Short (bad direction)
-                        if spread_pct_signed < MIN_SPREAD_DIRECTION:
+                        # V11: APR masking - maximum (avoid traps)
+                        if fund_apr > MAX_APR:
                             continue
+
+                        # Time to funding masking
+                        minutes_to_funding = self._calc_minutes_to_profitable_funding(opp)
+                        if minutes_to_funding > MAX_MINUTES_TO_FUNDING:
+                            continue
+
+                        # V11: Spread masking (absolute spread size)
+                        entry_long_price = opp.get('entry_long_price', 0.0)
+                        entry_short_price = opp.get('entry_short_price', 0.0)
+                        if entry_long_price > 0 and entry_short_price > 0:
+                            avg_price = (entry_long_price + entry_short_price) / 2
+                            spread_pct_signed = (entry_long_price - entry_short_price) / avg_price * 100
+                            spread_pct_abs = abs(spread_pct_signed)
+
+                            # Filter by absolute spread size
+                            if spread_pct_abs < MIN_SPREAD_PCT:
+                                continue
+                            if spread_pct_abs > MAX_SPREAD_PCT:
+                                continue
+
+                            # V11: Filter by spread direction
+                            # Reject when Long price is much lower than Short (bad direction)
+                            if spread_pct_signed < MIN_SPREAD_DIRECTION:
+                                continue
 
                     # All sizes enabled - model prefers SMALL (best performance)
                     mask[1 + i] = True      # SMALL (1-5)
@@ -903,13 +912,13 @@ class FundingArbitrageEnv(gym.Env):
             # Close all remaining positions
             reward += self._close_all_positions()
 
-        # Terminate if max drawdown exceeded (25%)
-        if self.portfolio.max_drawdown_pct >= 25.0:
+        # Terminate if max drawdown exceeded (25%) - skip if disabled for testing
+        if not self.disable_early_termination and self.portfolio.max_drawdown_pct >= 25.0:
             terminated = True
             reward += self._close_all_positions()
 
-        # Terminate if portfolio value too low
-        if self.portfolio.portfolio_value < self.initial_capital * 0.5:
+        # Terminate if portfolio value too low - skip if disabled for testing
+        if not self.disable_early_termination and self.portfolio.portfolio_value < self.initial_capital * 0.5:
             terminated = True
             reward += self._close_all_positions()
 
