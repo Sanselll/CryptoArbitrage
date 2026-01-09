@@ -73,8 +73,8 @@ def parse_args():
                         help='Capital utilization (default: 0.8 = 80%%)')
     parser.add_argument('--max-positions', type=int, default=1,
                         help='Max concurrent positions (default: 1, V9: single position only)')
-    parser.add_argument('--stop-loss', type=float, default=-0.05,
-                        help='Stop-loss threshold as decimal (default: -0.05 = -5%%)')
+    parser.add_argument('--stop-loss', type=float, default=-0.10,
+                        help='Stop-loss threshold as decimal (default: -0.10 = -10%%)')
 
     # Test configuration
     parser.add_argument('--num-episodes', type=int, default=1,

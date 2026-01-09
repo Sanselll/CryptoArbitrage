@@ -203,7 +203,7 @@ class ModularRLPredictor:
                 'max_leverage': 1.0,
                 'target_utilization': 0.5,
                 'max_positions': 1,  # V9: single position only
-                'stop_loss_threshold': -0.05,
+                'stop_loss_threshold': -0.10,
                 'liquidation_buffer': 0.15,
             }
 

@@ -13,9 +13,9 @@ PARALLEL_JOBS=4
 TEST_DATA="/Users/sansel/Projects/CryptoArbitrage/ml_pipeline/data/production/rl_opportunities.csv"
 PRICE_HISTORY="data/production/price_history"
 LEVERAGE=2
-START_TIME="2025-12-24 09:00:00"
-END_TIME="2026-01-03 16:55:00"
-INITIAL_CAPITAL=400
+START_TIME="2025-12-03 01:20:00"
+END_TIME="2026-01-08 09:50:00"
+INITIAL_CAPITAL=1000
 
 echo "========================================================================"
 echo "TESTING ALL CHECKPOINTS IN PARALLEL"
@@ -51,6 +51,7 @@ test_checkpoint() {
         --start-time "$START_TIME" \
         --end-time "$END_TIME" \
         --initial-capital "$INITIAL_CAPITAL" \
+        --stop-loss -0.10 \
         --checkpoint "$checkpoint" \
         2>&1)
 

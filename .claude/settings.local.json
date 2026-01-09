@@ -359,7 +359,9 @@
       "Bash(do printf \"%-35s %8s%% %8s%% %8s %10sh\\\\n\" \"$ckpt\" \"$pnl\" \"$wr\" \"$trades\" \"$hrs\")",
       "Bash(python test_inference.py:*)",
       "Bash(python visualize_trades.py:*)",
-      "Bash(open:*)"
+      "Bash(open:*)",
+      "Bash(xargs -I {} sh -c 'ps -o pid,rss,vsz,comm -p {} 2>/dev/null && echo \"\"\"\"RSS \\(MB\\):\"\"\"\" && ps -o rss= -p {} | awk \"\"\"\"{print \\\\$1/1024}\"\"\"\"')",
+      "Bash(python /tmp/compare_divergence.py:*)"
     ],
     "deny": [],
     "ask": []
