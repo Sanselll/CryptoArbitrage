@@ -180,7 +180,7 @@ class MLAPIClient:
             return str(pd.Timestamp(obj))
         elif isinstance(obj, float):
             if math.isnan(obj):
-                return 0.0
+                return None  # Use null for NaN to preserve semantics
             elif math.isinf(obj):
                 return 1e9 if obj > 0 else -1e9
             else:
@@ -192,7 +192,7 @@ class MLAPIClient:
             # Convert numpy floats to Python float (and check for inf/nan)
             val = float(obj)
             if math.isnan(val):
-                return 0.0
+                return None  # Use null for NaN to preserve semantics
             elif math.isinf(val):
                 return 1e9 if val > 0 else -1e9
             else:
@@ -296,6 +296,12 @@ class MLAPIClient:
                 'price_spread_3d_avg': opp.get('price_spread_3d_avg', 0.0),
                 'spread_volatility_stddev': opp.get('spread_volatility_stddev', 0.0),
                 'has_existing_position': opp.get('has_existing_position', False),
+                # Fields needed for time_to_funding calculation in action masking
+                'entry_time': str(opp.get('entry_time', '')) if opp.get('entry_time') else None,
+                'long_funding_rate': opp.get('long_funding_rate', 0.0),
+                'short_funding_rate': opp.get('short_funding_rate', 0.0),
+                'long_next_funding_time': str(opp.get('long_next_funding_time', '')) if opp.get('long_next_funding_time') else None,
+                'short_next_funding_time': str(opp.get('short_next_funding_time', '')) if opp.get('short_next_funding_time') else None,
             })
 
         return {
@@ -856,24 +862,6 @@ def test_model_inference(args):
                     elif args.max_spread_vol > 0 and spread_vol > args.max_spread_vol:
                         action = 0
                         apr_blocked_high_spread_vol += 1
-
-            # DEBUG: Log around divergence point (Jan 1 16:00 - 20:00)
-            _target_start = pd.Timestamp("2026-01-01 16:00:00", tz='UTC')
-            _target_end = pd.Timestamp("2026-01-01 20:00:00", tz='UTC')
-            if hasattr(env, 'current_time') and _target_start <= env.current_time <= _target_end:
-                pos_info = ""
-                if env.portfolio.positions:
-                    p = env.portfolio.positions[0]
-                    pos_info = f" | {p.symbol} held={p.hours_held:.2f}h"
-                action_name = {0: "HOLD", 16: "EXIT"}.get(action, f"ENTER_{action}")
-                print(f"DEBUG: {env.current_time} → action={action} ({action_name}) conf={confidence*100:.1f}%{pos_info}")
-                if action == 16:
-                    print(f"DEBUG: >>> EXIT ACTION! <<<")
-                # Save observation at 01:20 for comparison
-                if env.current_time == pd.Timestamp("2025-12-04 01:20:00", tz='UTC'):
-                    np.save('/tmp/obs_test_inference.npy', obs)
-                    print(f"DEBUG: Saved obs to /tmp/obs_test_inference.npy")
-                    print(f"DEBUG: obs[7:26] (execution features): {obs[7:26]}")
 
             # Step
             obs, reward, terminated, truncated, info = env.step(action)

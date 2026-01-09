@@ -66,19 +66,20 @@ class OpportunityRawData(BaseModel):
     long_exchange: str
     short_exchange: str
 
-    # Funding profit projections (6 features)
-    fund_profit_8h: float = Field(default=0.0)
-    fund_profit_8h_24h_proj: float = Field(default=0.0)
-    fund_profit_8h_3d_proj: float = Field(default=0.0)
-    fund_apr: float = Field(default=0.0)
-    fund_apr_24h_proj: float = Field(default=0.0)
-    fund_apr_3d_proj: float = Field(default=0.0)
+    # Funding profit projections (6 features) - Optional to allow NaN/null passthrough
+    fund_profit_8h: Optional[float] = Field(default=0.0)
+    fund_profit_8h_24h_proj: Optional[float] = Field(default=0.0)
+    fund_profit_8h_3d_proj: Optional[float] = Field(default=0.0)
+    fund_apr: Optional[float] = Field(default=0.0)
+    fund_apr_24h_proj: Optional[float] = Field(default=0.0)
+    fund_apr_3d_proj: Optional[float] = Field(default=0.0)
 
     # Spread metrics (4 features - can be negative when short exchange price < long exchange price)
-    spread_30_sample_avg: float = Field(default=0.0)
-    price_spread_24h_avg: float = Field(default=0.0)
-    price_spread_3d_avg: float = Field(default=0.0)
-    spread_volatility_stddev: float = Field(default=0.0, ge=0.0)  # Standard deviation is always >= 0
+    # Optional to allow NaN/null passthrough for parity with direct mode
+    spread_30_sample_avg: Optional[float] = Field(default=0.0)
+    price_spread_24h_avg: Optional[float] = Field(default=0.0)
+    price_spread_3d_avg: Optional[float] = Field(default=0.0)
+    spread_volatility_stddev: Optional[float] = Field(default=0.0)
 
     # Position tracking
     has_existing_position: bool = Field(default=False)

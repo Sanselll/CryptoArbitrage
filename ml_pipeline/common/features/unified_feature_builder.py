@@ -628,14 +628,24 @@ class UnifiedFeatureBuilder:
         """
         all_features = []
 
+        def _get_float(d: Dict, key: str, default: float = 0.0) -> float:
+            """Get float value, converting None/NaN-string to NaN for consistent handling."""
+            val = d.get(key, default)
+            if val is None:
+                return float('nan')
+            # Handle "NaN" string from some JSON serializers (e.g., C# with certain settings)
+            if isinstance(val, str) and val.lower() == 'nan':
+                return float('nan')
+            return float(val)
+
         for slot_idx in range(DIMS.OPPORTUNITIES_SLOTS):
             if slot_idx < len(opportunities):
                 opp = opportunities[slot_idx]
 
-                fund_profit_8h = opp.get('fund_profit_8h', 0)
-                fund_profit_8h_24h_proj = opp.get('fund_profit_8h_24h_proj', 0)
-                spread_30_sample_avg = opp.get('spread_30_sample_avg', 0)
-                price_spread_3d_avg = opp.get('price_spread_3d_avg', 0)
+                fund_profit_8h = _get_float(opp, 'fund_profit_8h', 0)
+                fund_profit_8h_24h_proj = _get_float(opp, 'fund_profit_8h_24h_proj', 0)
+                spread_30_sample_avg = _get_float(opp, 'spread_30_sample_avg', 0)
+                price_spread_3d_avg = _get_float(opp, 'price_spread_3d_avg', 0)
 
                 # V5.4: Sign-agnostic spread mean-reversion potential
                 # Positive = spread wider than 3d avg = mean-reversion opportunity
@@ -648,15 +658,15 @@ class UnifiedFeatureBuilder:
                     # Profit projections (6 features)
                     fund_profit_8h,
                     fund_profit_8h_24h_proj,
-                    opp.get('fund_profit_8h_3d_proj', 0),
-                    opp.get('fund_apr', 0),
-                    opp.get('fund_apr_24h_proj', 0),
-                    opp.get('fund_apr_3d_proj', 0),
+                    _get_float(opp, 'fund_profit_8h_3d_proj', 0),
+                    _get_float(opp, 'fund_apr', 0),
+                    _get_float(opp, 'fund_apr_24h_proj', 0),
+                    _get_float(opp, 'fund_apr_3d_proj', 0),
                     # Spread metrics (4 features)
                     spread_30_sample_avg,
-                    opp.get('price_spread_24h_avg', 0),
+                    _get_float(opp, 'price_spread_24h_avg', 0),
                     price_spread_3d_avg,
-                    opp.get('spread_volatility_stddev', 0),
+                    _get_float(opp, 'spread_volatility_stddev', 0),
                     # Velocity (1 feature)
                     fund_profit_8h - fund_profit_8h_24h_proj,  # apr_velocity
                     # V5.4: Spread mean-reversion potential (1 feature)
@@ -778,6 +788,76 @@ class UnifiedFeatureBuilder:
         # Normalize by 480 minutes (8 hours max)
         return min(min_minutes / 480.0, 1.0)
 
+    def _calc_minutes_to_profitable_funding(self, opp: Dict, current_time: Optional[datetime]) -> float:
+        """
+        Calculate minutes until next funding payment on the profitable side.
+
+        This is the raw minutes version (not normalized) for action masking.
+        Matches environment's _calc_minutes_to_profitable_funding() exactly.
+
+        For funding arbitrage:
+        - Long side profitable when long_funding_rate < 0 (we receive funding)
+        - Short side profitable when short_funding_rate > 0 (we receive funding)
+
+        Args:
+            opp: Opportunity dict with funding rates and next funding times
+            current_time: Fallback datetime (UTC) if entry_time not in opportunity
+
+        Returns:
+            Minutes to next profitable funding, or 999999.0 if none
+        """
+        import pandas as pd
+
+        # Get reference time: opportunity's entry_time or passed current_time
+        ref_time = opp.get('entry_time')
+        if ref_time is None:
+            ref_time = current_time
+        if ref_time is None:
+            return 999999.0
+
+        # Convert to pandas Timestamp if needed
+        if not isinstance(ref_time, pd.Timestamp):
+            ref_time = pd.to_datetime(ref_time)
+
+        # Get funding rates
+        long_rate = opp.get('long_funding_rate', 0.0)
+        short_rate = opp.get('short_funding_rate', 0.0)
+
+        # Get next funding times
+        long_next = opp.get('long_next_funding_time')
+        short_next = opp.get('short_next_funding_time')
+
+        profitable_minutes = []
+
+        # Long is profitable if rate < 0 (we receive)
+        if long_rate < 0 and long_next is not None:
+            if not isinstance(long_next, pd.Timestamp):
+                try:
+                    long_next = pd.to_datetime(long_next)
+                except:
+                    long_next = None
+            if long_next is not None:
+                minutes = (long_next - ref_time).total_seconds() / 60
+                if minutes > 0:
+                    profitable_minutes.append(minutes)
+
+        # Short is profitable if rate > 0 (we receive)
+        if short_rate > 0 and short_next is not None:
+            if not isinstance(short_next, pd.Timestamp):
+                try:
+                    short_next = pd.to_datetime(short_next)
+                except:
+                    short_next = None
+            if short_next is not None:
+                minutes = (short_next - ref_time).total_seconds() / 60
+                if minutes > 0:
+                    profitable_minutes.append(minutes)
+
+        if not profitable_minutes:
+            return 999999.0  # No profitable funding
+
+        return min(profitable_minutes)
+
     def get_action_mask(
         self,
         opportunities: List[Dict],
@@ -786,7 +866,8 @@ class UnifiedFeatureBuilder:
         current_time: Optional[datetime] = None,
         max_minutes_to_funding: float = 30.0,
         min_apr: float = 2500.0,
-        max_apr: float = 15000.0
+        max_apr: float = 15000.0,
+        mask_enter: bool = True
     ) -> np.ndarray:
         """
         Generate action mask (17 dimensions, V10).
@@ -798,12 +879,12 @@ class UnifiedFeatureBuilder:
         - 11-15: ENTER_OPP_0-4_LARGE
         - 16: EXIT_POS_0
 
-        ENTER masking criteria (V10):
-        - Opportunity must have fund_apr >= min_apr
-        - Opportunity must have fund_apr <= max_apr (block high APR traps)
-        - Time to profitable funding must be <= max_minutes_to_funding
-        - Must have position capacity
-        - Must not have existing position for same symbol
+        ENTER masking criteria (V11 - matches environment exactly):
+        - HARD: Must have position capacity
+        - HARD: Must not have existing position for same symbol
+        - SOFT (mask_enter=True): Opportunity must have fund_apr >= min_apr
+        - SOFT (mask_enter=True): Opportunity must have fund_apr <= max_apr (block high APR traps)
+        - SOFT (mask_enter=True): Time to profitable funding must be <= max_minutes_to_funding
 
         Args:
             opportunities: List of opportunity dicts
@@ -813,6 +894,7 @@ class UnifiedFeatureBuilder:
             max_minutes_to_funding: Max minutes until next profitable funding (default: 30)
             min_apr: Minimum APR required to enter (default: 2500)
             max_apr: Maximum APR allowed to enter (default: 15000, blocks high APR traps)
+            mask_enter: If True (default), apply soft constraints. If False, only hard constraints.
 
         Returns:
             Boolean array (17,) where True = valid action
@@ -822,7 +904,7 @@ class UnifiedFeatureBuilder:
         # HOLD is always valid
         mask[DIMS.ACTION_HOLD] = True
 
-        # APR + TIME MASKING (min 2500%, max 30min to funding)
+        # ENTER masking
         effective_max_positions = min(max_positions, DIMS.EXECUTIONS_SLOTS)
         has_capacity = num_positions < effective_max_positions
 
@@ -831,19 +913,25 @@ class UnifiedFeatureBuilder:
                 if i < len(opportunities):
                     opp = opportunities[i]
 
+                    # HARD CONSTRAINT: Prevent duplicate symbols (always enforced)
                     if opp.get('has_existing_position', False):
                         continue
 
-                    fund_apr = opp.get('fund_apr', 0.0)
-                    if fund_apr < min_apr:
-                        continue
-                    if fund_apr > max_apr:
-                        continue
+                    # SOFT CONSTRAINTS: Only apply if mask_enter=True
+                    if mask_enter:
+                        # APR masking - minimum
+                        fund_apr = opp.get('fund_apr', 0.0)
+                        if fund_apr < min_apr:
+                            continue
 
-                    time_to_funding_norm = self._calc_time_to_profitable_funding(opp, current_time)
-                    minutes_to_funding = time_to_funding_norm * 480.0
-                    if minutes_to_funding > max_minutes_to_funding:
-                        continue
+                        # APR masking - maximum (avoid traps)
+                        if fund_apr > max_apr:
+                            continue
+
+                        # Time to funding masking (using raw minutes, not normalized)
+                        minutes_to_funding = self._calc_minutes_to_profitable_funding(opp, current_time)
+                        if minutes_to_funding > max_minutes_to_funding:
+                            continue
 
                     mask[1 + i] = True
                     mask[6 + i] = True

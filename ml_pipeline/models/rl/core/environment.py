@@ -347,15 +347,15 @@ class FundingArbitrageEnv(gym.Env):
         """
         Get boolean mask of valid actions for current state (V10: 17 actions).
 
-        ENTER masking criteria (V11 - Analysis-based filters):
-        - Opportunity must have fund_apr >= MIN_APR (2500)
-        - Opportunity must have fund_apr <= MAX_APR (15000) - avoid traps!
-        - Time to PROFITABLE funding must be <= MAX_MINUTES_TO_FUNDING (30)
-        - Entry spread must be >= MIN_SPREAD (1%) - enough opportunity
-        - Entry spread must be <= MAX_SPREAD (5%) - avoid stuck divergence
-        - Spread direction: Long price not much lower than Short (>= -2%)
-        - Must have position capacity
-        - Must not have existing position for same symbol
+        Delegates to UnifiedFeatureBuilder.get_action_mask() to ensure consistency
+        between direct mode and API mode.
+
+        ENTER masking criteria (V11):
+        - HARD: Must have position capacity
+        - HARD: Must not have existing position for same symbol
+        - SOFT (mask_enter_actions=True): fund_apr >= MIN_APR (2500)
+        - SOFT (mask_enter_actions=True): fund_apr <= MAX_APR (15000)
+        - SOFT (mask_enter_actions=True): time_to_funding <= MAX_MINUTES (30)
 
         Returns:
             Boolean array of shape (17,) where True = valid action
@@ -367,101 +367,30 @@ class FundingArbitrageEnv(gym.Env):
             11-15: ENTER_OPP_0-4_LARGE
             16: EXIT_POS_0
         """
-        mask = np.zeros(DIMS.TOTAL_ACTIONS, dtype=bool)
-
-        # HOLD is always valid
-        mask[0] = True
-
-        # APR MASKING (V11: filter APR traps)
+        # Masking parameters
         MIN_APR = 2500.0
-        MAX_APR = 15000.0  # Block high APR traps
+        MAX_APR = 15000.0
         MAX_MINUTES_TO_FUNDING = 30.0
 
-        # SPREAD MASKING - DISABLED
-        MIN_SPREAD_PCT = 0.0
-        MAX_SPREAD_PCT = 999.0
-
-        # SPREAD DIRECTION - DISABLED
-        MIN_SPREAD_DIRECTION = -999.0
-
-        # EXIT MASKING (V11: prevent early exits) - DISABLED for testing
-        # Analysis: trades <1h = -$120 loss, 12% win rate
-        MIN_HOLD_HOURS = 0.0  # DISABLED - allow exit anytime
-
-        num_positions = len(self.portfolio.positions)
-        max_positions = self.current_config.max_positions
-        effective_max_positions = min(max_positions, DIMS.EXECUTIONS_SLOTS)
-        has_capacity = num_positions < effective_max_positions
-
-        # Get set of symbols we already have positions in
+        # Prepare opportunities with has_existing_position flag
         existing_symbols = {pos.symbol for pos in self.portfolio.positions}
+        opportunities_with_flags = []
+        for opp in self.current_opportunities:
+            opp_copy = opp.copy()
+            opp_copy['has_existing_position'] = opp.get('symbol', '') in existing_symbols
+            opportunities_with_flags.append(opp_copy)
 
-        if has_capacity:
-            for i in range(DIMS.OPPORTUNITIES_SLOTS):
-                if i < len(self.current_opportunities):
-                    opp = self.current_opportunities[i]
-                    opp_symbol = opp.get('symbol', '')
-
-                    # HARD CONSTRAINT: Prevent duplicate symbols (always enforced)
-                    if opp_symbol in existing_symbols:
-                        continue
-
-                    # SOFT CONSTRAINTS: Only apply if mask_enter_actions=True (default)
-                    # When False, model learns entry criteria from rewards
-                    if self.mask_enter_actions:
-                        # APR masking - minimum
-                        fund_apr = opp.get('fund_apr', 0.0)
-                        if fund_apr < MIN_APR:
-                            continue
-
-                        # V11: APR masking - maximum (avoid traps)
-                        if fund_apr > MAX_APR:
-                            continue
-
-                        # Time to funding masking
-                        minutes_to_funding = self._calc_minutes_to_profitable_funding(opp)
-                        if minutes_to_funding > MAX_MINUTES_TO_FUNDING:
-                            continue
-
-                        # V11: Spread masking (absolute spread size)
-                        entry_long_price = opp.get('entry_long_price', 0.0)
-                        entry_short_price = opp.get('entry_short_price', 0.0)
-                        if entry_long_price > 0 and entry_short_price > 0:
-                            avg_price = (entry_long_price + entry_short_price) / 2
-                            spread_pct_signed = (entry_long_price - entry_short_price) / avg_price * 100
-                            spread_pct_abs = abs(spread_pct_signed)
-
-                            # Filter by absolute spread size
-                            if spread_pct_abs < MIN_SPREAD_PCT:
-                                continue
-                            if spread_pct_abs > MAX_SPREAD_PCT:
-                                continue
-
-                            # V11: Filter by spread direction
-                            # Reject when Long price is much lower than Short (bad direction)
-                            if spread_pct_signed < MIN_SPREAD_DIRECTION:
-                                continue
-
-                    # All sizes enabled - model prefers SMALL (best performance)
-                    mask[1 + i] = True      # SMALL (1-5)
-                    mask[6 + i] = True      # MEDIUM (6-10)
-                    mask[11 + i] = True     # LARGE (11-15)
-
-        # EXIT actions: valid if position exists AND held for minimum time
-        for i in range(DIMS.EXECUTIONS_SLOTS):
-            if i < num_positions:
-                position = self.portfolio.positions[i]
-
-                # V11: Check minimum hold time before allowing exit
-                if self.current_time is not None and position.entry_time is not None:
-                    hours_held = (self.current_time - position.entry_time).total_seconds() / 3600
-                    if hours_held < MIN_HOLD_HOURS:
-                        # Don't allow exit yet - position too young
-                        continue
-
-                mask[DIMS.ACTION_EXIT_START + i] = True  # 16
-
-        return mask
+        # Delegate to UnifiedFeatureBuilder for consistent masking with API mode
+        return self.feature_builder.get_action_mask(
+            opportunities=opportunities_with_flags,
+            num_positions=len(self.portfolio.positions),
+            max_positions=self.current_config.max_positions,
+            current_time=self.current_time,
+            max_minutes_to_funding=MAX_MINUTES_TO_FUNDING,
+            min_apr=MIN_APR,
+            max_apr=MAX_APR,
+            mask_enter=self.mask_enter_actions
+        )
 
     def _calc_minutes_to_profitable_funding(self, opp: Dict) -> float:
         """
