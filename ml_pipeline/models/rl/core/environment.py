@@ -356,6 +356,7 @@ class FundingArbitrageEnv(gym.Env):
         - SOFT (mask_enter_actions=True): fund_apr >= MIN_APR (2500)
         - SOFT (mask_enter_actions=True): fund_apr <= MAX_APR (15000)
         - SOFT (mask_enter_actions=True): time_to_funding <= MAX_MINUTES (30)
+        - SOFT (mask_enter_actions=True): liquidity in ALLOWED_LIQUIDITY
 
         Returns:
             Boolean array of shape (17,) where True = valid action
@@ -368,9 +369,10 @@ class FundingArbitrageEnv(gym.Env):
             16: EXIT_POS_0
         """
         # Masking parameters
-        MIN_APR = 2500.0
+        MIN_APR = 2000.0
         MAX_APR = 15000.0
         MAX_MINUTES_TO_FUNDING = 30.0
+        ALLOWED_LIQUIDITY = [0.0]  # Good (0) only, block Medium (1) and Low (2)
 
         # Prepare opportunities with has_existing_position flag
         existing_symbols = {pos.symbol for pos in self.portfolio.positions}
@@ -389,7 +391,8 @@ class FundingArbitrageEnv(gym.Env):
             max_minutes_to_funding=MAX_MINUTES_TO_FUNDING,
             min_apr=MIN_APR,
             max_apr=MAX_APR,
-            mask_enter=self.mask_enter_actions
+            mask_enter=self.mask_enter_actions,
+            allowed_liquidity=ALLOWED_LIQUIDITY
         )
 
     def _calc_minutes_to_profitable_funding(self, opp: Dict) -> float:

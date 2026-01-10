@@ -867,7 +867,8 @@ class UnifiedFeatureBuilder:
         max_minutes_to_funding: float = 30.0,
         min_apr: float = 2500.0,
         max_apr: float = 15000.0,
-        mask_enter: bool = True
+        mask_enter: bool = True,
+        allowed_liquidity: List[float] = None
     ) -> np.ndarray:
         """
         Generate action mask (17 dimensions, V10).
@@ -885,6 +886,7 @@ class UnifiedFeatureBuilder:
         - SOFT (mask_enter=True): Opportunity must have fund_apr >= min_apr
         - SOFT (mask_enter=True): Opportunity must have fund_apr <= max_apr (block high APR traps)
         - SOFT (mask_enter=True): Time to profitable funding must be <= max_minutes_to_funding
+        - SOFT (mask_enter=True): Liquidity must be in allowed_liquidity list
 
         Args:
             opportunities: List of opportunity dicts
@@ -895,6 +897,7 @@ class UnifiedFeatureBuilder:
             min_apr: Minimum APR required to enter (default: 2500)
             max_apr: Maximum APR allowed to enter (default: 15000, blocks high APR traps)
             mask_enter: If True (default), apply soft constraints. If False, only hard constraints.
+            allowed_liquidity: List of allowed liquidityStatus values (e.g., [0.0, 1.0] for Good/Medium)
 
         Returns:
             Boolean array (17,) where True = valid action
@@ -932,6 +935,12 @@ class UnifiedFeatureBuilder:
                         minutes_to_funding = self._calc_minutes_to_profitable_funding(opp, current_time)
                         if minutes_to_funding > max_minutes_to_funding:
                             continue
+
+                        # Liquidity filter (block low liquidity opportunities)
+                        if allowed_liquidity is not None:
+                            liquidity = opp.get('liquidityStatus', 0.0)
+                            if liquidity not in allowed_liquidity:
+                                continue
 
                     mask[1 + i] = True
                     mask[6 + i] = True

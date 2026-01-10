@@ -81,6 +81,9 @@ class OpportunityRawData(BaseModel):
     price_spread_3d_avg: Optional[float] = Field(default=0.0)
     spread_volatility_stddev: Optional[float] = Field(default=0.0)
 
+    # Liquidity (0.0=Good, 1.0=Medium, 2.0=Low)
+    liquidityStatus: Optional[float] = Field(default=0.0)
+
     # Position tracking
     has_existing_position: bool = Field(default=False)
 

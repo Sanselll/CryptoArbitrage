@@ -240,16 +240,18 @@ class ModularRLPredictor:
         max_positions = trading_config.get('max_positions', 1)
 
         # V10 masking criteria from trading config (with defaults)
-        min_apr = trading_config.get('min_apr', 2500.0)
+        min_apr = trading_config.get('min_apr', 2000.0)
         max_apr = trading_config.get('max_apr', 15000.0)  # Block high APR traps
         max_minutes_to_funding = trading_config.get('max_minutes_to_funding', 30.0)
+        allowed_liquidity = [0.0]  # Good (0) only, block Medium (1) and Low (2)
 
         action_mask = feature_builder.get_action_mask(
             opportunities, num_positions, max_positions,
             current_time=current_time,
             max_minutes_to_funding=max_minutes_to_funding,
             min_apr=min_apr,
-            max_apr=max_apr
+            max_apr=max_apr,
+            allowed_liquidity=allowed_liquidity
         )
 
         # Select action (deterministic = greedy)
