@@ -273,6 +273,7 @@ public class RLPredictionService
             PriceSpread24hAvg = opp.PriceSpread24hAvg ?? 0m,
             PriceSpread3dAvg = opp.PriceSpread3dAvg ?? 0m,
             SpreadVolatilityStddev = opp.SpreadVolatilityStdDev ?? 0m,
+            LiquidityStatus = (decimal)(opp.LiquidityStatus ?? 0),
             HasExistingPosition = opp.IsExistingPosition,
 
             // V10: Funding rate and timing fields for action masking
@@ -293,7 +294,7 @@ public class RLPredictionService
         {
             MaxLeverage = config.MaxLeverage,
             TargetUtilization = config.TargetUtilization,
-            MaxPositions = config.MaxPositions
+            MaxPositions = 1  // V9: forced to single position only
             // StopLossThreshold and LiquidationBuffer will use default values from TradingConfigRawData
         };
     }

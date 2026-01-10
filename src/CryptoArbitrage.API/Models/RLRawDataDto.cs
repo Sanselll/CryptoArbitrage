@@ -166,6 +166,10 @@ public class OpportunityRawData
     [JsonPropertyName("spread_volatility_stddev")]
     public decimal SpreadVolatilityStddev { get; set; }
 
+    // Liquidity status (0=Good, 1=Medium, 2=Low)
+    [JsonPropertyName("liquidityStatus")]
+    public decimal LiquidityStatus { get; set; }
+
     // Position tracking
     [JsonPropertyName("has_existing_position")]
     public bool HasExistingPosition { get; set; }
