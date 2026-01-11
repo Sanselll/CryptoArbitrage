@@ -19,6 +19,7 @@ interface AuthState {
   error: string | null;
 
   login: (googleToken: string, mode: TradingMode) => Promise<void>;
+  devLogin: (email: string, password: string, mode: TradingMode) => Promise<void>;
   logout: () => void;
   checkAuth: () => void;
   clearError: () => void;
@@ -65,6 +66,41 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ token, user, isAuthenticated: true, isLoading: false, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed';
+      set({ isLoading: false, error: message, isAuthenticated: false });
+      throw error;
+    }
+  },
+
+  devLogin: async (email: string, password: string, mode: TradingMode) => {
+    set({ isLoading: true, error: null });
+    try {
+      setApiBaseUrl(mode);
+      const apiBaseUrl = getApiBaseUrl();
+
+      console.log('Dev login attempt with mode:', mode);
+      console.log('Connecting to:', apiBaseUrl);
+
+      const response = await fetch(`${apiBaseUrl}/auth/dev-signin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Dev login failed');
+      }
+
+      const { token, user } = await response.json();
+
+      setAuthToken(token);
+      setTradingMode(mode);
+
+      console.log('Dev login successful for:', email);
+
+      set({ token, user, isAuthenticated: true, isLoading: false, error: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Dev login failed';
       set({ isLoading: false, error: message, isAuthenticated: false });
       throw error;
     }

@@ -114,6 +114,76 @@ public class AuthController : BaseController
     }
 
     /// <summary>
+    /// Dev sign-in for whitelisted users using email + password.
+    /// Temporary bypass for Google OAuth.
+    /// </summary>
+    [HttpPost("dev-signin")]
+    public async Task<IActionResult> DevSignIn([FromBody] DevSignInRequest request)
+    {
+        return await ExecuteActionAsync(async () =>
+        {
+            // 1. Validate dev password
+            var devPassword = _config["Authentication:DevPassword"];
+            if (string.IsNullOrEmpty(devPassword) || request.Password != devPassword)
+            {
+                Logger.LogWarning("Invalid dev password attempt for: {Email}", request.Email);
+                return Unauthorized(new { error = "Invalid credentials" });
+            }
+
+            // 2. Check email whitelist
+            var allowedUsers = _config.GetSection("Authentication:AllowedUsers").Get<string[]>() ?? Array.Empty<string>();
+            if (!allowedUsers.Contains(request.Email, StringComparer.OrdinalIgnoreCase))
+            {
+                Logger.LogWarning("Dev login attempt from non-whitelisted email: {Email}", request.Email);
+                return Unauthorized(new { error = "User not authorized. Email not in whitelist." });
+            }
+
+            // 3. Find or create user (same as Google flow)
+            var user = await _userManager.FindByEmailAsync(request.Email);
+            if (user == null)
+            {
+                user = new ApplicationUser
+                {
+                    UserName = request.Email,
+                    Email = request.Email,
+                    EmailConfirmed = true,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                var createResult = await _userManager.CreateAsync(user);
+                if (!createResult.Succeeded)
+                {
+                    var errors = string.Join(", ", createResult.Errors.Select(e => e.Description));
+                    Logger.LogError("Failed to create user {Email}: {Errors}", request.Email, errors);
+                    return StatusCode(500, new { error = "Failed to create user account" });
+                }
+
+                Logger.LogInformation("Created new user account via dev auth: {Email}", request.Email);
+            }
+
+            // 4. Update last login
+            user.LastLoginAt = DateTime.UtcNow;
+            await _userManager.UpdateAsync(user);
+
+            // 5. Generate JWT token
+            var token = GenerateJwtToken(user);
+
+            Logger.LogInformation("User authenticated via dev auth: {Email} (UserId: {UserId})", user.Email, user.Id);
+
+            return Ok(new
+            {
+                token,
+                user = new
+                {
+                    id = user.Id,
+                    email = user.Email,
+                    createdAt = user.CreatedAt
+                }
+            });
+        }, "Dev sign-in");
+    }
+
+    /// <summary>
     /// Generates a JWT token for the authenticated user.
     /// Token includes standard claims (NameIdentifier, Email, Sub, Jti) and expiration.
     /// </summary>
@@ -156,3 +226,8 @@ public class AuthController : BaseController
 /// Request model for Google sign-in endpoint.
 /// </summary>
 public record GoogleSignInRequest(string IdToken);
+
+/// <summary>
+/// Request model for dev sign-in endpoint.
+/// </summary>
+public record DevSignInRequest(string Email, string Password);

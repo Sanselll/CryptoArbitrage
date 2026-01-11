@@ -7,9 +7,26 @@ import { Card, CardContent } from '../components/ui/Card';
 
 export const LoginPage = () => {
   const login = useAuthStore((state) => state.login);
+  const devLogin = useAuthStore((state) => state.devLogin);
   const error = useAuthStore((state) => state.error);
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+  const [showDevLogin, setShowDevLogin] = useState(false);
+  const [devEmail, setDevEmail] = useState('');
+  const [devPassword, setDevPassword] = useState('');
+
+  const handleDevLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setIsLoading(true);
+      await devLogin(devEmail, devPassword, 'Real');
+      navigate('/');
+    } catch (err) {
+      console.error('Dev login failed:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleGoogleSuccess = async (credentialResponse: any) => {
     try {
@@ -58,6 +75,46 @@ export const LoginPage = () => {
               onError={() => console.error('Login failed')}
             />
           </div>
+
+          {/* Dev Login Toggle */}
+          <div className="text-center mb-4">
+            <button
+              type="button"
+              onClick={() => setShowDevLogin(!showDevLogin)}
+              className="text-xs text-binance-text-muted hover:text-binance-text-secondary"
+            >
+              {showDevLogin ? 'Hide Dev Login' : 'Dev Login'}
+            </button>
+          </div>
+
+          {/* Dev Login Form */}
+          {showDevLogin && (
+            <form onSubmit={handleDevLogin} className="space-y-3 mb-4">
+              <input
+                type="email"
+                placeholder="Email"
+                value={devEmail}
+                onChange={(e) => setDevEmail(e.target.value)}
+                className="w-full px-3 py-2 bg-binance-card border border-binance-border rounded text-sm text-binance-text-primary placeholder-binance-text-muted focus:outline-none focus:border-binance-yellow"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={devPassword}
+                onChange={(e) => setDevPassword(e.target.value)}
+                className="w-full px-3 py-2 bg-binance-card border border-binance-border rounded text-sm text-binance-text-primary placeholder-binance-text-muted focus:outline-none focus:border-binance-yellow"
+                required
+              />
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2 bg-binance-card border border-binance-border text-binance-text-primary rounded text-sm hover:bg-binance-border disabled:opacity-50"
+              >
+                {isLoading ? 'Signing in...' : 'Dev Sign In'}
+              </button>
+            </form>
+          )}
 
           {/* Loading State */}
           {isLoading && (
