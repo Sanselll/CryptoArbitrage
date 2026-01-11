@@ -260,8 +260,9 @@ class MLAPIClient:
                 # Raw funding and fees (Python calculates P&L)
                 'long_funding_earned_usd': float(pos.long_net_funding_usd),
                 'short_funding_earned_usd': float(pos.short_net_funding_usd),
-                'long_fees_usd': float(pos.entry_fees_paid_usd / 2),  # Split entry fees between legs
-                'short_fees_usd': float(pos.entry_fees_paid_usd / 2),
+                # Fees: entry + estimated exit to match production (UserDataCollector sends entry + exit)
+                'long_fees_usd': float((pos.entry_fees_paid_usd + pos.estimated_exit_fees_usd) / 2),
+                'short_fees_usd': float((pos.entry_fees_paid_usd + pos.estimated_exit_fees_usd) / 2),
                 'long_funding_rate': float(long_funding_rate),
                 'short_funding_rate': float(short_funding_rate),
                 'long_funding_interval_hours': int(pos.long_funding_interval_hours),

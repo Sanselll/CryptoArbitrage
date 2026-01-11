@@ -779,16 +779,16 @@ public class ArbitrageExecutionService
             }
 
             // Calculate quantities - use same quantity for both legs to maintain proper hedge
-            // NOTE: PositionSizeUsd now represents MARGIN/CAPITAL to use (not notional)
-            // For cross-exchange: split margin between both legs, calculate notional with leverage
+            // NOTE: PositionSizeUsd represents MARGIN PER LEG (ML model returns per-leg margin)
+            // Total margin used = PositionSizeUsd * 2 (for both long and short legs)
             var avgPrice = (longPrice + shortPrice) / 2;
-            var marginPerLeg = request.PositionSizeUsd / 2;  // Split total margin between long and short
+            var marginPerLeg = request.PositionSizeUsd;  // ML model already returns per-leg margin
             var notionalPerLeg = marginPerLeg * request.Leverage;  // Calculate notional with leverage
             var baseQuantity = notionalPerLeg / avgPrice;
 
             _logger.LogInformation(
-                "Cross-exchange position sizing for {Symbol}: TotalMargin=${TotalMargin}, MarginPerLeg=${MarginPerLeg}, Leverage={Leverage}x, NotionalPerLeg=${Notional}, Quantity={Quantity}",
-                request.Symbol, request.PositionSizeUsd, marginPerLeg, request.Leverage, notionalPerLeg, baseQuantity);
+                "Cross-exchange position sizing for {Symbol}: MarginPerLeg=${MarginPerLeg}, TotalMargin=${TotalMargin}, Leverage={Leverage}x, NotionalPerLeg=${Notional}, Quantity={Quantity}",
+                request.Symbol, marginPerLeg, marginPerLeg * 2, request.Leverage, notionalPerLeg, baseQuantity);
 
             // Get instrument info from both exchanges to ensure proper quantity precision
             decimal finalQuantity;
@@ -1070,7 +1070,7 @@ public class ArbitrageExecutionService
                 EntryPrice = longPrice,
                 Quantity = isSpotFutures ? actualLongQuantity : quantity, // Use actual filled quantity for spot
                 Leverage = isSpotFutures ? 1m : request.Leverage, // Spot has no leverage
-                InitialMargin = isSpotFutures ? request.PositionSizeUsd : marginPerLeg,  // For Futures/Futures: marginPerLeg = PositionSizeUsd / 2
+                InitialMargin = isSpotFutures ? request.PositionSizeUsd : marginPerLeg,  // For Futures/Futures: marginPerLeg = PositionSizeUsd (ML returns per-leg)
                 FundingEarnedUsd = 0,
                 TradingFeesUsd = longEntryFee,
                 PricePnLUsd = 0,
@@ -1100,7 +1100,7 @@ public class ArbitrageExecutionService
                 EntryPrice = shortPrice,
                 Quantity = quantity,
                 Leverage = request.Leverage > 0 ? request.Leverage : 1m,
-                InitialMargin = isSpotFutures ? (quantity * shortPrice / request.Leverage) : marginPerLeg,  // For Futures/Futures: marginPerLeg, for Spot/Futures: calculate from actual notional
+                InitialMargin = isSpotFutures ? (quantity * shortPrice / request.Leverage) : marginPerLeg,  // For Futures/Futures: marginPerLeg = PositionSizeUsd (ML returns per-leg)
                 FundingEarnedUsd = 0,
                 TradingFeesUsd = shortEntryFee,
                 PricePnLUsd = 0,

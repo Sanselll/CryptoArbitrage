@@ -136,12 +136,17 @@ class Position:
         notional_per_leg = self.position_size_usd * self.leverage
         self.coin_quantity = notional_per_leg / avg_entry_price
 
-        # Entry fees (assume maker orders for limit entry)
-        self.entry_fee_pct = self.maker_fee * 2  # Long + short
-        self.entry_fees_paid_usd = notional_per_leg * 2 * self.maker_fee
+        # Entry fees - use TAKER rate to match production (ArbitrageExecutionService uses taker for entry)
+        # Production: longEntryFee = longNotionalValue * GetTakerFeeRate(exchange)
+        self.entry_fee_pct = self.taker_fee * 2  # Long + short
+        self.entry_fees_paid_usd = notional_per_leg * 2 * self.taker_fee
 
-        # Exit fees (assume taker for market exit, calculated on close)
+        # Exit fees (taker for market exit)
         self.exit_fee_pct = self.taker_fee * 2
+
+        # Estimated exit fees (to match production which sends entry + estimated exit)
+        # Production (UserDataCollector): tradingFeePaid = TradingFeesUsd + estimatedExitFee
+        self.estimated_exit_fees_usd = notional_per_leg * 2 * self.taker_fee
 
         # Calculate margin required (total for both long + short)
         # position_size_usd is already margin per leg, so total margin = 2 × position_size_usd

@@ -471,7 +471,7 @@ public class RLPredictionService
             {
                 IsActive = true,
                 Symbol = longPosition.Symbol,
-                PositionSizeUsd = longPosition.InitialMargin + shortPosition.InitialMargin,
+                PositionSizeUsd = (longPosition.InitialMargin + shortPosition.InitialMargin) / 2,  // Per-leg margin as expected by Python
                 PositionAgeHours = positionAgeHours,
                 Leverage = longPosition.Leverage,
 
