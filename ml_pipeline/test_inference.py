@@ -1090,6 +1090,38 @@ def test_model_inference(args):
                         exit_str = str(exit_dt)[-14:-3] if exit_dt else 'N/A'
                     print(f"   {symbol:<12} ${pnl_usd:>9.2f} {pnl_pct:>7.2f}% {entry_str:>14} {exit_str:>14}")
 
+                # Show last 10 positions with detailed breakdown
+                print(f"\n📋 LAST 10 POSITIONS:")
+                print(f"   {'Symbol':<12} {'Notional':>10} {'Price P&L':>10} {'Fund P&L':>10} {'Comm':>8} {'Total P&L':>10} {'Open':>14} {'Close':>14}")
+                print(f"   {'-'*106}")
+
+                # Sort by exit time to get last 10
+                closed_trades_by_time = closed_trades.sort_values('exit_datetime', ascending=False)
+                for _, trade in closed_trades_by_time.head(10).iterrows():
+                    symbol = trade.get('symbol', 'N/A')[:12]
+                    position_size = trade.get('position_size_usd', 0)
+                    leverage = trade.get('leverage', 1)
+                    notional = position_size * leverage
+
+                    funding_pnl = trade.get('funding_earned_usd', 0)
+                    total_pnl = trade.get('realized_pnl_usd', 0)
+                    total_fees = trade.get('total_fees_usd', 0)
+                    # Price P&L = Total P&L - Funding + Fees (since fees are subtracted in total)
+                    price_pnl = total_pnl - funding_pnl + total_fees
+
+                    entry_dt = trade.get('entry_datetime', '')
+                    exit_dt = trade.get('exit_datetime', '')
+                    if hasattr(entry_dt, 'strftime'):
+                        entry_str = entry_dt.strftime('%m-%d %H:%M')
+                    else:
+                        entry_str = str(entry_dt)[-14:-3] if entry_dt else 'N/A'
+                    if hasattr(exit_dt, 'strftime'):
+                        exit_str = exit_dt.strftime('%m-%d %H:%M')
+                    else:
+                        exit_str = str(exit_dt)[-14:-3] if exit_dt else 'N/A'
+
+                    print(f"   {symbol:<12} ${notional:>9.2f} ${price_pnl:>9.2f} ${funding_pnl:>9.2f} ${total_fees:>7.2f} ${total_pnl:>9.2f} {entry_str:>14} {exit_str:>14}")
+
     # Write trades to CSV
     if all_trades:
         trades_df = pd.DataFrame(all_trades)
